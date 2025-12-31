@@ -320,8 +320,18 @@ read_input() {
     local default="${2:-}"
     local title="${3:-Input}"
     
+    # All display output goes to /dev/tty so it renders even when captured in $()
+    exec 3>/dev/tty
+    
     get_term_size
-    draw_header "$title"
+    
+    printf "%s" "$CLEAR_SCREEN" >&3
+    
+    # Header bar
+    move_to 1 1 >&3
+    printf "%s%s" "$BG_RED" "$WHITE$BOLD" >&3
+    printf " %-$((TERM_COLS-1))s" "$title" >&3
+    printf "%s" "$RESET" >&3
     
     local box_width=60
     [[ $box_width -gt $((TERM_COLS - 10)) ]] && box_width=$((TERM_COLS - 10))
@@ -329,23 +339,47 @@ read_input() {
     local box_row=$(( (TERM_ROWS - box_height) / 2 ))
     local box_col=$(( (TERM_COLS - box_width) / 2 ))
     
-    draw_box $box_row $box_col $box_height $box_width "$title"
+    # Draw box to tty
+    move_to $box_row $box_col >&3
+    printf "%s%s┌" "$RED" "$BOLD" >&3
+    printf "─%.0s" $(seq 1 $((box_width-2))) >&3
+    printf "┐%s" "$RESET" >&3
+    
+    # Title in box
+    move_to $box_row $((box_col + 2)) >&3
+    printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET" >&3
+    
+    # Sides
+    for ((i=1; i<box_height-1; i++)); do
+        move_to $((box_row+i)) $box_col >&3
+        printf "%s│%s" "$RED" "$RESET" >&3
+        move_to $((box_row+i)) $((box_col+box_width-1)) >&3
+        printf "%s│%s" "$RED" "$RESET" >&3
+    done
+    
+    # Bottom border
+    move_to $((box_row+box_height-1)) $box_col >&3
+    printf "%s└" "$RED" >&3
+    printf "─%.0s" $(seq 1 $((box_width-2))) >&3
+    printf "┘%s" "$RESET" >&3
     
     # Prompt
-    move_to $((box_row + 2)) $((box_col + 3))
-    printf "%s%s%s" "$WHITE" "$prompt" "$RESET"
+    move_to $((box_row + 2)) $((box_col + 3)) >&3
+    printf "%s%s%s" "$WHITE" "$prompt" "$RESET" >&3
     
     # Hint
-    move_to $((box_row + 4)) $((box_col + 3))
-    printf "%s(Empty to cancel)%s" "$DIM" "$RESET"
+    move_to $((box_row + 4)) $((box_col + 3)) >&3
+    printf "%s(Empty to cancel)%s" "$DIM" "$RESET" >&3
     
     # Input field
-    move_to $((box_row + 6)) $((box_col + 3))
-    printf "%s▸ %s" "$RED" "$RESET$SHOW_CURSOR"
+    move_to $((box_row + 6)) $((box_col + 3)) >&3
+    printf "%s▸ %s%s" "$RED" "$RESET" "$SHOW_CURSOR" >&3
+    
+    exec 3>&-
     
     local input
-    read -r -e -i "$default" input
-    printf "%s" "$HIDE_CURSOR"
+    read -r -e -i "$default" input </dev/tty
+    printf "%s" "$HIDE_CURSOR" >/dev/tty
     
     echo "$input"
 }
