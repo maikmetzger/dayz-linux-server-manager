@@ -84,11 +84,15 @@ fi
 # User Identity & Paths
 # -----------------------------------------------------------------------------
 # Determine the real invoking user (not root when running via sudo)
-INVOKING_USER="${SUDO_USER:-${LOGNAME:-$USER}}"
+# DAYZ_USER is our custom variable that survives sudo; SUDO_USER is set by sudo itself
+INVOKING_USER="${DAYZ_USER:-${SUDO_USER:-${LOGNAME:-$USER}}}"
 
 # Try multiple methods to find the correct home directory
 get_user_home() {
     local user="$1"
+    
+    # Method 0: Use DAYZ_HOME if set (passed from installer)
+    [[ -n "$DAYZ_HOME" && -d "$DAYZ_HOME" ]] && { echo "$DAYZ_HOME"; return 0; }
     
     # Method 1: getent passwd
     local home
@@ -114,18 +118,10 @@ get_user_home() {
     echo "${HOME:-/tmp}"
 }
 
-INVOKING_HOME="$(get_user_home "$INVOKING_USER")"
+INVOKING_HOME="${DAYZ_HOME:-$(get_user_home "$INVOKING_USER")}"
 
 # Standard search root: ~/servers
 SEARCH_ROOT="${INVOKING_HOME}/servers"
-
-# DEBUG: Show what paths we're using
-echo "DEBUG: INVOKING_USER=${INVOKING_USER}" >&2
-echo "DEBUG: INVOKING_HOME=${INVOKING_HOME}" >&2
-echo "DEBUG: SEARCH_ROOT=${SEARCH_ROOT}" >&2
-echo "DEBUG: SUDO_USER=${SUDO_USER:-unset}" >&2
-echo "DEBUG: HOME=${HOME}" >&2
-sleep 2
 
 # Instance Lists
 declare -a INSTANCE_DIRS=()
@@ -605,12 +601,12 @@ select_instance() {
             if [[ $idx -eq $count ]]; then
                 # Installer
              if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
-                 # Preserve user identity for the installer
-                 export SUDO_USER="$INVOKING_USER"
-                 export HOME="$INVOKING_HOME"
+                 # Preserve user identity for the installer using custom vars (sudo overwrites SUDO_USER)
+                 export DAYZ_USER="$INVOKING_USER"
+                 export DAYZ_HOME="$INVOKING_HOME"
                  
                  # Check access
-                     if ! groups | grep -q "\bdocker\b"; then
+                     if ! groups | grep -q "\\bdocker\\b"; then
                          if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
                              printf "%s" "$SHOW_CURSOR"
                              exec sudo -E bash "${SCRIPT_DIR}/install-dayz-docker.sh"

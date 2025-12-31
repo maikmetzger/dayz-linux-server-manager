@@ -366,11 +366,15 @@ is_cmd(){ command -v "$1" >/dev/null 2>&1; }
 SUDO=""
 if [[ "${EUID}" -ne 0 ]]; then SUDO="sudo"; fi
 
-invoking_user="${SUDO_USER:-${LOGNAME:-$USER}}"
+# DAYZ_USER is our custom variable that survives sudo; SUDO_USER is set by sudo itself
+invoking_user="${DAYZ_USER:-${SUDO_USER:-${LOGNAME:-$USER}}}"
 
 # Try multiple methods to find the correct home directory
 get_user_home() {
     local user="$1"
+    
+    # Method 0: Use DAYZ_HOME if set (passed from server-manager)
+    [[ -n "$DAYZ_HOME" && -d "$DAYZ_HOME" ]] && { echo "$DAYZ_HOME"; return 0; }
     
     # Method 1: getent passwd
     local home
@@ -396,7 +400,7 @@ get_user_home() {
     echo "${HOME:-/tmp}"
 }
 
-invoking_home="$(get_user_home "$invoking_user")"
+invoking_home="${DAYZ_HOME:-$(get_user_home "$invoking_user")}"
 
 PUID="$(id -u "${invoking_user}")"
 PGID="$(id -g "${invoking_user}")"
@@ -1559,14 +1563,6 @@ HOST_NETWORK=${use_host_net}
 main_tui() {
     local scan_root="${invoking_home}/servers"
     
-    # DEBUG: Show what paths we're using
-    info "DEBUG: invoking_user=${invoking_user}"
-    info "DEBUG: invoking_home=${invoking_home}"
-    info "DEBUG: scan_root=${scan_root}"
-    info "DEBUG: SUDO_USER=${SUDO_USER:-unset}"
-    info "DEBUG: HOME=${HOME}"
-    sleep 2
-
     while true; do
         draw_header "DayZ Docker Installer"
         
@@ -1609,9 +1605,9 @@ main_tui() {
             # 3 is separator
             4) # Run Server Manager
                 if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
-                    # Preserve user identity for the manager
-                    export SUDO_USER="${invoking_user}"
-                    export HOME="${invoking_home}"
+                    # Preserve user identity using custom vars (sudo overwrites SUDO_USER)
+                    export DAYZ_USER="${invoking_user}"
+                    export DAYZ_HOME="${invoking_home}"
                     exec "${SCRIPT_DIR}/server-manager.sh"
                 else
                     show_message "server-manager.sh not found." "Error"
