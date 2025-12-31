@@ -816,7 +816,7 @@ mod_manager() {
         done < <(get_all_mod_ids "$mods_file" "$servermods_file")
         
         local mod_count=${#mod_ids[@]}
-        local total_items=$((mod_count + 4))  # mods + Add + Sync + FixCase + Back
+        local total_items=$((mod_count + 4))  # mods + Add + Sync + FixMods + Back
         
         # Clamp selection
         [[ $selected -lt 0 ]] && selected=0
@@ -959,7 +959,7 @@ mod_manager() {
         
         # Action bar (horizontal) - full width
         local action_row=$row
-        local actions=("[A] Add" "[S] Sync" "[F] FixCase" "[Q] Back")
+        local actions=("[A] Add" "[S] Sync" "[F] FixMods" "[Q] Back")
         local action_indices=(0 1 2 3)
         
         move_to $action_row 2
@@ -987,7 +987,7 @@ mod_manager() {
         fi
 
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select   U/D Move   Enter Toggle   A Add   S Sync   F FixCase   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 75))" "" "$RESET"
+        printf "%s%s ↑↓ Select   U/D Move   Enter Toggle   A Add   S Sync   F FixMods   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 75))" "" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
@@ -1053,18 +1053,15 @@ mod_manager() {
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
-                    # Fix Case
+                    # FixMods
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
                     if [[ "$status" != "RUNNING" ]]; then
-                        show_message "Container must be running to fix casing"
+                        show_message "Container must be running to fix mods"
                     else
-                         if confirm "This renames all mod files to lowercase. Proceed?" "y"; then
-                            # Bash script to run inside container to lowercase recursively
-                            # Using find -depth ensures we rename files/subdirs before parents
-                            local cmd='find /dayz/serverfiles/steamapps/workshop/content/221100 -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed workshop casing."; find /dayz/serverfiles/keys -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed keys casing."'
-                            
-                            run_with_output "Fixing Casing..." $DOCKER exec "$SELECTED_CONTAINER" bash -c "$cmd"
+                         if confirm "Fix casing & sync all keys. Continue?" "y"; then
+                            local cmd='find /dayz/serverfiles/steamapps/workshop/content/221100 -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed workshop casing."; find /dayz/serverfiles/keys -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed keys casing."; find /dayz/serverfiles/steamapps/workshop/content/221100 -type f -name "*.bikey" -exec cp -f {} /dayz/serverfiles/keys/ \; ; echo "Keys re-synced."'
+                            run_with_output "Fixing Mods (Casing & Keys)..." $DOCKER exec "$SELECTED_CONTAINER" bash -c "$cmd"
                         fi
                     fi
                 elif [[ $selected -eq $((mod_count + 3)) ]]; then
