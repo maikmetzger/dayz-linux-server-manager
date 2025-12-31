@@ -713,10 +713,11 @@ check_mod_dependencies() {
     [[ $my_index -eq -1 ]] && return 0
     
     for rule in "${DEPENDENCY_RULES[@]}"; do
-        local dep_id req_id req_name
-        dep_id=$(echo "$rule" | cut -d: -f1)
-        req_id=$(echo "$rule" | cut -d: -f2)
-        req_name=$(echo "$rule" | cut -d: -f3)
+        # Use bash parameter expansion instead of echo|cut (no subshells!)
+        local dep_id="${rule%%:*}"
+        local rest="${rule#*:}"
+        local req_id="${rest%%:*}"
+        local req_name="${rest#*:}"
         
         if [[ "$mod_id" == "$dep_id" ]]; then
             # Verify requirement exists and is loaded BEFORE this mod
@@ -866,6 +867,7 @@ mod_manager() {
     local -a mod_ids=()
     local -a mod_names=()
     local -a mod_types=()
+    local -a mod_warnings=()
     
     while true; do
         
@@ -874,6 +876,7 @@ mod_manager() {
             mod_ids=()
             mod_names=()
             mod_types=()
+            mod_warnings=()
             
             while IFS= read -r mid; do
                 [[ -z "$mid" ]] && continue
@@ -890,6 +893,17 @@ mod_manager() {
                 mtype="$(get_mod_type "$mid" "$mods_file" "$servermods_file")"
                 mod_types+=("$mtype")
             done < <(get_all_mod_ids "$mods_file" "$servermods_file")
+            
+            # Pre-calculate dependency warnings (expensive, do once)
+            for i in "${!mod_ids[@]}"; do
+                local mid="${mod_ids[$i]}"
+                local mtype="${mod_types[$i]}"
+                local warn=""
+                if [[ "$mtype" != "disabled" ]]; then
+                    warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}" 2>/dev/null || true)"
+                fi
+                mod_warnings+=("$warn")
+            done
             
             needs_rebuild=0
         fi
@@ -957,13 +971,8 @@ mod_manager() {
                 disabled) status_icon="✗"; type_label="[Off]"; type_short="Off" ;;
             esac
             
-            # Check dependencies
-            local dep_warn=""
-            if [[ "$mtype" != "disabled" ]]; then
-                dep_warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}" || true)"
-            fi
-            
-            if [[ -n "$dep_warn" ]]; then
+            # Use pre-calculated dependency warning
+            if [[ -n "${mod_warnings[$i]:-}" ]]; then
                 status_icon="⚠️"
             fi
             
