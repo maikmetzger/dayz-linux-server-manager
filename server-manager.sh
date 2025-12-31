@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 # -----------------------------------------------------------------------------
 # ANSI Colors - DayZ Theme (Black/Blood Red #b20000)
 # -----------------------------------------------------------------------------
@@ -541,27 +543,27 @@ select_instance() {
             
             if [[ $idx -eq $count ]]; then
                 # Installer
-                 if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
-                     # Check access
-                     if [[ $EUID -ne 0 ]]; then
-                         if ! groups | grep -q "\bdocker\b"; then
-                             if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
-                                 printf "%s" "$SHOW_CURSOR"
-                                 sudo "${SCRIPT_DIR}/install-dayz-docker.sh" || true
-                                 printf "%s" "$HIDE_CURSOR"
-                                 continue # Loop back to re-scan instances
-                             fi
+             if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
+                 # Check access
+                 if [[ $EUID -ne 0 ]]; then
+                     if ! groups | grep -q "\bdocker\b"; then
+                         if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
+                             printf "%s" "$SHOW_CURSOR"
+                             sudo bash "${SCRIPT_DIR}/install-dayz-docker.sh" || true
+                             printf "%s" "$HIDE_CURSOR"
+                             continue # Loop back to re-scan instances
                          fi
                      fi
-                     
-                     printf "%s" "$SHOW_CURSOR"
-                     "${SCRIPT_DIR}/install-dayz-docker.sh" || true
-                     printf "%s" "$HIDE_CURSOR"
-                     continue # Loop back to re-scan instances
-                 else
-                     show_message "install-dayz-docker.sh not found."
-                     # Loop back
                  fi
+                 
+                 printf "%s" "$SHOW_CURSOR"
+                 bash "${SCRIPT_DIR}/install-dayz-docker.sh" || true
+                 printf "%s" "$HIDE_CURSOR"
+                 continue # Loop back to re-scan instances
+             else
+                 show_message "install-dayz-docker.sh not found."
+                 # Loop back
+             fi
             elif [[ $idx -eq $((count + 1)) ]]; then
                 exit 0
             fi
