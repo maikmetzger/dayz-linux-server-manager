@@ -232,6 +232,14 @@ sync_mod_list() {
     [[ -n "${id}" ]] || continue
     local mod_dir="${WORKSHOP_DIR}/${id}"
     if [[ -d "${mod_dir}" ]]; then
+      # Fix casing recursively (required for Linux compatibility)
+      log "Fixing casing for mod id=${id}..."
+      find "${mod_dir}" -depth | while read -r p; do
+        local d f n
+        d="$(dirname "${p}")"; f="$(basename "${p}")"; n="${f,,}"
+        [[ "${f}" != "${n}" ]] && mv -T "${p}" "${d}/${n}" 2>/dev/null || true
+      done
+
       ln -sfn "${mod_dir}" "${DZ_SERVERFILES}/@${id}"
       mod_args+="${mod_args:+;}"
       mod_args+="@${id}"

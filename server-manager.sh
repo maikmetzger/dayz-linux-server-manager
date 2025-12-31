@@ -1106,12 +1106,12 @@ mod_manager() {
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
-                    show_message "Container must be running to fix casing"
+                    show_message "Container must be running to fix mods"
                 else
-                     if confirm "This renames all mod files to lowercase. Proceed?" "y"; then
-                        local cmd='find /dayz/serverfiles/steamapps/workshop/content/221100 -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed workshop casing."; find /dayz/serverfiles/keys -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed keys casing."'
+                     if confirm "Fix casing & re-sync keys? (Deep Clean)" "y"; then
+                        local cmd='find /dayz/serverfiles/steamapps/workshop/content/221100 -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed workshop casing."; find /dayz/serverfiles/keys -depth | while read p; do d="$(dirname "$p")"; f="$(basename "$p")"; new_f="${f,,}"; [[ "$f" != "$new_f" ]] && mv -T "$p" "$d/$new_f"; done; echo "Fixed keys casing."; find /dayz/serverfiles/steamapps/workshop/content/221100 -type f -name "*.bikey" -exec cp -f {} /dayz/serverfiles/keys/ \; ; echo "Keys re-synced."'
                         
-                        run_with_output "Fixing Casing..." $DOCKER exec "$SELECTED_CONTAINER" bash -c "$cmd"
+                        run_with_output "Fixing Mods (Deep Clean)..." $DOCKER exec "$SELECTED_CONTAINER" bash -c "$cmd"
                     fi
                 fi
                 ;;
