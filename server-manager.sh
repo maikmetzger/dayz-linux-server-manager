@@ -92,7 +92,7 @@ get_user_home() {
     local user="$1"
     
     # Method 0: Use DAYZ_HOME if set (passed from installer)
-    [[ -n "$DAYZ_HOME" && -d "$DAYZ_HOME" ]] && { echo "$DAYZ_HOME"; return 0; }
+    [[ -n "${DAYZ_HOME:-}" && -d "${DAYZ_HOME:-}" ]] && { echo "$DAYZ_HOME"; return 0; }
     
     # Method 1: getent passwd
     local home
