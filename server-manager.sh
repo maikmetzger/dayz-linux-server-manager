@@ -1343,7 +1343,7 @@ main_menu() {
         status="$(get_container_status "$SELECTED_CONTAINER")"
         
         local status_text="${WHITE}● STOPPED]${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING]${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${WHITE}]${RESET}"
         
         local -a items=(
             "▶️  Start Server"
