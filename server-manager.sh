@@ -792,16 +792,7 @@ mod_manager() {
     local dirty=0
     
     while true; do
-        get_term_size
-        
-        # ... (rest of function until read input) ...
-        # (Wait, I need to preserve the loop body. This replaces lines 786-1082 is too big. I should use multi replace or target smaller chunks.)
-        # Skipping large block replacement. I will insert 'dirty=1' logic at modification points and 'prompt' at exit.
-        # Let's do multiple chunks logic.
-        
-    done
-}
-        get_term_size
+
         
         # Get all unique mod IDs from both files
         local -a mod_ids=()
