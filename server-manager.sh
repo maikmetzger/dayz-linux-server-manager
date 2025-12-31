@@ -602,6 +602,74 @@ get_mod_type() {
     fi
 }
 
+# -----------------------------------------------------------------------------
+# Dependency Rules (Heuristic)
+# Format: "DependentID:RequiredID:ModName"
+# -----------------------------------------------------------------------------
+DEPENDENCY_RULES=(
+    # Community Framework (CF) is required by almost everything
+    "1564026768:1559212036:CF" # COT -> CF
+    "1708571078:1559212036:CF" # VPPAdminTools -> CF
+    "2411613529:1559212036:CF" # Dabs Framework -> CF
+    "2116151222:1559212036:CF" # Expansion-Core -> CF
+    "2275832136:1559212036:CF" # DayZ-Editor -> CF
+    
+    # Dabs Framework is required by Editor and Expansion
+    "2116151222:2411613529:Dabs Framework" # Expansion-Core -> Dabs
+    "2275832136:2411613529:Dabs Framework" # DayZ-Editor -> Dabs
+    
+    # Expansion Core is required by Expansion Modules
+    "2116157322:2116151222:Expansion-Core" # Licensed
+    "2116177301:2116151222:Expansion-Core" # Vehicles
+    "2116153160:2116151222:Expansion-Core" # Market
+    "2116176696:2116151222:Expansion-Core" # Quests
+    "2116166431:2116151222:Expansion-Core" # AI
+    "2116161408:2116151222:Expansion-Core" # Chat
+    "2116155694:2116151222:Expansion-Core" # SpawnSelection
+)
+
+check_mod_dependencies() {
+    local mod_id="$1"
+    local -a all_ids=("${@:2}") # passed as array
+    
+    local my_index=-1
+    # Find my index
+    for i in "${!all_ids[@]}"; do
+        if [[ "${all_ids[$i]}" == "$mod_id" ]]; then
+            my_index=$i
+            break
+        fi
+    done
+    [[ $my_index -eq -1 ]] && return 0
+    
+    for rule in "${DEPENDENCY_RULES[@]}"; do
+        local dep_id req_id req_name
+        dep_id=$(echo "$rule" | cut -d: -f1)
+        req_id=$(echo "$rule" | cut -d: -f2)
+        req_name=$(echo "$rule" | cut -d: -f3)
+        
+        if [[ "$mod_id" == "$dep_id" ]]; then
+            # Verify requirement exists and is loaded BEFORE this mod
+            local req_index=-1
+            for j in "${!all_ids[@]}"; do
+                if [[ "${all_ids[$j]}" == "$req_id" ]]; then
+                    req_index=$j
+                    break
+                fi
+            done
+            
+            if [[ $req_index -eq -1 ]]; then
+                echo "Missing dependency: $req_name ($req_id)"
+                return 1
+            elif [[ $req_index -gt $my_index ]]; then
+                echo "Wrong Order! Must be below $req_name"
+                return 1
+            fi
+        fi
+    done
+    return 0
+}
+
 is_mod_in_file() {
     local mod_id="$1"
     local file="$2"
@@ -810,6 +878,16 @@ mod_manager() {
                 disabled) status_icon="✗"; type_label="[Off]"; type_short="Off" ;;
             esac
             
+            # Check dependencies
+            local dep_warn=""
+            if [[ "$mtype" != "disabled" ]]; then
+                dep_warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}")"
+            fi
+            
+            if [[ -n "$dep_warn" ]]; then
+                status_icon="⚠️"
+            fi
+            
             move_to $row 1
             if [[ $i -eq $selected ]]; then
                 # Selected row - full red background
@@ -896,6 +974,18 @@ mod_manager() {
         done
         
         # Footer
+        move_to $((TERM_ROWS-1)) 1
+        if [[ $selected -lt $mod_count ]]; then
+             local sel_mid="${mod_ids[$selected]}"
+             local sel_warn
+             sel_warn="$(check_mod_dependencies "$sel_mid" "${mod_ids[@]}")"
+             if [[ -n "$sel_warn" ]]; then
+                 printf "%s%s WARN: %s %s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "$RESET"
+             else
+                 printf "%s" "$CLEAR_LINE"
+             fi
+        fi
+
         move_to $TERM_ROWS 1
         printf "%s%s ↑↓ Select   U/D Move   Enter Toggle   A Add   S Sync   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 65))" "" "$RESET"
         
