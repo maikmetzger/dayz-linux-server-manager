@@ -1162,9 +1162,9 @@ main_menu() {
         local -a items=(
             "▶️  Start Server"
             "⏹️  Stop Server"
-            "🔄  Restart Server"
+            "🔄 Restart Server"
             "--------------------"
-            "⚒️ Mod Manager"
+            "⚒️  Mod Manager"
             "🧹 Wipe Server Data"
             "📜 View Logs"
             "💻 Enter Shell"
