@@ -491,66 +491,81 @@ run_with_output() {
 # Instance Selector
 # -----------------------------------------------------------------------------
 select_instance() {
-    scan_instances
-    
-    if [[ ${#INSTANCE_NAMES[@]} -eq 0 ]]; then
-        show_message "No DayZ instances found. Run install-dayz-docker.sh first." "Error"
-        exit 0
-    fi
-    
-    # Build menu items with status
-    local -a items=()
-    for i in "${!INSTANCE_NAMES[@]}"; do
-        local name="${INSTANCE_NAMES[$i]}"
-        local container="${INSTANCE_CONTAINERS[$i]}"
-        local status
-        status="$(get_container_status "$container")"
+    while true; do
+        scan_instances
         
-        local status_icon="${RED}○${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
+        # Build menu items with status
+        local -a items=()
+        if [[ ${#INSTANCE_NAMES[@]} -gt 0 ]]; then
+            for i in "${!INSTANCE_NAMES[@]}"; do
+                local name="${INSTANCE_NAMES[$i]}"
+                local container="${INSTANCE_CONTAINERS[$i]}"
+                local status
+                status="$(get_container_status "$container")"
+                
+                local status_icon="${RED}○${RESET}"
+                [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
+                
+                items+=("$status_icon $name [$status]")
+            done
+            items+=("--------------------")
+        else
+            items+=("No instances found.")
+            items+=("--------------------")
+        fi
         
-        items+=("$status_icon $name [$status]")
-    done
-    
-    items+=("--------------------")
-    items+=("✨ Install/Manage Instances")
-    items+=("❌ Quit")
-    
-    if run_menu items "DayZ Server Manager - Select Instance"; then
-        local idx=$MENU_RESULT
-        local count=${#INSTANCE_NAMES[@]}
+        items+=("✨ Install/Manage Instances")
+        items+=("❌ Quit")
         
-        if [[ $idx -lt $count ]]; then
-            SELECTED_DIR="${INSTANCE_DIRS[$idx]}"
-            SELECTED_NAME="${INSTANCE_NAMES[$idx]}"
-            SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$idx]}"
-        elif [[ $idx -eq $((count + 1)) ]]; then
-            # Installer
-             if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
-                 # Check access
-                 if [[ $EUID -ne 0 ]]; then
-                     if ! groups | grep -q "\bdocker\b"; then
-                         if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
-                             printf "%s" "$SHOW_CURSOR"
-                             sudo "${SCRIPT_DIR}/install-dayz-docker.sh"
-                             printf "%s" "$HIDE_CURSOR"
-                             continue # Return to menu
+        if run_menu items "DayZ Server Manager - Select Instance"; then
+            local idx=$MENU_RESULT
+            local count=${#INSTANCE_NAMES[@]}
+            
+            if [[ ${#INSTANCE_NAMES[@]} -gt 0 ]]; then
+                if [[ $idx -lt $count ]]; then
+                    SELECTED_DIR="${INSTANCE_DIRS[$idx]}"
+                    SELECTED_NAME="${INSTANCE_NAMES[$idx]}"
+                    SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$idx]}"
+                    return # Successfully selected, return to main
+                fi
+                # Adjust for separator
+                idx=$((idx - 1))
+            fi
+            
+            # The adjusted index now maps to:
+            # count = Installer
+            # count + 1 = Quit
+            
+            if [[ $idx -eq $count ]]; then
+                # Installer
+                 if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
+                     # Check access
+                     if [[ $EUID -ne 0 ]]; then
+                         if ! groups | grep -q "\bdocker\b"; then
+                             if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
+                                 printf "%s" "$SHOW_CURSOR"
+                                 sudo "${SCRIPT_DIR}/install-dayz-docker.sh" || true
+                                 printf "%s" "$HIDE_CURSOR"
+                                 continue # Loop back to re-scan instances
+                             fi
                          fi
                      fi
+                     
+                     printf "%s" "$SHOW_CURSOR"
+                     "${SCRIPT_DIR}/install-dayz-docker.sh" || true
+                     printf "%s" "$HIDE_CURSOR"
+                     continue # Loop back to re-scan instances
+                 else
+                     show_message "install-dayz-docker.sh not found."
+                     # Loop back
                  fi
-                 
-                 printf "%s" "$SHOW_CURSOR"
-                 "${SCRIPT_DIR}/install-dayz-docker.sh"
-                 printf "%s" "$HIDE_CURSOR"
-             else
-                 show_message "install-dayz-docker.sh not found."
-             fi
-        elif [[ $idx -eq $((count + 2)) ]]; then
+            elif [[ $idx -eq $((count + 1)) ]]; then
+                exit 0
+            fi
+        else
             exit 0
         fi
-    else
-        exit 0
-    fi
+    done
 }
 
 # -----------------------------------------------------------------------------
