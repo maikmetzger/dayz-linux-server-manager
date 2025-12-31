@@ -238,7 +238,7 @@ sync_mod_list() {
 
       # Copy .bikey files (non-destructive; does not delete old keys automatically)
       if [[ -d "${DZ_SERVERFILES}/@${id}" ]]; then
-        find "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -name "*.bikey" -print0 2>/dev/null \
+        find "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -iname "*.bikey" -print0 2>/dev/null \
           | xargs -0 -I{} cp -f "{}" "${KEYS_DIR}/" 2>/dev/null || true
       fi
     else
