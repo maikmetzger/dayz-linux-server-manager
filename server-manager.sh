@@ -810,8 +810,7 @@ mod_manager() {
                     if [[ "$status" != "RUNNING" ]]; then
                         show_message "Container must be running to sync"
                     else
-                        run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
-                        run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
+                        run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Back
@@ -836,8 +835,7 @@ mod_manager() {
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running to sync"
                 else
-                    run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
-                    run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
+                    run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                 fi
                 ;;
             'q'|'Q')
