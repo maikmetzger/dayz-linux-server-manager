@@ -1342,8 +1342,8 @@ main_menu() {
         local status
         status="$(get_container_status "$SELECTED_CONTAINER")"
         
-        local status_text="${WHITE}● STOPPED${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${RESET}"
+        local status_text="${WHITE}● STOPPED]${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING]${RESET}"
         
         local -a items=(
             "▶️  Start Server"
@@ -1360,7 +1360,7 @@ main_menu() {
             "← Switch Instance"
         )
         
-        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text]" $selection; then
+        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text" $selection; then
             exit 0
         fi
         
