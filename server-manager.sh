@@ -268,7 +268,7 @@ run_menu() {
     
     [[ $count -eq 0 ]] && return 1
     
-    printf "%s%s" "$HIDE_CURSOR" "$BG_BLACK"
+    printf "%s" "$HIDE_CURSOR"
     
     while true; do
         get_term_size
