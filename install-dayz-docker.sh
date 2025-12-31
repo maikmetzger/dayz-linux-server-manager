@@ -335,12 +335,19 @@ show_message() {
 }
 
 # All log output -> stderr (keeps stdout clean if you ever capture output)
-hr(){ printf "%s\n" "${DIM}------------------------------------------------------------${C0}" >&2; }
-step(){ hr; printf "%s%s==> %s%s\n" "${BOLD}" "${CYN}" "$*" "${C0}" >&2; }
-info(){ printf "%s%s%s\n" "${BLU}" "$*" "${C0}" >&2; }
-ok(){ printf "%s%s%s\n" "${GRN}" "$*" "${C0}" >&2; }
-warn(){ printf "%sWARN:%s %s\n" "${YLW}" "${C0}" "$*" >&2; }
-die(){ printf "%sERROR:%s %s\n" "${RED}" "${C0}" "$*" >&2; exit 1; }
+# All log output -> stderr (keeps stdout clean if you ever capture output)
+hr(){ printf "%s\n" "${RED}────────────────────────────────────────────────────────────${RESET}" >&2; }
+step(){ 
+    printf "\n" >&2
+    printf "%s%s %s %s\n" "${BG_RED}" "${WHITE}${BOLD}" " $1 " "${RESET}" >&2
+}
+info(){ printf "%s%s●%s %s\n" "${RED}" "${BOLD}" "${RESET}" "$*" >&2; }
+ok(){ printf "%s%s✔%s %s\n" "${GREEN}" "${BOLD}" "${RESET}" "$*" >&2; }
+warn(){ printf "%s%s!%s %sWarning:%s %s\n" "${YELLOW}" "${BOLD}" "${RESET}" "${YELLOW}" "${RESET}" "$*" >&2; }
+die(){ 
+    printf "\n%s%s FATAL %s %s\n" "${BG_RED}" "${WHITE}${BOLD}" "${RESET}" "$*" >&2
+    exit 1
+}
 
 show_cmd(){ printf "%s%s$ %s%s\n" "${DIM}" "${BOLD}" "$*" "${C0}" >&2; }
 run_shell(){ show_cmd "$*"; bash -lc "$*"; }
@@ -632,12 +639,34 @@ configure_ufw() {
   is_cmd ufw || { warn "ufw not installed; skipping firewall rules."; return 0; }
 
   step "Step: Firewall (UFW) rules"
-  info "About to add:"
-  info "  - UDP ${port}-$((port+3))  : DayZ game port range (base + 0..3)"
-  info "  - UDP ${query}            : Steam query port (steamQueryPort in serverDZ.cfg)"
-  info "These will be recorded in: ${inst_dir}/UFW_RULES.txt"
+  
+  # Check if rules already exist
+  local missing=0
+  local port_rule="${port}:$((port+3))/udp"
+  local query_rule="${query}/udp"
+  
+  if ${SUDO} ufw status | grep -q "${port_rule}"; then
+      info "Rule exists for Game Ports: ${port_rule}"
+  else
+      missing=1
+      info "MISSING Rule for Game Ports: ${port_rule}"
+  fi
+  
+  if ${SUDO} ufw status | grep -q "${query_rule}"; then
+      info "Rule exists for Query Port: ${query_rule}"
+  else
+      missing=1
+      info "MISSING Rule for Query Port: ${query_rule}"
+  fi
 
-  if ! prompt_yn "Add these UFW rules now?" "Y"; then
+  if [[ $missing -eq 0 ]]; then
+      ok "All firewall rules are already present."
+      return 0
+  fi
+  
+  info "New rules will be recorded in: ${inst_dir}/UFW_RULES.txt"
+  
+  if ! prompt_yn "Add MISSING UFW rules now?" "Y"; then
     warn "Skipping UFW changes."; return 0
   fi
 
@@ -657,8 +686,8 @@ Adjust if you use different custom ports.
 EOF
   chmod 600 "${inst_dir}/UFW_RULES.txt" || true
 
-  ufw_allow_with_comment_fallback "${port}:$((port+3))/udp" "DayZ game ports (base +0..+3)"
-  ufw_allow_with_comment_fallback "${query}/udp" "DayZ Steam query port (steamQueryPort)"
+  ufw_allow_with_comment_fallback "${port_rule}" "DayZ game ports (base +0..+3)"
+  ufw_allow_with_comment_fallback "${query_rule}" "DayZ Steam query port (steamQueryPort)"
 
   ${SUDO} ufw status | grep -qi "Status: active" && ok "UFW active; rules applied." || warn "UFW inactive; rules added but not active."
 }
@@ -1471,6 +1500,16 @@ HOST_NETWORK=${use_host_net}
   info "Container name: dayz-${name}"
   info ""
   info "Manage with: ./server-manager.sh"
+  
+  if [[ "${CLI_MODE}" != "1" ]]; then
+      if prompt_yn "Run Server Manager now?" "Y"; then
+          if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
+              exec "${SCRIPT_DIR}/server-manager.sh"
+          else
+              warn "server-manager.sh not found."
+          fi
+      fi
+  fi
 }
 
 
@@ -1578,10 +1617,16 @@ tui_create_instance() {
     
     # 5. Steam Creds
     local steam_user steam_pass
-    steam_user=$(read_input "Steam Username (for Mods)" "anonymous" "Steam Credentials")
-    [[ -z "$steam_user" ]] && return
-    
-    steam_pass=""
+    while true; do
+        steam_user=$(read_input "Steam Username (REQUIRED)" "" "Steam Credentials")
+        [[ -z "$steam_user" ]] && continue
+        
+        if [[ "${steam_user,,}" == "anonymous" ]]; then
+            show_message "Anonymous login is not allowed for DayZ." "Error"
+            continue
+        fi
+        break
+    done
     if [[ "$steam_user" != "anonymous" ]]; then
         steam_pass=$(read_input "Steam Password" "" "Steam Credentials" "1") # Masked
     fi
