@@ -633,7 +633,85 @@ get_all_mod_ids() {
     {
         awk '/^[[:space:]]*#?[[:space:]]*[0-9]+/ { gsub(/^[[:space:]]*#?[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print $1 }' "$mods_file" 2>/dev/null
         awk '/^[[:space:]]*#?[[:space:]]*[0-9]+/ { gsub(/^[[:space:]]*#?[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print $1 }' "$servermods_file" 2>/dev/null
-    } | sort -u | grep -E '^[0-9]+$'
+    } | awk '!seen[$0]++' | grep -E '^[0-9]+$'
+}
+
+move_line_up() {
+    local file="$1"
+    local pattern="$2"
+    [[ -f "$file" ]] || return 1
+    
+    local line_num
+    line_num=$(grep -n "$pattern" "$file" | head -n1 | cut -d: -f1)
+    
+    [[ -z "$line_num" || "$line_num" -le 1 ]] && return 0
+    
+    local prev_line=$((line_num - 1))
+    
+    # Read file into array
+    mapfile -t lines < "$file"
+    
+    # Swap using 0-based index
+    local idx=$((line_num - 1))
+    local prev_idx=$((prev_line - 1))
+    
+    local temp="${lines[$idx]}"
+    lines[$idx]="${lines[$prev_idx]}"
+    lines[$prev_idx]="$temp"
+    
+    # Write back
+    printf "%s\n" "${lines[@]}" > "$file"
+}
+
+move_line_down() {
+    local file="$1"
+    local pattern="$2"
+    [[ -f "$file" ]] || return 1
+    
+    local line_num
+    line_num=$(grep -n "$pattern" "$file" | head -n1 | cut -d: -f1)
+    
+    # Count lines
+    local total_lines
+    total_lines=$(wc -l < "$file")
+    
+    [[ -z "$line_num" || "$line_num" -ge "$total_lines" ]] && return 0
+    
+    local next_line=$((line_num + 1))
+    
+    # Read file into array
+    mapfile -t lines < "$file"
+    
+    # Swap using 0-based index
+    local idx=$((line_num - 1))
+    local next_idx=$((next_line - 1))
+    
+    local temp="${lines[$idx]}"
+    lines[$idx]="${lines[$next_idx]}"
+    lines[$next_idx]="$temp"
+    
+    # Write back
+    printf "%s\n" "${lines[@]}" > "$file"
+}
+
+move_mod_up() {
+    local mod_id="$1"
+    local f1="$2"
+    local f2="$3"
+    local pattern="^[[:space:]]*#\?[[:space:]]*${mod_id}[[:space:]]*$"
+    
+    move_line_up "$f1" "$pattern"
+    move_line_up "$f2" "$pattern"
+}
+
+move_mod_down() {
+    local mod_id="$1"
+    local f1="$2"
+    local f3="$3"
+    local pattern="^[[:space:]]*#\?[[:space:]]*${mod_id}[[:space:]]*$"
+    
+    move_line_down "$f1" "$pattern"
+    move_line_down "$f3" "$pattern"
 }
 
 mod_manager() {
@@ -819,7 +897,7 @@ mod_manager() {
         
         # Footer
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select   Enter Toggle/Action   A Add   S Sync   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 58))" "" "$RESET"
+        printf "%s%s ↑↓ Select   U/D Move   Enter Toggle   A Add   S Sync   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 65))" "" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
@@ -831,6 +909,22 @@ mod_manager() {
                     '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
                     '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
                 esac
+                ;;
+            'u'|'U'|'+')
+                if [[ $selected -gt 0 && $selected -lt $mod_count ]]; then
+                     local mid="${mod_ids[$selected]}"
+                     move_mod_up "$mid" "$mods_file" "$servermods_file"
+                     selected=$((selected - 1))
+                fi
+                continue
+                ;;
+            'd'|'D'|'-')
+                if [[ $selected -lt $((mod_count - 1)) ]]; then
+                     local mid="${mod_ids[$selected]}"
+                     move_mod_down "$mid" "$mods_file" "$servermods_file"
+                     selected=$((selected + 1))
+                fi
+                continue
                 ;;
             '')  # Enter
                 if [[ $selected -lt $mod_count ]]; then
