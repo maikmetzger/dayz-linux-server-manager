@@ -234,11 +234,13 @@ sync_mod_list() {
     if [[ -d "${mod_dir}" ]]; then
       # Fix casing recursively (required for Linux compatibility)
       log "Fixing casing for mod id=${id}..."
-      find "${mod_dir}" -depth | while read -r p; do
-        local d f n
+      local d f n
+      while IFS= read -r p; do
         d="$(dirname "${p}")"; f="$(basename "${p}")"; n="${f,,}"
-        [[ "${f}" != "${n}" ]] && mv -T "${p}" "${d}/${n}" 2>/dev/null || true
-      done
+        if [[ "${f}" != "${n}" ]]; then
+          mv -T "${p}" "${d}/${n}" 2>/dev/null && log "  Renamed: ${f} -> ${n}" || true
+        fi
+      done < <(find "${mod_dir}" -depth 2>/dev/null)
       log "Casing normalized for mod id=${id}."
 
       ln -sfn "${mod_dir}" "${DZ_SERVERFILES}/@${id}"
