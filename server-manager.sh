@@ -134,10 +134,11 @@ mkdir -p "$MOD_CACHE_DIR" 2>/dev/null || true
 get_mod_name() {
     local mod_id="$1"
     
+    # Check cache first
     if [[ -f "$MOD_CACHE_FILE" ]]; then
         local cached
-        cached=$(grep "^${mod_id}|" "$MOD_CACHE_FILE" 2>/dev/null | cut -d'|' -f2-)
-        if [[ -n "$cached" ]]; then
+        cached=$(grep "^${mod_id}|" "$MOD_CACHE_FILE" 2>/dev/null | head -1 | cut -d'|' -f2-)
+        if [[ -n "$cached" && "$cached" != "Mod #${mod_id}" ]]; then
             echo "$cached"
             return
         fi
@@ -147,18 +148,35 @@ get_mod_name() {
     local name=""
     if command -v curl &>/dev/null; then
         local response
-        response=$(curl -s --max-time 3 -X POST \
+        response=$(curl -sS --max-time 5 -X POST \
             "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/" \
             -d "itemcount=1" \
-            -d "publishedfileids[0]=${mod_id}" 2>/dev/null || true)
+            -d "publishedfileids[0]=${mod_id}" 2>/dev/null) || response=""
         
-        if command -v jq &>/dev/null && [[ -n "$response" ]]; then
-            name=$(echo "$response" | jq -r '.response.publishedfiledetails[0].title // empty' 2>/dev/null || true)
+        if [[ -n "$response" ]]; then
+            # Try jq first
+            if command -v jq &>/dev/null; then
+                name=$(echo "$response" | jq -r '.response.publishedfiledetails[0].title // empty' 2>/dev/null) || name=""
+            fi
+            
+            # Fallback: parse with grep/sed if jq failed or isn't installed
+            if [[ -z "$name" ]]; then
+                # Look for "title":"..." pattern
+                name=$(echo "$response" | grep -oP '"title"\s*:\s*"\K[^"]+' 2>/dev/null | head -1) || name=""
+            fi
         fi
     fi
     
+    # Use fallback if still empty
     [[ -z "$name" ]] && name="Mod #${mod_id}"
+    
+    # Update cache (remove old entry first)
+    if [[ -f "$MOD_CACHE_FILE" ]]; then
+        grep -v "^${mod_id}|" "$MOD_CACHE_FILE" > "${MOD_CACHE_FILE}.tmp" 2>/dev/null || true
+        mv "${MOD_CACHE_FILE}.tmp" "$MOD_CACHE_FILE" 2>/dev/null || true
+    fi
     echo "${mod_id}|${name}" >> "$MOD_CACHE_FILE" 2>/dev/null || true
+    
     echo "$name"
 }
 
