@@ -292,11 +292,14 @@ draw_menu() {
 run_menu() {
     local _menu_arr_name=$1
     local title="$2"
-    local selected=0
+    local selected=${3:-0}
     
     eval "local count=\${#${_menu_arr_name}[@]}"
     
     [[ $count -eq 0 ]] && return 1
+    
+    [[ $selected -ge $count ]] && selected=$((count - 1))
+    [[ $selected -lt 0 ]] && selected=0
     
     printf "%s" "$HIDE_CURSOR"
     
@@ -493,6 +496,7 @@ run_with_output() {
 # Instance Selector
 # -----------------------------------------------------------------------------
 select_instance() {
+    local selection=0
     while true; do
         scan_instances
         
@@ -519,7 +523,8 @@ select_instance() {
         items+=("✨ Install/Manage Instances")
         items+=("❌ Quit")
         
-        if run_menu items "DayZ Server Manager - Select Instance"; then
+        if run_menu items "DayZ Server Manager - Select Instance" $selection; then
+            selection=$MENU_RESULT
             local idx=$MENU_RESULT
             local count=${#INSTANCE_NAMES[@]}
             
@@ -1094,8 +1099,14 @@ wipe_menu() {
         show_message "Could not find storage_1 directory in ${storage_root}" "Error"
         return
     fi
-    
-    local -a states=(0 0 0) # Players, Vehicles, Bases/Loot
+
+    # Try to find economy.xml (usually in ../db/economy.xml relative to storage_1 parent map dir)
+    local mission_dir
+    mission_dir="$(dirname "$storage_dir")"
+    local economy_file="${mission_dir}/db/economy.xml"
+
+    local -a states=(0 0 0 0) # Players, Vehicles, Bases, Loot
+    local selection=0
     
     while true; do
         draw_header "Wipe Server Data - $SELECTED_NAME"
@@ -1103,20 +1114,23 @@ wipe_menu() {
         local -a items=()
         if [[ ${states[0]} -eq 1 ]]; then items+=(" [x] 👤 Wipe Players (players.db)"); else items+=(" [ ] 👤 Wipe Players (players.db)"); fi
         if [[ ${states[1]} -eq 1 ]]; then items+=(" [x] 🚗 Wipe Vehicles (vehicles.bin)"); else items+=(" [ ] 🚗 Wipe Vehicles (vehicles.bin)"); fi
-        if [[ ${states[2]} -eq 1 ]]; then items+=(" [x] 🏰 Wipe Bases/Loot (Map Persistence)"); else items+=(" [ ] 🏰 Wipe Bases/Loot (Map Persistence)"); fi
+        if [[ ${states[2]} -eq 1 ]]; then items+=(" [x] 🏰 Wipe Bases (persistence/data)"); else items+=(" [ ] 🏰 Wipe Bases (persistence/data)"); fi
+        if [[ ${states[3]} -eq 1 ]]; then items+=(" [x] 🎒 Wipe Loot (economy reset)"); else items+=(" [ ] 🎒 Wipe Loot (economy reset)"); fi
         
         items+=("--------------------")
         items+=("💀 EXECUTE SELECTED WIPE(S)")
         items+=("❌ Cancel / Back")
         
-        if run_menu items "Select Data to Wipe (Enter to Toggle)"; then
+        if run_menu items "Select Data to Wipe (Enter to Toggle)" $selection; then
+            selection=$MENU_RESULT
             case $MENU_RESULT in
                 0) states[0]=$((1 - states[0])) ;;
                 1) states[1]=$((1 - states[1])) ;;
                 2) states[2]=$((1 - states[2])) ;;
-                3) ;; # Separator
-                4) # Execute
-                    local count=$((states[0] + states[1] + states[2]))
+                3) states[3]=$((1 - states[3])) ;;
+                4) ;; # Separator
+                5) # Execute
+                    local count=$((states[0] + states[1] + states[2] + states[3]))
                     if [[ $count -eq 0 ]]; then
                         show_message "No items selected." "Error"
                         continue
@@ -1125,22 +1139,70 @@ wipe_menu() {
                     if confirm "Wipe ${count} categories? This cannot be undone!" "n"; then
                         printf "%s" "$SHOW_CURSOR"
                         
+                        # 1. Players
                         if [[ ${states[0]} -eq 1 ]]; then
                             rm -f "${storage_dir}/players.db" "${storage_dir}/players.db-journal"
                         fi
+                        
+                        # 2. Vehicles
                         if [[ ${states[1]} -eq 1 ]]; then
                             rm -f "${storage_dir}/vehicles.bin" "${storage_dir}/vehicles.bin-journal"
                         fi
+
+                        # 3. Bases (and included Loot in data/)
                         if [[ ${states[2]} -eq 1 ]]; then
-                             # Delete all except players and vehicles
-                             find "${storage_dir}" -type f -not -name "players.db" -not -name "players.db-journal" -not -name "vehicles.bin" -not -name "vehicles.bin-journal" -delete
+                             # Wiping bases essentially means clearing the data folder
+                             if [[ -d "${storage_dir}/data" ]]; then
+                                 rm -rf "${storage_dir}/data"/*
+                             fi
+                        fi
+
+                        # 4. Loot Only (Context dependent)
+                        if [[ ${states[3]} -eq 1 ]]; then
+                            # If Bases were ALSO wiped, loot is already gone via data/ folder deletion.
+                            # If Bases NOT wiped, we need to try the economy toggle trick or warn.
+                            if [[ ${states[2]} -eq 0 ]]; then
+                                if [[ -f "$economy_file" ]]; then
+                                    # Perform Soft Wipe Sequence
+                                    # Requires server stop
+                                    local was_running=0
+                                    if [[ "$(get_container_status "$SELECTED_CONTAINER")" == "RUNNING" ]]; then
+                                        was_running=1
+                                        echo "Stopping server for loot wipe..."
+                                        $DOCKER stop "$SELECTED_CONTAINER" >/dev/null
+                                    fi
+                                    
+                                    # Backup economy.xml
+                                    cp "$economy_file" "${economy_file}.bak"
+                                    
+                                    # Set dynamic load=0
+                                    sed -i 's/dynamic init="1" load="1"/dynamic init="1" load="0"/g' "$economy_file"
+                                    
+                                    echo "Starting server to clear loot (Wait 60s)..."
+                                    $DOCKER start "$SELECTED_CONTAINER" >/dev/null
+                                    sleep 60
+                                    
+                                    echo "Stopping server..."
+                                    $DOCKER stop "$SELECTED_CONTAINER" >/dev/null
+                                    
+                                    # Restore setting
+                                    sed -i 's/dynamic init="1" load="0"/dynamic init="1" load="1"/g' "$economy_file"
+                                    
+                                    if [[ $was_running -eq 1 ]]; then
+                                        echo "Restarting server..."
+                                        $DOCKER start "$SELECTED_CONTAINER" >/dev/null
+                                    fi
+                                else
+                                    show_message "Cannot wipe loot separately: economy.xml not found." "Warning"
+                                fi
+                            fi
                         fi
                         
                         show_message "Wipe Complete." "Success"
-                        states=(0 0 0)
+                        states=(0 0 0 0)
                     fi
                     ;;
-                5) return ;;
+                6) return ;;
             esac
         else
             return
@@ -1152,6 +1214,7 @@ wipe_menu() {
 # Main Menu
 # -----------------------------------------------------------------------------
 main_menu() {
+    local selection=0
     while true; do
         local status
         status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -1174,9 +1237,11 @@ main_menu() {
             "← Switch Instance"
         )
         
-        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text]"; then
+        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text]" $selection; then
             exit 0
         fi
+        
+        selection=$MENU_RESULT
         
         case $MENU_RESULT in
             0) # Start
