@@ -499,64 +499,169 @@ select_instance() {
 }
 
 # -----------------------------------------------------------------------------
-# Mod Manager
+# Unified Mod Manager - Combined view with Client/Server/Both toggle
 # -----------------------------------------------------------------------------
+# Mod types:
+#   client - Only in mods.txt (players download this)
+#   server - Only in servermods.txt (server-side only)
+#   both   - In both files
+
+get_mod_type() {
+    local mod_id="$1"
+    local mods_file="$2"
+    local servermods_file="$3"
+    
+    local in_mods=0 in_servermods=0
+    
+    grep -qE "^[[:space:]]*${mod_id}[[:space:]]*$" "$mods_file" 2>/dev/null && in_mods=1
+    grep -qE "^[[:space:]]*${mod_id}[[:space:]]*$" "$servermods_file" 2>/dev/null && in_servermods=1
+    
+    if [[ $in_mods -eq 1 && $in_servermods -eq 1 ]]; then
+        echo "both"
+    elif [[ $in_mods -eq 1 ]]; then
+        echo "client"
+    elif [[ $in_servermods -eq 1 ]]; then
+        echo "server"
+    else
+        echo "disabled"
+    fi
+}
+
+is_mod_in_file() {
+    local mod_id="$1"
+    local file="$2"
+    grep -qE "^[[:space:]]*#?[[:space:]]*${mod_id}[[:space:]]*$" "$file" 2>/dev/null
+}
+
+add_mod_to_file() {
+    local mod_id="$1"
+    local file="$2"
+    if ! grep -qE "^[[:space:]]*#?[[:space:]]*${mod_id}[[:space:]]*$" "$file" 2>/dev/null; then
+        echo "$mod_id" >> "$file"
+    else
+        # Enable if commented
+        sed -i "s/^[[:space:]]*#[[:space:]]*${mod_id}[[:space:]]*$/${mod_id}/" "$file"
+    fi
+}
+
+remove_mod_from_file() {
+    local mod_id="$1"
+    local file="$2"
+    # Comment out instead of delete
+    sed -i "s/^[[:space:]]*${mod_id}[[:space:]]*$/# ${mod_id}/" "$file"
+}
+
+get_all_mod_ids() {
+    local mods_file="$1"
+    local servermods_file="$2"
+    
+    {
+        awk '/^[[:space:]]*#?[[:space:]]*[0-9]+/ { gsub(/^[[:space:]]*#?[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print $1 }' "$mods_file" 2>/dev/null
+        awk '/^[[:space:]]*#?[[:space:]]*[0-9]+/ { gsub(/^[[:space:]]*#?[[:space:]]*/,""); gsub(/[[:space:]]*$/,""); print $1 }' "$servermods_file" 2>/dev/null
+    } | sort -u | grep -E '^[0-9]+$'
+}
+
 mod_manager() {
     local mods_file="${SELECTED_DIR}/data/config/mods.txt"
-    local title_prefix="$1"
-    [[ "$1" == "server" ]] && mods_file="${SELECTED_DIR}/data/config/servermods.txt"
+    local servermods_file="${SELECTED_DIR}/data/config/servermods.txt"
     
     [[ -f "$mods_file" ]] || touch "$mods_file"
+    [[ -f "$servermods_file" ]] || touch "$servermods_file"
     
     while true; do
-        # Read mods
+        # Get all unique mod IDs from both files
         local -a mod_ids=()
-        local -a mod_statuses=()
         local -a mod_names=()
+        local -a mod_types=()
         
-        while IFS='|' read -r mid mstatus; do
+        while IFS= read -r mid; do
+            [[ -z "$mid" ]] && continue
             mod_ids+=("$mid")
-            mod_statuses+=("$mstatus")
+            
             local mname
             mname="$(get_mod_name "$mid")"
-            [[ ${#mname} -gt 30 ]] && mname="${mname:0:27}..."
+            [[ ${#mname} -gt 25 ]] && mname="${mname:0:22}..."
             mod_names+=("$mname")
-        done < <(read_mod_ids_with_status "$mods_file")
+            
+            local mtype
+            mtype="$(get_mod_type "$mid" "$mods_file" "$servermods_file")"
+            mod_types+=("$mtype")
+        done < <(get_all_mod_ids "$mods_file" "$servermods_file")
         
-        # Build display items
+        # Build table-style display items
         local -a items=()
         for i in "${!mod_ids[@]}"; do
-            local icon="✗"
-            local color="$RED"
-            if [[ "${mod_statuses[$i]}" == "enabled" ]]; then
-                icon="✓"
-                color="$GREEN"
-            fi
-            items+=("$color$icon$RESET ${mod_names[$i]} [${mod_ids[$i]}]")
+            local mid="${mod_ids[$i]}"
+            local mname="${mod_names[$i]}"
+            local mtype="${mod_types[$i]}"
+            
+            local status_icon type_label type_color
+            case "$mtype" in
+                both)
+                    status_icon="${GREEN}✓${RESET}"
+                    type_label="[C+S]"
+                    type_color="$GREEN"
+                    ;;
+                client)
+                    status_icon="${GREEN}✓${RESET}"
+                    type_label="[Client]"
+                    type_color="$YELLOW"
+                    ;;
+                server)
+                    status_icon="${GREEN}✓${RESET}"
+                    type_label="[Server]"
+                    type_color="$YELLOW"
+                    ;;
+                disabled)
+                    status_icon="${RED}✗${RESET}"
+                    type_label="[Off]"
+                    type_color="$RED"
+                    ;;
+            esac
+            
+            # Table row: icon | name (padded) | ID | type
+            local row
+            printf -v row "%s %-25s %-12s %s%s%s" "$status_icon" "$mname" "$mid" "$type_color" "$type_label" "$RESET"
+            items+=("$row")
         done
         
-        items+=("────────────────────────────────")
-        items+=("${GREEN}+${RESET} Add mod")
+        items+=("────────────────────────────────────────────────")
+        items+=("${GREEN}+${RESET} Add new mod")
         items+=("${YELLOW}↻${RESET} Sync all mods")
         items+=("← Back")
         
-        local title="${title_prefix^} Mods - $SELECTED_NAME"
-        if ! run_menu items "$title"; then
+        if ! run_menu items "Mod Manager - $SELECTED_NAME"; then
             return
         fi
         
         local mod_count=${#mod_ids[@]}
         
         if [[ $MENU_RESULT -lt $mod_count ]]; then
-            # Toggle mod
+            # Cycle mod type: disabled -> client -> server -> both -> disabled
             local mid="${mod_ids[$MENU_RESULT]}"
-            local mstatus="${mod_statuses[$MENU_RESULT]}"
+            local mtype="${mod_types[$MENU_RESULT]}"
             
-            if [[ "$mstatus" == "enabled" ]]; then
-                sed -i "s/^[[:space:]]*${mid}[[:space:]]*$/# ${mid}/" "$mods_file"
-            else
-                sed -i "s/^[[:space:]]*#[[:space:]]*${mid}[[:space:]]*$/${mid}/" "$mods_file"
-            fi
+            case "$mtype" in
+                disabled)
+                    # Enable as client only
+                    add_mod_to_file "$mid" "$mods_file"
+                    ;;
+                client)
+                    # Change to server only
+                    remove_mod_from_file "$mid" "$mods_file"
+                    add_mod_to_file "$mid" "$servermods_file"
+                    ;;
+                server)
+                    # Change to both
+                    add_mod_to_file "$mid" "$mods_file"
+                    add_mod_to_file "$mid" "$servermods_file"
+                    ;;
+                both)
+                    # Disable (remove from both)
+                    remove_mod_from_file "$mid" "$mods_file"
+                    remove_mod_from_file "$mid" "$servermods_file"
+                    ;;
+            esac
         elif [[ $MENU_RESULT -eq $mod_count ]]; then
             # Separator - ignore
             :
@@ -565,12 +670,12 @@ mod_manager() {
             local new_id
             new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
             if [[ "$new_id" =~ ^[0-9]+$ ]]; then
-                if ! grep -qE "^[[:space:]]*#?[[:space:]]*${new_id}[[:space:]]*$" "$mods_file" 2>/dev/null; then
+                # Add to mods.txt by default (client-side)
+                if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
                     echo "$new_id" >> "$mods_file"
-                    # Try to get the name for the confirmation
                     local mod_name
                     mod_name="$(get_mod_name "$new_id")"
-                    show_message "Added: $mod_name" "Mod Added"
+                    show_message "Added: $mod_name\nType: [Client] (toggle to change)" "Mod Added"
                 else
                     show_message "Mod $new_id is already in your list" "Already Exists"
                 fi
@@ -585,6 +690,7 @@ mod_manager() {
                 show_message "Container must be running to sync"
             else
                 run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
+                run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
             fi
         elif [[ $MENU_RESULT -eq $((mod_count + 3)) ]]; then
             # Back
@@ -613,7 +719,6 @@ main_menu() {
             "💻 Enter Shell"
             "────────────────────"
             "🔧 Manage Mods"
-            "🔧 Manage Server Mods"
             "⬆  Update Server"
             "────────────────────"
             "← Switch Instance"
@@ -647,13 +752,10 @@ main_menu() {
                 ;;
             6) # Separator
                 ;;
-            7) # Mods
-                mod_manager "workshop"
+            7) # Mod Manager (unified)
+                mod_manager
                 ;;
-            8) # Server Mods
-                mod_manager "server"
-                ;;
-            9) # Update
+            8) # Update
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
@@ -662,9 +764,9 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            10) # Separator
+            9) # Separator
                 ;;
-            11) # Switch instance
+            10) # Switch instance
                 select_instance
                 ;;
         esac
