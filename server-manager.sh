@@ -867,6 +867,7 @@ main_menu() {
             "🔧 Manage Mods"
             "⬆  Update Server"
             "--------------------"
+            "✨ Install/Manage Instances"
             "← Switch Instance"
         )
         
@@ -914,7 +915,16 @@ main_menu() {
                 ;;
             9) # Separator
                 ;;
-            10) # Switch instance
+            10) # Installer
+                 if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
+                     printf "%s" "$SHOW_CURSOR"
+                     "${SCRIPT_DIR}/install-dayz-docker.sh"
+                     printf "%s" "$HIDE_CURSOR"
+                 else
+                     show_message "install-dayz-docker.sh not found."
+                 fi
+                 ;;
+            11) # Switch instance
                 select_instance
                 ;;
         esac
