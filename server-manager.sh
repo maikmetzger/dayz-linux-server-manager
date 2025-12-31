@@ -1084,7 +1084,7 @@ mod_manager() {
                      local mid="${mod_ids[$selected]}"
                      move_mod_up "$mid" "$mods_file" "$servermods_file"
                      selected=$((selected - 1))
-                     dirty=1
+                     dirty=1; needs_rebuild=1
                 fi
                 continue
                 ;;
@@ -1093,7 +1093,7 @@ mod_manager() {
                      local mid="${mod_ids[$selected]}"
                      move_mod_down "$mid" "$mods_file" "$servermods_file"
                      selected=$((selected + 1))
-                     dirty=1
+                     dirty=1; needs_rebuild=1
                 fi
                 continue
                 ;;
@@ -1108,7 +1108,7 @@ mod_manager() {
                         server) add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
-                    dirty=1
+                    dirty=1; needs_rebuild=1
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
                     local new_id
@@ -1117,7 +1117,7 @@ mod_manager() {
                         if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
                             echo "$new_id" >> "$mods_file"
                             show_message "Added mod $new_id as [Client]" "Mod Added"
-                            dirty=1
+                            dirty=1; needs_rebuild=1
                         else
                             show_message "Mod already in list" "Already Exists"
                         fi
