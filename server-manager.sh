@@ -526,10 +526,13 @@ select_instance() {
                     SELECTED_DIR="${INSTANCE_DIRS[$idx]}"
                     SELECTED_NAME="${INSTANCE_NAMES[$idx]}"
                     SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$idx]}"
-                    return # Successfully selected, return to main
+                return # Successfully selected, return to main
                 fi
                 # Adjust for separator
                 idx=$((idx - 1))
+            else
+                # Adjust for "No instances" + separator
+                idx=$((idx - 2))
             fi
             
             # The adjusted index now maps to:
