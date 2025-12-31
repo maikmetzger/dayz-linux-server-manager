@@ -318,8 +318,8 @@ run_menu() {
             $'\x1b')  # Escape sequence
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') ((selected > 0)) && ((selected--)) ;;  # Up
-                    '[B') ((selected < count-1)) && ((selected++)) ;;  # Down
+                    '[A') if ((selected > 0)); then ((selected-=1)); fi ;;  # Up
+                    '[B') if ((selected < count-1)); then ((selected+=1)); fi ;;  # Down
                 esac
                 ;;
             '') # Enter
@@ -742,8 +742,8 @@ mod_manager() {
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') ((selected > 0)) && ((selected--)) ;;
-                    '[B') ((selected < total_items - 1)) && ((selected++)) ;;
+                    '[A') if ((selected > 0)); then ((selected-=1)); fi ;;
+                    '[B') if ((selected < total_items - 1)); then ((selected+=1)); fi ;;
                 esac
                 ;;
             '')  # Enter
