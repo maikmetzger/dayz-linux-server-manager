@@ -279,7 +279,7 @@ draw_menu() {
             clean_item="${item//\\033\[*([0-9;])m/}"
             # Fallback: use sed if parameter expansion doesn't strip all codes
             clean_item=$(printf '%s' "$item" | sed $'s/\033\\[[0-9;]*m//g')
-            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
+            printf "%s%s > %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
         else
             printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
         fi
@@ -506,8 +506,8 @@ select_instance() {
         local status
         status="$(get_container_status "$container")"
         
-        local status_icon="${RED}○${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
+        local status_icon="${RED}[-]${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}[*]${RESET}"
         
         items+=("$status_icon $name [$status]")
     done
@@ -640,7 +640,7 @@ mod_manager() {
         
         move_to $table_start 1
         printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) $col_status
@@ -654,42 +654,56 @@ mod_manager() {
         
         move_to $((table_start + 2)) 1
         printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
         printf "%s" "$RESET"
         
         # Mod rows
         local row=$((table_start + 3))
+        if [[ $mod_count -eq 0 ]]; then
+            move_to $row 1
+            printf "%s  (No mods - press A to add)%s" "$DIM" "$RESET"
+            ((row++))
+        fi
         for i in "${!mod_ids[@]}"; do
             local mid="${mod_ids[$i]}"
             local mname="${mod_names[$i]}"
             local mtype="${mod_types[$i]}"
             
-            local status_icon type_label
+            local status_icon type_label type_short
             case "$mtype" in
-                both)     status_icon="${GREEN}✓${RESET}"; type_label="${GREEN}[C+S]${RESET}" ;;
-                client)   status_icon="${GREEN}✓${RESET}"; type_label="${YELLOW}[Cli]${RESET}" ;;
-                server)   status_icon="${GREEN}✓${RESET}"; type_label="${YELLOW}[Srv]${RESET}" ;;
-                disabled) status_icon="${RED}✗${RESET}"; type_label="${RED}[Off]${RESET}" ;;
+                both)     status_icon="+"; type_label="[C+S]"; type_short="C+S" ;;
+                client)   status_icon="+"; type_label="[Cli]"; type_short="Cli" ;;
+                server)   status_icon="+"; type_label="[Srv]"; type_short="Srv" ;;
+                disabled) status_icon="x"; type_label="[Off]"; type_short="Off" ;;
             esac
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
+                # Selected row - full red background with status icon
                 printf "%s%s" "$BG_RED" "$WHITE$BOLD"
-                printf "▶ %-6s" ""
+                printf " > %s  " "$status_icon"
                 printf "%-$((col_id - col_name - 2))s" "$mname"
                 printf "%-14s" "$mid"
-                printf "%-6s" ""
+                printf "[%s]" "$type_short"
                 # Fill rest of line
-                printf "%*s" "$((TERM_COLS - col_type - 6))" ""
+                local filled=$((8 + col_id - col_name - 2 + 14 + 5))
+                [[ $filled -lt $TERM_COLS ]] && printf "%*s" "$((TERM_COLS - filled))" ""
                 printf "%s" "$RESET"
-                # Print type label without color codes to avoid breaking
-                move_to $row $col_type
-                printf "%s%s[%s]%s" "$BG_RED" "$WHITE$BOLD" "${mtype:0:3}" "$RESET"
             else
-                printf "  %s     " "$status_icon"
+                # Normal row with colors
+                if [[ "$mtype" == "disabled" ]]; then
+                    printf "  %s%s%s     " "$RED" "$status_icon" "$RESET"
+                else
+                    printf "  %s%s%s     " "$GREEN" "$status_icon" "$RESET"
+                fi
                 printf "%-$((col_id - col_name - 2))s" "$mname"
                 printf "%s%-14s%s" "$DIM" "$mid" "$RESET"
-                printf "%s" "$type_label"
+                case "$mtype" in
+                    both)     printf "%s%s%s" "$GREEN" "$type_label" "$RESET" ;;
+                    client)   printf "%s%s%s" "$YELLOW" "$type_label" "$RESET" ;;
+                    server)   printf "%s%s%s" "$YELLOW" "$type_label" "$RESET" ;;
+                    disabled) printf "%s%s%s" "$RED" "$type_label" "$RESET" ;;
+                esac
             fi
             ((row++))
         done
@@ -697,7 +711,7 @@ mod_manager() {
         # Separator before actions
         move_to $row 1
         printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
         printf "%s" "$RESET"
         ((row++))
         
@@ -808,20 +822,20 @@ main_menu() {
         status="$(get_container_status "$SELECTED_CONTAINER")"
         
         local status_text="${RED}STOPPED${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}[*] RUNNING${RESET}"
         
         local -a items=(
-            "▶  Start Server"
-            "■  Stop Server"
-            "↻  Restart Server"
-            "────────────────────"
-            "📋 View Logs"
-            "💻 Enter Shell"
-            "────────────────────"
-            "🔧 Manage Mods"
-            "⬆  Update Server"
-            "────────────────────"
-            "← Switch Instance"
+            "[>] Start Server"
+            "[=] Stop Server"
+            "[r] Restart Server"
+            "--------------------"
+            "[L] View Logs"
+            "[S] Enter Shell"
+            "--------------------"
+            "[M] Manage Mods"
+            "[U] Update Server"
+            "--------------------"
+            "[<] Switch Instance"
         )
         
         if ! run_menu items "DayZ: $SELECTED_NAME [$status_text]"; then
