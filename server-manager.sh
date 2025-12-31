@@ -887,7 +887,9 @@ main_menu() {
             3) # Separator
                 ;;
             4) # Logs
-                run_with_output "Container Logs" $DOCKER logs --tail=100 "$SELECTED_CONTAINER"
+                trap : INT  # Ignore SIGINT in parent so Ctrl+C only stops the logs command
+                run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
+                trap - INT  # Restore default SIGINT behavior
                 ;;
             5) # Shell
                 printf "%s%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
