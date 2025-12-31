@@ -591,7 +591,11 @@ mod_manager() {
     [[ -f "$mods_file" ]] || touch "$mods_file"
     [[ -f "$servermods_file" ]] || touch "$servermods_file"
     
+    local selected=0
+    
     while true; do
+        get_term_size
+        
         # Get all unique mod IDs from both files
         local -a mod_ids=()
         local -a mod_names=()
@@ -603,7 +607,9 @@ mod_manager() {
             
             local mname
             mname="$(get_mod_name "$mid")"
-            [[ ${#mname} -gt 35 ]] && mname="${mname:0:32}..."
+            local max_name=$((TERM_COLS - 35))
+            [[ $max_name -lt 20 ]] && max_name=20
+            [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
             mod_names+=("$mname")
             
             local mtype
@@ -611,123 +617,185 @@ mod_manager() {
             mod_types+=("$mtype")
         done < <(get_all_mod_ids "$mods_file" "$servermods_file")
         
-        # Build table with headers
-        local -a items=()
+        local mod_count=${#mod_ids[@]}
+        local total_items=$((mod_count + 3))  # mods + Add + Sync + Back
         
-        # Table header (will be rendered but not selectable - we'll handle in case)
-        items+=("${DIM}  ─────────────────────────────────────────────────────────────────${RESET}")
-        items+=("${DIM}  STATUS   MOD NAME                           WORKSHOP ID     TYPE${RESET}")
-        items+=("${DIM}  ─────────────────────────────────────────────────────────────────${RESET}")
+        # Clamp selection
+        [[ $selected -lt 0 ]] && selected=0
+        [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
         
-        # Table rows
+        # Draw screen
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        
+        # Header bar (full width)
+        move_to 1 1
+        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Mod Manager - $SELECTED_NAME" "$RESET"
+        
+        # Table header (row 3)
+        local table_start=3
+        local col_status=2
+        local col_name=10
+        local col_id=$((TERM_COLS - 25))
+        local col_type=$((TERM_COLS - 10))
+        
+        move_to $table_start 1
+        printf "%s%s" "$DIM" "$RED"
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%s" "$RESET"
+        
+        move_to $((table_start + 1)) $col_status
+        printf "%s%sSTATUS%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_name
+        printf "%s%sMOD NAME%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_id
+        printf "%s%sWORKSHOP ID%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_type
+        printf "%s%sTYPE%s" "$DIM" "$WHITE" "$RESET"
+        
+        move_to $((table_start + 2)) 1
+        printf "%s%s" "$DIM" "$RED"
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%s" "$RESET"
+        
+        # Mod rows
+        local row=$((table_start + 3))
         for i in "${!mod_ids[@]}"; do
             local mid="${mod_ids[$i]}"
             local mname="${mod_names[$i]}"
             local mtype="${mod_types[$i]}"
             
-            local status_icon type_label type_color
+            local status_icon type_label
             case "$mtype" in
-                both)
-                    status_icon="${GREEN}  ✓   ${RESET}"
-                    type_label="[C+S]"
-                    type_color="$GREEN"
-                    ;;
-                client)
-                    status_icon="${GREEN}  ✓   ${RESET}"
-                    type_label="[Client]"
-                    type_color="$YELLOW"
-                    ;;
-                server)
-                    status_icon="${GREEN}  ✓   ${RESET}"
-                    type_label="[Server]"
-                    type_color="$YELLOW"
-                    ;;
-                disabled)
-                    status_icon="${RED}  ✗   ${RESET}"
-                    type_label="[Off]"
-                    type_color="$RED"
-                    ;;
+                both)     status_icon="${GREEN}✓${RESET}"; type_label="${GREEN}[C+S]${RESET}" ;;
+                client)   status_icon="${GREEN}✓${RESET}"; type_label="${YELLOW}[Cli]${RESET}" ;;
+                server)   status_icon="${GREEN}✓${RESET}"; type_label="${YELLOW}[Srv]${RESET}" ;;
+                disabled) status_icon="${RED}✗${RESET}"; type_label="${RED}[Off]${RESET}" ;;
             esac
             
-            # Table row with proper column widths
-            local row
-            printf -v row "%s  %-35s %-15s %s%-8s%s" "$status_icon" "$mname" "$mid" "$type_color" "$type_label" "$RESET"
-            items+=("$row")
+            move_to $row 1
+            if [[ $i -eq $selected ]]; then
+                printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+                printf "▶ %-6s" ""
+                printf "%-$((col_id - col_name - 2))s" "$mname"
+                printf "%-14s" "$mid"
+                printf "%-6s" ""
+                # Fill rest of line
+                printf "%*s" "$((TERM_COLS - col_type - 6))" ""
+                printf "%s" "$RESET"
+                # Print type label without color codes to avoid breaking
+                move_to $row $col_type
+                printf "%s%s[%s]%s" "$BG_RED" "$WHITE$BOLD" "${mtype:0:3}" "$RESET"
+            else
+                printf "  %s     " "$status_icon"
+                printf "%-$((col_id - col_name - 2))s" "$mname"
+                printf "%s%-14s%s" "$DIM" "$mid" "$RESET"
+                printf "%s" "$type_label"
+            fi
+            ((row++))
         done
         
-        # Footer separator and actions
-        items+=("${DIM}  ─────────────────────────────────────────────────────────────────${RESET}")
-        items+=("  ${GREEN}+${RESET}  Add new mod")
-        items+=("  ${YELLOW}↻${RESET}  Sync all mods (download from Steam)")
-        items+=("  ${RED}←${RESET}  Back to main menu")
+        # Separator before actions
+        move_to $row 1
+        printf "%s%s" "$DIM" "$RED"
+        printf "%*s" "$TERM_COLS" "" | tr ' ' '─'
+        printf "%s" "$RESET"
+        ((row++))
         
-        if ! run_menu items "Mod Manager - $SELECTED_NAME"; then
-            return
-        fi
+        # Action bar (horizontal) - full width
+        local action_row=$row
+        local actions=("[A] Add" "[S] Sync" "[Q] Back")
+        local action_indices=(0 1 2)  # Add=mod_count, Sync=mod_count+1, Back=mod_count+2
         
-        local mod_count=${#mod_ids[@]}
-        # 3 header rows before mods, so mod indices are 3 to (3+mod_count-1)
-        local header_rows=3
-        
-        if [[ $MENU_RESULT -lt $header_rows ]]; then
-            # Header row selected - ignore
-            :
-        elif [[ $MENU_RESULT -lt $((header_rows + mod_count)) ]]; then
-            # Mod row selected - cycle type
-            local mod_index=$((MENU_RESULT - header_rows))
-            local mid="${mod_ids[$mod_index]}"
-            local mtype="${mod_types[$mod_index]}"
-            
-            case "$mtype" in
-                disabled)
-                    add_mod_to_file "$mid" "$mods_file"
-                    ;;
-                client)
-                    remove_mod_from_file "$mid" "$mods_file"
-                    add_mod_to_file "$mid" "$servermods_file"
-                    ;;
-                server)
-                    add_mod_to_file "$mid" "$mods_file"
-                    add_mod_to_file "$mid" "$servermods_file"
-                    ;;
-                both)
-                    remove_mod_from_file "$mid" "$mods_file"
-                    remove_mod_from_file "$mid" "$servermods_file"
-                    ;;
-            esac
-        elif [[ $MENU_RESULT -eq $((header_rows + mod_count)) ]]; then
-            # Footer separator - ignore
-            :
-        elif [[ $MENU_RESULT -eq $((header_rows + mod_count + 1)) ]]; then
-            # Add mod
-            local new_id
-            new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
-            if [[ "$new_id" =~ ^[0-9]+$ ]]; then
-                if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
-                    echo "$new_id" >> "$mods_file"
-                    local mod_name
-                    mod_name="$(get_mod_name "$new_id")"
-                    show_message "Added: $mod_name\nType: [Client] (toggle to change)" "Mod Added"
-                else
-                    show_message "Mod $new_id is already in your list" "Already Exists"
-                fi
-            elif [[ -n "$new_id" ]]; then
-                show_message "Invalid Workshop ID - must be a number" "Error"
-            fi
-        elif [[ $MENU_RESULT -eq $((header_rows + mod_count + 2)) ]]; then
-            # Sync mods
-            local status
-            status="$(get_container_status "$SELECTED_CONTAINER")"
-            if [[ "$status" != "RUNNING" ]]; then
-                show_message "Container must be running to sync"
+        move_to $action_row 2
+        for a in "${!actions[@]}"; do
+            local action_idx=$((mod_count + a))
+            if [[ $selected -eq $action_idx ]]; then
+                printf "%s%s ▶ %s %s" "$BG_RED" "$WHITE$BOLD" "${actions[$a]}" "$RESET"
             else
-                run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
-                run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
+                printf "   %s   " "${actions[$a]}"
             fi
-        elif [[ $MENU_RESULT -eq $((header_rows + mod_count + 3)) ]]; then
-            # Back
-            return
-        fi
+            printf "   "
+        done
+        
+        # Footer
+        move_to $TERM_ROWS 1
+        printf "%s%s ↑↓ Select   Enter Toggle/Action   A Add   S Sync   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 58))" "" "$RESET"
+        
+        # Read input
+        IFS= read -rsn1 key
+        
+        case "$key" in
+            $'\x1b')
+                read -rsn2 -t 0.1 seq || true
+                case "$seq" in
+                    '[A') ((selected > 0)) && ((selected--)) ;;
+                    '[B') ((selected < total_items - 1)) && ((selected++)) ;;
+                esac
+                ;;
+            '')  # Enter
+                if [[ $selected -lt $mod_count ]]; then
+                    # Toggle mod type
+                    local mid="${mod_ids[$selected]}"
+                    local mtype="${mod_types[$selected]}"
+                    case "$mtype" in
+                        disabled) add_mod_to_file "$mid" "$mods_file" ;;
+                        client) remove_mod_from_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
+                        server) add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
+                        both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
+                    esac
+                elif [[ $selected -eq $mod_count ]]; then
+                    # Add
+                    local new_id
+                    new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
+                    if [[ "$new_id" =~ ^[0-9]+$ ]]; then
+                        if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
+                            echo "$new_id" >> "$mods_file"
+                            show_message "Added mod $new_id as [Client]" "Mod Added"
+                        else
+                            show_message "Mod already in list" "Already Exists"
+                        fi
+                    fi
+                elif [[ $selected -eq $((mod_count + 1)) ]]; then
+                    # Sync
+                    local status
+                    status="$(get_container_status "$SELECTED_CONTAINER")"
+                    if [[ "$status" != "RUNNING" ]]; then
+                        show_message "Container must be running to sync"
+                    else
+                        run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
+                        run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
+                    fi
+                elif [[ $selected -eq $((mod_count + 2)) ]]; then
+                    # Back
+                    return
+                fi
+                ;;
+            'a'|'A')
+                local new_id
+                new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
+                if [[ "$new_id" =~ ^[0-9]+$ ]]; then
+                    if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
+                        echo "$new_id" >> "$mods_file"
+                        show_message "Added mod $new_id as [Client]" "Mod Added"
+                    else
+                        show_message "Mod already in list" "Already Exists"
+                    fi
+                fi
+                ;;
+            's'|'S')
+                local status
+                status="$(get_container_status "$SELECTED_CONTAINER")"
+                if [[ "$status" != "RUNNING" ]]; then
+                    show_message "Container must be running to sync"
+                else
+                    run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
+                    run_with_output "Syncing Server Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-servermods
+                fi
+                ;;
+            'q'|'Q')
+                return
+                ;;
+        esac
     done
 }
 
