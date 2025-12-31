@@ -862,29 +862,37 @@ mod_manager() {
     local selected=0
     local dirty=0
     
+    local needs_rebuild=1
+    local -a mod_ids=()
+    local -a mod_names=()
+    local -a mod_types=()
+    
     while true; do
-
         
-        # Get all unique mod IDs from both files
-        local -a mod_ids=()
-        local -a mod_names=()
-        local -a mod_types=()
-        
-        while IFS= read -r mid; do
-            [[ -z "$mid" ]] && continue
-            mod_ids+=("$mid")
+        # Only rebuild arrays when data has changed
+        if [[ $needs_rebuild -eq 1 ]]; then
+            mod_ids=()
+            mod_names=()
+            mod_types=()
             
-            local mname
-            mname="$(get_mod_name "$mid")"
-            local max_name=$((TERM_COLS - 35))
-            [[ $max_name -lt 20 ]] && max_name=20
-            [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
-            mod_names+=("$mname")
+            while IFS= read -r mid; do
+                [[ -z "$mid" ]] && continue
+                mod_ids+=("$mid")
+                
+                local mname
+                mname="$(get_mod_name "$mid")"
+                local max_name=$((TERM_COLS - 35))
+                [[ $max_name -lt 20 ]] && max_name=20
+                [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
+                mod_names+=("$mname")
+                
+                local mtype
+                mtype="$(get_mod_type "$mid" "$mods_file" "$servermods_file")"
+                mod_types+=("$mtype")
+            done < <(get_all_mod_ids "$mods_file" "$servermods_file")
             
-            local mtype
-            mtype="$(get_mod_type "$mid" "$mods_file" "$servermods_file")"
-            mod_types+=("$mtype")
-        done < <(get_all_mod_ids "$mods_file" "$servermods_file")
+            needs_rebuild=0
+        fi
         
         local mod_count=${#mod_ids[@]}
         local total_items=$((mod_count + 4))  # mods + Add + Sync + FixMods + Back
