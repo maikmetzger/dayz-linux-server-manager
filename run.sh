@@ -239,6 +239,7 @@ sync_mod_list() {
         d="$(dirname "${p}")"; f="$(basename "${p}")"; n="${f,,}"
         [[ "${f}" != "${n}" ]] && mv -T "${p}" "${d}/${n}" 2>/dev/null || true
       done
+      log "Casing normalized for mod id=${id}."
 
       ln -sfn "${mod_dir}" "${DZ_SERVERFILES}/@${id}"
       mod_args+="${mod_args:+;}"
@@ -246,8 +247,13 @@ sync_mod_list() {
 
       # Copy .bikey files (non-destructive; does not delete old keys automatically)
       if [[ -d "${DZ_SERVERFILES}/@${id}" ]]; then
-        find -L "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -iname "*.bikey" -print0 2>/dev/null \
-          | xargs -0 -I{} cp -f "{}" "${KEYS_DIR}/" 2>/dev/null || true
+        local key_count
+        key_count=$(find -L "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -iname "*.bikey" -printf '.' | wc -c)
+        if [[ ${key_count} -gt 0 ]]; then
+            find -L "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -iname "*.bikey" -print0 2>/dev/null \
+              | xargs -0 -I{} cp -v -f "{}" "${KEYS_DIR}/" 2>/dev/null | sed "s/^/  [Key] /" || true
+            log "Synchronized ${key_count} keys for mod @${id}"
+        fi
       fi
     else
       warn "Workshop content missing for id=${id} (expected ${mod_dir})"
