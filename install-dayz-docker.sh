@@ -1543,7 +1543,7 @@ main_tui() {
             menu_items+=("🔄 Update run.sh (No instances found)")
         fi
         
-        menu_items+=("🗑️ Delete Instance/Container")
+        menu_items+=("🗑️  Delete Instance/Container")
         menu_items+=("--------------------")
         menu_items+=("✨ Run Server Manager")
         menu_items+=("❌ Exit")

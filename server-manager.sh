@@ -550,21 +550,16 @@ select_instance() {
                 # Installer
              if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
                  # Check access
-                 if [[ $EUID -ne 0 ]]; then
                      if ! groups | grep -q "\bdocker\b"; then
                          if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
                              printf "%s" "$SHOW_CURSOR"
-                             sudo bash "${SCRIPT_DIR}/install-dayz-docker.sh" || true
-                             printf "%s" "$HIDE_CURSOR"
-                             continue # Loop back to re-scan instances
+                             exec sudo bash "${SCRIPT_DIR}/install-dayz-docker.sh"
                          fi
                      fi
                  fi
                  
                  printf "%s" "$SHOW_CURSOR"
-                 bash "${SCRIPT_DIR}/install-dayz-docker.sh" || true
-                 printf "%s" "$HIDE_CURSOR"
-                 continue # Loop back to re-scan instances
+                 exec bash "${SCRIPT_DIR}/install-dayz-docker.sh"
              else
                  show_message "install-dayz-docker.sh not found."
                  # Loop back
