@@ -1052,7 +1052,6 @@ mod_manager() {
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                    fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Fix Case
                     local status
