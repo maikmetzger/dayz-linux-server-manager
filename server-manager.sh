@@ -556,7 +556,6 @@ select_instance() {
                              exec sudo bash "${SCRIPT_DIR}/install-dayz-docker.sh"
                          fi
                      fi
-                 fi
                  
                  printf "%s" "$SHOW_CURSOR"
                  exec bash "${SCRIPT_DIR}/install-dayz-docker.sh"
