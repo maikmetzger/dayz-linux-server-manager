@@ -275,16 +275,13 @@ draw_header() {
     
     printf "%s" "$CLEAR_SCREEN"
     
-    # Strip ANSI codes from title to calculate actual visible length
-    local clean_title
-    clean_title=$(printf '%s' "$title" | sed $'s/\033\\[[0-9;]*m//g')
-    local title_len=${#clean_title}
-    local padding=$((TERM_COLS - title_len - 1))
-    [[ $padding -lt 0 ]] && padding=0
-    
-    # Header bar - red background full width
+    # Header bar - fill entire line with red background first
     move_to 1 1
-    printf "%s%s %s%${padding}s%s" "$BG_RED" "$WHITE$BOLD" "$title" "" "$RESET"
+    printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+    
+    # Then draw title on top
+    move_to 1 2
+    printf "%s%s%s%s" "$BG_RED" "$WHITE$BOLD" "$title" "$RESET"
     
     # Footer
     move_to $TERM_ROWS 1
