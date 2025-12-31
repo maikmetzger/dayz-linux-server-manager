@@ -1534,32 +1534,28 @@ main_tui() {
         mapfile -t markers < <(discover_instances_under "${scan_root}")
         mapfile -t containers < <(list_dayz_containers)
         
-        local -a menu_items=("✨ Run Server Manager" "Create NEW Instance")
-        
+        local -a menu_items=()
+        menu_items+=("🆕 Create NEW Instance")
+
         if [[ "${#markers[@]}" -gt 0 ]]; then
-            menu_items+=("Update run.sh for Instance")
+            menu_items+=("🔄 Update run.sh for Instance")
         else
-            menu_items+=("Update run.sh (No instances found)")
+            menu_items+=("🔄 Update run.sh (No instances found)")
         fi
         
-        menu_items+=("Delete Instance/Container")
-        menu_items+=("Exit")
+        menu_items+=("🗑️ Delete Instance/Container")
+        menu_items+=("--------------------")
+        menu_items+=("✨ Run Server Manager")
+        menu_items+=("❌ Exit")
         
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
         
         case $MENU_RESULT in
-            0) # Run Server Manager
-                if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
-                    exec "${SCRIPT_DIR}/server-manager.sh"
-                else
-                    show_message "server-manager.sh not found." "Error"
-                fi
-                ;;
-            1) # Create
+            0) # Create
                 tui_create_instance
                 read -rp "Press Enter to return to menu..."
                 ;;
-            2) # Update
+            1) # Update
                 if [[ "${#markers[@]}" -eq 0 ]]; then
                     show_message "No marker-based instances found." "Error"
                     continue
@@ -1567,10 +1563,18 @@ main_tui() {
                 tui_update_instance "${markers[@]}"
                 read -rp "Press Enter to return to menu..."
                 ;;
-            3) # Delete
+            2) # Delete
                 tui_delete_menu "${scan_root}"
                 ;;
-            4) # Exit
+            # 3 is separator
+            4) # Run Server Manager
+                if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
+                    exec "${SCRIPT_DIR}/server-manager.sh"
+                else
+                    show_message "server-manager.sh not found." "Error"
+                fi
+                ;;
+            5) # Exit
                 exit 0
                 ;;
         esac
