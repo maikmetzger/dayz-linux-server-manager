@@ -23,6 +23,106 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# DayZ Color Theme (Black/Red)
+# -----------------------------------------------------------------------------
+setup_dialog_theme() {
+    # Only for dialog (whiptail doesn't support custom colors well)
+    [[ "$TUI_CMD" != "dialog" ]] && return
+    
+    # Create temporary dialogrc with DayZ theme
+    DIALOGRC_FILE=$(mktemp)
+    trap "rm -f $DIALOGRC_FILE" EXIT
+    
+    cat > "$DIALOGRC_FILE" << 'DIALOGRC'
+# DayZ Theme - Black & Red
+# Attribute: (foreground, background, highlight)
+
+# Screen (background behind dialogs)
+screen_color = (WHITE,BLACK,ON)
+
+# Shadow
+shadow_color = (BLACK,BLACK,OFF)
+
+# Dialog box
+dialog_color = (WHITE,BLACK,OFF)
+
+# Title
+title_color = (RED,BLACK,ON)
+
+# Border
+border_color = (RED,BLACK,ON)
+
+# Button (inactive)
+button_inactive_color = (WHITE,BLACK,OFF)
+
+# Button (active/selected) - RED background
+button_active_color = (WHITE,RED,ON)
+
+# Button key (hotkey letter)
+button_key_inactive_color = (RED,BLACK,ON)
+button_key_active_color = (WHITE,RED,ON)
+
+# Button label
+button_label_inactive_color = (WHITE,BLACK,ON)
+button_label_active_color = (WHITE,RED,ON)
+
+# Input box
+inputbox_color = (WHITE,BLACK,OFF)
+inputbox_border_color = (RED,BLACK,ON)
+
+# Searchbox
+searchbox_color = (WHITE,BLACK,OFF)
+searchbox_title_color = (RED,BLACK,ON)
+searchbox_border_color = (RED,BLACK,ON)
+
+# Position indicator
+position_indicator_color = (RED,BLACK,ON)
+
+# Menu box
+menubox_color = (WHITE,BLACK,OFF)
+menubox_border_color = (RED,BLACK,ON)
+
+# Item (inactive)
+item_color = (WHITE,BLACK,OFF)
+
+# Item (selected) - RED background
+item_selected_color = (WHITE,RED,ON)
+
+# Tag (menu item key)
+tag_color = (RED,BLACK,ON)
+tag_selected_color = (WHITE,RED,ON)
+tag_key_color = (RED,BLACK,ON)
+tag_key_selected_color = (WHITE,RED,ON)
+
+# Checklist/radiolist
+check_color = (WHITE,BLACK,OFF)
+check_selected_color = (WHITE,RED,ON)
+
+# Gauge
+gauge_color = (RED,BLACK,ON)
+
+# Text for textbox/msgbox
+textbox_color = (WHITE,BLACK,OFF)
+textbox_border_color = (RED,BLACK,ON)
+
+# Form
+form_active_text_color = (WHITE,BLACK,ON)
+form_text_color = (WHITE,BLACK,OFF)
+form_item_readonly_color = (WHITE,BLACK,OFF)
+
+# Use shadows
+use_shadow = OFF
+
+# Use colors
+use_colors = ON
+DIALOGRC
+    
+    export DIALOGRC="$DIALOGRC_FILE"
+}
+
+setup_dialog_theme
+
+# -----------------------------------------------------------------------------
 # Terminal Size & Responsive Layout
 # -----------------------------------------------------------------------------
 get_term_size() {
@@ -669,14 +769,14 @@ main_menu() {
             "1" "▶  Start Server" \
             "2" "■  Stop Server" \
             "3" "↻  Restart Server" \
-            "" "" \
+            "-" "─────────────────────────" \
             "4" "📋 View Logs" \
             "5" "💻 Enter Shell" \
-            "" "" \
+            "--" "─────────────────────────" \
             "6" "🔧 Manage Mods" \
             "7" "🔧 Manage Server Mods" \
             "8" "⬆  Update Server Files" \
-            "" "" \
+            "---" "─────────────────────────" \
             "9" "← Select Different Instance" \
             3>&1 1>&2 2>&3) || exit 0
         
@@ -701,8 +801,8 @@ main_menu() {
             9)
                 select_instance
                 ;;
-            "")
-                # Empty selection (separator)
+            -|--|---)
+                # Separator selected, ignore
                 ;;
         esac
     done
