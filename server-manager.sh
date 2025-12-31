@@ -667,8 +667,11 @@ mod_manager() {
         for i in "${!mod_ids[@]}"; do
             local mid="${mod_ids[$i]}"
             local mname="${mod_names[$i]}"
-            local mtype="${mod_types[$i]}"
+            # Truncate name to fit between name col and id col
+            local max_name_len=$((col_id - col_name - 2))
+            [[ ${#mname} -gt $max_name_len ]] && mname="${mname:0:$((max_name_len-3))}..."
             
+            local mtype="${mod_types[$i]}"
             local status_icon type_label type_short
             case "$mtype" in
                 both)     status_icon="✓"; type_label="[C+S]"; type_short="C+S" ;;
@@ -679,25 +682,56 @@ mod_manager() {
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
-                # Selected row - full red background with status icon
+                # Selected row - full red background
                 printf "%s%s" "$BG_RED" "$WHITE$BOLD"
-                printf " ▶ %s  " "$status_icon"
-                printf "%-$((col_id - col_name - 2))s" "$mname"
-                printf "%-14s" "$mid"
+                
+                # Column 1: Status (Arrow + Icon)
+                # Fixed spacing: " (arrow) (icon)  "
+                move_to $row $col_status
+                printf "▶ %s" "$status_icon"
+                
+                # Column 2: Name
+                move_to $row $col_name
+                printf "%s" "$mname"
+                
+                # Column 3: ID
+                move_to $row $col_id
+                printf "%s" "$mid"
+                
+                # Column 4: Type
+                move_to $row $col_type
                 printf "[%s]" "$type_short"
-                # Fill rest of line
-                local filled=$((8 + col_id - col_name - 2 + 14 + 5))
-                [[ $filled -lt $TERM_COLS ]] && printf "%*s" "$((TERM_COLS - filled))" ""
+                
+                # Fill remaining space to end of line with red bg
+                local current_pos=$((col_type + 5))
+                local fill_len=$((TERM_COLS - current_pos + 1))
+                if [[ $fill_len -gt 0 ]]; then
+                    move_to $row $current_pos
+                    printf "%*s" "$fill_len" ""
+                fi
+                
                 printf "%s" "$RESET"
             else
-                # Normal row with colors
+                # Unselected row
+                
+                # Column 1: Status (Icon only)
+                move_to $row $col_status
                 if [[ "$mtype" == "disabled" ]]; then
-                    printf "  %s%s%s     " "$RED" "$status_icon" "$RESET"
+                    printf "  %s%s%s" "$RED" "$status_icon" "$RESET"
                 else
-                    printf "  %s%s%s     " "$GREEN" "$status_icon" "$RESET"
+                    printf "  %s%s%s" "$GREEN" "$status_icon" "$RESET"
                 fi
-                printf "%-$((col_id - col_name - 2))s" "$mname"
-                printf "%s%-14s%s" "$DIM" "$mid" "$RESET"
+                
+                # Column 2: Name
+                move_to $row $col_name
+                printf "%s" "$mname"
+                
+                # Column 3: ID
+                move_to $row $col_id
+                printf "%s%s%s" "$DIM" "$mid" "$RESET"
+                
+                # Column 4: Type
+                move_to $row $col_type
                 case "$mtype" in
                     both)     printf "%s%s%s" "$GREEN" "$type_label" "$RESET" ;;
                     client)   printf "%s%s%s" "$YELLOW" "$type_label" "$RESET" ;;
