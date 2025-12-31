@@ -528,8 +528,12 @@ ensure_docker() {
 
 discover_instances_under() {
   local root="$1"
+  info "DEBUG discover: root=${root}, exists=$(test -d "${root}" && echo yes || echo no)"
   [[ -d "${root}" ]] || return 0
-  find "${root}" -type f -name ".dayz-instance" -print 2>/dev/null || true
+  local result
+  result="$(find "${root}" -type f -name ".dayz-instance" -print 2>/dev/null || true)"
+  info "DEBUG discover: find result=[${result}]"
+  echo "${result}"
 }
 
 list_dayz_containers() {
