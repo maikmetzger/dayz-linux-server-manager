@@ -187,19 +187,12 @@ draw_header() {
     get_term_size
     
     printf "%s" "$CLEAR_SCREEN"
-    printf "%s" "$BG_BLACK"
-    
-    # Fill screen with black
-    for ((i=1; i<=TERM_ROWS; i++)); do
-        move_to $i 1
-        printf "%${TERM_COLS}s" ""
-    done
     
     # Header bar
     move_to 1 1
     printf "%s%s" "$BG_RED" "$WHITE$BOLD"
     printf " %-$((TERM_COLS-1))s" "$title"
-    printf "%s" "$RESET$BG_BLACK"
+    printf "%s" "$RESET"
     
     # Footer
     move_to $TERM_ROWS 1
