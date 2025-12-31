@@ -1042,11 +1042,13 @@ mod_manager() {
         for a in "${!actions[@]}"; do
             local action_idx=$((mod_count + a))
             if [[ $selected -eq $action_idx ]]; then
-                printf "%s%s ▶ %s %s" "$BG_RED" "$WHITE$BOLD" "${actions[$a]}" "$RESET"
+                # Selected:  "▶ [text] " = 2 + text + 1 padding
+                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "${actions[$a]}" "$RESET"
             else
-                printf "   %s   " "${actions[$a]}"
+                # Unselected: "  [text] " = 2 + text + 1 padding (same as selected)
+                printf "  %s " "${actions[$a]}"
             fi
-            printf "   "
+            printf "  "
         done
         
         # Footer
@@ -1343,7 +1345,7 @@ main_menu() {
         local status
         status="$(get_container_status "$SELECTED_CONTAINER")"
         
-        local status_text="${RED}STOPPED${RESET}"
+        local status_text="${WHITE}● STOPPED${RESET}"
         [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${RESET}"
         
         local -a items=(
