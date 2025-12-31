@@ -185,24 +185,40 @@ MOD_CACHE_DIR="${HOME}/.cache/dayz-server-manager"
 MOD_CACHE_FILE="${MOD_CACHE_DIR}/mod-names.cache"
 mkdir -p "$MOD_CACHE_DIR" 2>/dev/null || true
 
+# In-memory cache for fast lookups (associative array)
+declare -A MOD_NAME_CACHE=()
+
+# Load cache file into memory
+load_mod_cache() {
+    MOD_NAME_CACHE=()
+    [[ -f "$MOD_CACHE_FILE" ]] || return 0
+    while IFS='|' read -r mid mname; do
+        [[ -n "$mid" ]] && MOD_NAME_CACHE["$mid"]="$mname"
+    done < "$MOD_CACHE_FILE"
+}
+
+# Save in-memory cache to file
+save_mod_cache() {
+    : > "$MOD_CACHE_FILE" 2>/dev/null || return
+    for mid in "${!MOD_NAME_CACHE[@]}"; do
+        echo "${mid}|${MOD_NAME_CACHE[$mid]}" >> "$MOD_CACHE_FILE"
+    done
+}
+
 get_mod_name() {
     local mod_id="$1"
     
-    # Check cache first
-    if [[ -f "$MOD_CACHE_FILE" ]]; then
-        local cached
-        cached=$(grep "^${mod_id}|" "$MOD_CACHE_FILE" 2>/dev/null | head -1 | cut -d'|' -f2-)
-        if [[ -n "$cached" && "$cached" != "Mod #${mod_id}" ]]; then
-            echo "$cached"
-            return
-        fi
+    # Check in-memory cache first (fast!)
+    if [[ -n "${MOD_NAME_CACHE[$mod_id]:-}" && "${MOD_NAME_CACHE[$mod_id]}" != "Mod #${mod_id}" ]]; then
+        echo "${MOD_NAME_CACHE[$mod_id]}"
+        return
     fi
     
-    # Try Steam API
+    # Try Steam API (only if not cached)
     local name=""
     if command -v curl &>/dev/null; then
         local response
-        response=$(curl -sS --max-time 5 -X POST \
+        response=$(curl -sS --max-time 3 -X POST \
             "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/" \
             -d "itemcount=1" \
             -d "publishedfileids[0]=${mod_id}" 2>/dev/null) || response=""
@@ -224,15 +240,14 @@ get_mod_name() {
     # Use fallback if still empty
     [[ -z "$name" ]] && name="Mod #${mod_id}"
     
-    # Update cache (remove old entry first)
-    if [[ -f "$MOD_CACHE_FILE" ]]; then
-        grep -v "^${mod_id}|" "$MOD_CACHE_FILE" > "${MOD_CACHE_FILE}.tmp" 2>/dev/null || true
-        mv "${MOD_CACHE_FILE}.tmp" "$MOD_CACHE_FILE" 2>/dev/null || true
-    fi
-    echo "${mod_id}|${name}" >> "$MOD_CACHE_FILE" 2>/dev/null || true
+    # Update in-memory cache
+    MOD_NAME_CACHE["$mod_id"]="$name"
     
     echo "$name"
 }
+
+# Load cache on startup
+load_mod_cache
 
 # -----------------------------------------------------------------------------
 # Mod List Parsing
@@ -1133,6 +1148,7 @@ mod_manager() {
                             fi
                         fi
                     fi
+                    save_mod_cache
                     return
                 fi
                 ;;
