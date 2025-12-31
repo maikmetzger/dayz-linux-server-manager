@@ -366,9 +366,37 @@ is_cmd(){ command -v "$1" >/dev/null 2>&1; }
 SUDO=""
 if [[ "${EUID}" -ne 0 ]]; then SUDO="sudo"; fi
 
-invoking_user="${SUDO_USER:-$USER}"
-invoking_home="$(getent passwd "${invoking_user}" | cut -d: -f6 || true)"
-[[ -n "${invoking_home}" ]] || invoking_home="$HOME"
+invoking_user="${SUDO_USER:-${LOGNAME:-$USER}}"
+
+# Try multiple methods to find the correct home directory
+get_user_home() {
+    local user="$1"
+    
+    # Method 1: getent passwd
+    local home
+    home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)"
+    [[ -n "$home" && -d "$home" ]] && { echo "$home"; return 0; }
+    
+    # Method 2: Check common Linux home paths
+    [[ -d "/home/$user" ]] && { echo "/home/$user"; return 0; }
+    
+    # Method 3: Use HOME if it looks valid (not /root when we expect a user)
+    if [[ -n "$HOME" && -d "$HOME" && "$HOME" != "/root" ]]; then
+        echo "$HOME"
+        return 0
+    fi
+    
+    # Method 4: If we're root but have SUDO_USER, check their home
+    if [[ -d "/home/$SUDO_USER" ]]; then
+        echo "/home/$SUDO_USER"
+        return 0
+    fi
+    
+    # Fallback to HOME
+    echo "${HOME:-/tmp}"
+}
+
+invoking_home="$(get_user_home "$invoking_user")"
 
 PUID="$(id -u "${invoking_user}")"
 PGID="$(id -g "${invoking_user}")"

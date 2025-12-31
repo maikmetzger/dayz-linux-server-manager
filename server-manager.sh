@@ -83,8 +83,38 @@ fi
 # -----------------------------------------------------------------------------
 # User Identity & Paths
 # -----------------------------------------------------------------------------
-INVOKING_USER="${SUDO_USER:-$USER}"
-INVOKING_HOME="$(getent passwd "$INVOKING_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
+# Determine the real invoking user (not root when running via sudo)
+INVOKING_USER="${SUDO_USER:-${LOGNAME:-$USER}}"
+
+# Try multiple methods to find the correct home directory
+get_user_home() {
+    local user="$1"
+    
+    # Method 1: getent passwd
+    local home
+    home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)"
+    [[ -n "$home" && -d "$home" ]] && { echo "$home"; return 0; }
+    
+    # Method 2: Check common Linux home paths
+    [[ -d "/home/$user" ]] && { echo "/home/$user"; return 0; }
+    
+    # Method 3: Use HOME if it looks valid (not /root when we expect a user)
+    if [[ -n "$HOME" && -d "$HOME" && "$HOME" != "/root" ]]; then
+        echo "$HOME"
+        return 0
+    fi
+    
+    # Method 4: If we're root but have SUDO_USER, check their home
+    if [[ -d "/home/$SUDO_USER" ]]; then
+        echo "/home/$SUDO_USER"
+        return 0
+    fi
+    
+    # Fallback to HOME
+    echo "${HOME:-/tmp}"
+}
+
+INVOKING_HOME="$(get_user_home "$INVOKING_USER")"
 
 # Standard search root: ~/servers
 SEARCH_ROOT="${INVOKING_HOME}/servers"
