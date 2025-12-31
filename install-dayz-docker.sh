@@ -7,14 +7,332 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SH_SRC="${SCRIPT_DIR}/run.sh"
 
 # ---------- styling ----------
-USE_COLOR=0
-if [[ -t 1 ]]; then USE_COLOR=1; fi
-if [[ "${USE_COLOR}" == "1" ]]; then
-  C0=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'
-  RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; BLU=$'\033[34m'; CYN=$'\033[36m'
-else
-  C0=""; BOLD=""; DIM=""; RED=""; GRN=""; YLW=""; BLU=""; CYN=""
-fi
+# -----------------------------------------------------------------------------
+# ANSI Colors - DayZ Theme (Black/Blood Red #b20000)
+# -----------------------------------------------------------------------------
+ESC=$'\033'
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+DIM="${ESC}[2m"
+
+# Colors (24-bit true color for #b20000 = RGB 178,0,0)
+BLACK="${ESC}[30m"
+RED="${ESC}[38;2;178;0;0m"          # #b20000
+GREEN="${ESC}[32m"
+YELLOW="${ESC}[33m"
+WHITE="${ESC}[37m"
+GRAY="${ESC}[90m"
+# Legacy colors for existing loggers
+CYN="${ESC}[36m"
+BLU="${ESC}[34m"
+YLW="${YELLOW}"
+GRN="${GREEN}"
+C0="${RESET}"
+
+# Backgrounds
+BG_BLACK="${ESC}[40m"
+BG_RED="${ESC}[48;2;178;0;0m"       # #b20000
+BG_DARKGRAY="${ESC}[100m"
+
+# Cursor control
+HIDE_CURSOR="${ESC}[?25l"
+SHOW_CURSOR="${ESC}[?25h"
+CLEAR_SCREEN="${ESC}[2J${ESC}[H"
+CLEAR_LINE="${ESC}[2K"
+
+# Move cursor
+move_to() { printf "${ESC}[%d;%dH" "$1" "$2"; }
+
+# -----------------------------------------------------------------------------
+# Terminal Setup
+# -----------------------------------------------------------------------------
+TERM_ROWS=24
+TERM_COLS=80
+
+get_term_size() {
+    TERM_ROWS=$(tput lines 2>/dev/null || echo 24)
+    TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+}
+
+# -----------------------------------------------------------------------------
+# TUI Drawing Functions
+# -----------------------------------------------------------------------------
+draw_header() {
+    local title="$1"
+    get_term_size
+    
+    printf "%s" "$CLEAR_SCREEN"
+    
+    # Strip ANSI codes from title to calculate actual visible length
+    local clean_title
+    clean_title=$(printf '%s' "$title" | sed $'s/\033\\[[0-9;]*m//g')
+    local title_len=${#clean_title}
+    local padding=$((TERM_COLS - title_len - 1))
+    [[ $padding -lt 0 ]] && padding=0
+    
+    # Header bar - red background full width
+    move_to 1 1
+    printf "%s%s %s%${padding}s%s" "$BG_RED" "$WHITE$BOLD" "$title" "" "$RESET"
+    
+    # Footer
+    move_to $TERM_ROWS 1
+    printf "%s%s" "$BG_DARKGRAY" "$WHITE"
+    printf " ↑↓ Navigate  Enter Select  q Quit%$((TERM_COLS-38))s" ""
+    printf "%s" "$RESET"
+}
+
+draw_box() {
+    local row=$1 col=$2 height=$3 width=$4 title="${5:-}"
+    
+    # Top border
+    move_to $row $col
+    printf "%s%s┌" "$RED" "$BOLD"
+    printf "─%.0s" $(seq 1 $((width-2)))
+    printf "┐%s" "$RESET"
+    
+    # Title
+    if [[ -n "$title" ]]; then
+        move_to $row $((col + 2))
+        printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET"
+    fi
+    
+    # Sides
+    for ((i=1; i<height-1; i++)); do
+        move_to $((row+i)) $col
+        printf "%s│%s" "$RED" "$RESET"
+        move_to $((row+i)) $((col+width-1))
+        printf "%s│%s" "$RED" "$RESET"
+    done
+    
+    # Bottom border
+    move_to $((row+height-1)) $col
+    printf "%s└" "$RED"
+    printf "─%.0s" $(seq 1 $((width-2)))
+    printf "┘%s" "$RESET"
+}
+
+# -----------------------------------------------------------------------------
+# Menu System
+# -----------------------------------------------------------------------------
+# Returns selected index in MENU_RESULT
+MENU_RESULT=0
+
+draw_menu() {
+    local _arr_name=$1
+    local selected=$2
+    local start_row=$3
+    local start_col=$4
+    local width=$5
+    
+    eval "local -a _items=(\"\${${_arr_name}[@]}\")"
+    
+    local i=0
+    for item in "${_items[@]}"; do
+        move_to $((start_row + i)) $start_col
+        
+        if [[ $i -eq $selected ]]; then
+            # Strip ANSI color codes from selected item so BG_RED covers entire line
+            local clean_item
+            clean_item="${item//\\033\[*([0-9;])m/}"
+            # Fallback: use sed if parameter expansion doesn't strip all codes
+            clean_item=$(printf '%s' "$item" | sed $'s/\033\\[[0-9;]*m//g')
+            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
+        else
+            printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
+        fi
+        ((i+=1))
+    done
+}
+
+run_menu() {
+    local _menu_arr_name=$1
+    local title="$2"
+    local selected=0
+    
+    eval "local count=\${#${_menu_arr_name}[@]}"
+    
+    [[ $count -eq 0 ]] && return 1
+    
+    printf "%s" "$HIDE_CURSOR"
+    
+    while true; do
+        get_term_size
+        draw_header "$title"
+        
+        # Draw menu box
+        local box_height=$((count + 4))
+        local box_width=$((TERM_COLS - 10))
+        local box_row=$(( (TERM_ROWS - box_height) / 2 ))
+        local box_col=$(( (TERM_COLS - box_width) / 2 ))
+        
+        draw_box $box_row $box_col $box_height $box_width
+        draw_menu "$_menu_arr_name" $selected $((box_row + 2)) $((box_col + 2)) $((box_width - 4))
+        
+        # Read key
+        IFS= read -rsn1 key
+        
+        case "$key" in
+            $'\x1b')  # Escape sequence
+                read -rsn2 -t 0.1 seq || true
+                case "$seq" in
+                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;  # Up
+                    '[B') if ((selected < count-1)); then selected=$((selected+1)); fi ;;  # Down
+                esac
+                ;;
+            '') # Enter
+                MENU_RESULT=$selected
+                printf "%s" "$SHOW_CURSOR"
+                return 0
+                ;;
+            'q'|'Q')
+                printf "%s" "$SHOW_CURSOR"
+                return 1
+                ;;
+        esac
+    done
+}
+
+# -----------------------------------------------------------------------------
+# Input Dialog
+# -----------------------------------------------------------------------------
+read_input() {
+    local prompt="$1"
+    local default="${2:-}"
+    local title="${3:-Input}"
+    local masked="${4:-0}"
+    
+    # All display output goes to /dev/tty so it renders even when captured in $()
+    exec 3>/dev/tty
+    
+    get_term_size
+    
+    printf "%s" "$CLEAR_SCREEN" >&3
+    
+    # Header bar
+    move_to 1 1 >&3
+    printf "%s%s" "$BG_RED" "$WHITE$BOLD" >&3
+    printf " %-$((TERM_COLS-1))s" "$title" >&3
+    printf "%s" "$RESET" >&3
+    
+    local box_width=60
+    [[ $box_width -gt $((TERM_COLS - 10)) ]] && box_width=$((TERM_COLS - 10))
+    local box_height=9
+    local box_row=$(( (TERM_ROWS - box_height) / 2 ))
+    local box_col=$(( (TERM_COLS - box_width) / 2 ))
+    
+    # Draw box to tty
+    move_to $box_row $box_col >&3
+    printf "%s%s┌" "$RED" "$BOLD" >&3
+    printf "─%.0s" $(seq 1 $((box_width-2))) >&3
+    printf "┐%s" "$RESET" >&3
+    
+    # Title in box
+    move_to $box_row $((box_col + 2)) >&3
+    printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET" >&3
+    
+    # Sides
+    for ((i=1; i<box_height-1; i++)); do
+        move_to $((box_row+i)) $box_col >&3
+        printf "%s│%s" "$RED" "$RESET" >&3
+        move_to $((box_row+i)) $((box_col+box_width-1)) >&3
+        printf "%s│%s" "$RED" "$RESET" >&3
+    done
+    
+    # Bottom border
+    move_to $((box_row+box_height-1)) $box_col >&3
+    printf "%s└" "$RED" >&3
+    printf "─%.0s" $(seq 1 $((box_width-2))) >&3
+    printf "┘%s" "$RESET" >&3
+    
+    # Prompt
+    move_to $((box_row + 2)) $((box_col + 3)) >&3
+    printf "%s%s%s" "$WHITE" "$prompt" "$RESET" >&3
+    
+    # Hint
+    move_to $((box_row + 4)) $((box_col + 3)) >&3
+    if [[ "$masked" == "1" ]]; then
+        printf "%s(Input hidden)%s" "$DIM" "$RESET" >&3
+    else
+        printf "%s(Empty to cancel)%s" "$DIM" "$RESET" >&3
+    fi
+    
+    # Input field
+    move_to $((box_row + 6)) $((box_col + 3)) >&3
+    printf "%s▸ %s%s" "$RED" "$RESET" "$SHOW_CURSOR" >&3
+    
+    exec 3>&-
+    
+    local input
+    if [[ "$masked" == "1" ]]; then
+        read -r -s input </dev/tty
+    else
+        read -r -e -i "$default" input </dev/tty
+    fi
+    printf "%s" "$HIDE_CURSOR" >/dev/tty
+    
+    echo "$input"
+}
+
+# -----------------------------------------------------------------------------
+# Confirmation Dialog
+# -----------------------------------------------------------------------------
+confirm() {
+    local message="$1"
+    local default="${2:-n}"
+    
+    get_term_size
+    draw_header "Confirm"
+    
+    local box_width=50
+    local box_height=7
+    local box_row=$(( (TERM_ROWS - box_height) / 2 ))
+    local box_col=$(( (TERM_COLS - box_width) / 2 ))
+    
+    draw_box $box_row $box_col $box_height $box_width
+    
+    move_to $((box_row + 2)) $((box_col + 3))
+    printf "%s%s%s" "$WHITE" "$message" "$RESET"
+    
+    move_to $((box_row + 4)) $((box_col + 3))
+    if [[ "$default" == "y" ]]; then
+        printf "%s[Y]%s/n : " "$GREEN$BOLD" "$RESET"
+    else
+        printf "y/%s[N]%s : " "$RED$BOLD" "$RESET"
+    fi
+    
+    printf "%s" "$SHOW_CURSOR"
+    read -rsn1 answer
+    printf "%s" "$HIDE_CURSOR"
+    
+    answer="${answer:-$default}"
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+# -----------------------------------------------------------------------------
+# Message Box
+# -----------------------------------------------------------------------------
+show_message() {
+    local message="$1"
+    local title="${2:-Info}"
+    
+    get_term_size
+    draw_header "$title"
+    
+    local box_width=60
+    local box_height=7
+    local box_row=$(( (TERM_ROWS - box_height) / 2 ))
+    local box_col=$(( (TERM_COLS - box_width) / 2 ))
+    
+    draw_box $box_row $box_col $box_height $box_width "$title"
+    
+    move_to $((box_row + 3)) $((box_col + 3))
+    printf "%s%s%s" "$WHITE" "$message" "$RESET"
+    
+    move_to $((box_row + 5)) $((box_col + 3))
+    printf "%s[Press any key]%s" "$DIM" "$RESET"
+    
+    read -rsn1
+}
 
 # All log output -> stderr (keeps stdout clean if you ever capture output)
 hr(){ printf "%s\n" "${DIM}------------------------------------------------------------${C0}" >&2; }
@@ -1155,6 +1473,255 @@ HOST_NETWORK=${use_host_net}
   info "Manage with: ./server-manager.sh"
 }
 
+
+# -----------------------------------------------------------------------------
+# TUI Interactive Logic
+# -----------------------------------------------------------------------------
+main_tui() {
+    local scan_root="${invoking_home}/servers"
+
+    while true; do
+        draw_header "DayZ Docker Installer"
+        
+        # Discover existing
+        mapfile -t markers < <(discover_instances_under "${scan_root}")
+        mapfile -t containers < <(list_dayz_containers)
+        
+        local -a menu_items=("Create NEW Instance")
+        
+        if [[ "${#markers[@]}" -gt 0 ]]; then
+            menu_items+=("Update run.sh for Instance")
+        else
+            menu_items+=("Update run.sh (No instances found)")
+        fi
+        
+        menu_items+=("Delete Instance/Container")
+        menu_items+=("Exit")
+        
+        if ! run_menu menu_items "Main Menu"; then exit 0; fi
+        
+        case $MENU_RESULT in
+            0) # Create
+                tui_create_instance
+                exit 0
+                ;;
+            1) # Update
+                if [[ "${#markers[@]}" -eq 0 ]]; then
+                    show_message "No marker-based instances found." "Error"
+                    continue
+                fi
+                tui_update_instance "${markers[@]}"
+                exit 0
+                ;;
+            2) # Delete
+                tui_delete_menu "${scan_root}"
+                ;;
+            3) # Exit
+                exit 0
+                ;;
+        esac
+    done
+}
+
+tui_create_instance() {
+    local name
+    # 1. Name
+    while true; do
+        name=$(read_input "Instance Name (a-z0-9-)" "${preset_name:-server1}" "Create Instance")
+        [[ -z "$name" ]] && return # Cancel
+        
+        if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,31}$ ]]; then
+            show_message "Invalid name. Use alphanumeric/dashes only." "Error"
+            continue
+        fi
+        
+        if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -qx "dayz-${name}"; then
+            if confirm "Container 'dayz-${name}' exists. Delete & Recreate?" "n"; then
+                 delete_by_name_or_container "${invoking_home}/servers" "${name}" || true
+                 break
+            else
+                 # Ask for name again
+                 continue
+            fi
+        fi
+        break
+    done
+    
+    # 2. Directory
+    local default_base="${invoking_home}/servers/dayz-${name}"
+    local default_dir="$default_base"
+    if [[ -e "$default_dir" ]]; then
+        local n=2
+        while [[ -e "${default_base}-${n}" ]]; do ((n+=1)); done
+        default_dir="${default_base}-${n}"
+    fi
+    
+    local inst_dir
+    inst_dir=$(read_input "Install Directory" "$default_dir" "Create Instance")
+    [[ -z "$inst_dir" ]] && return
+    
+    # 3. Host Net
+    local use_host_net="yes"
+    if ! confirm "Use Host Networking? (Recommended)" "y"; then
+        use_host_net="no"
+    fi
+    
+    # 4. Ports
+    local dz_port="2302"
+    local query_port="27016"
+    
+    dz_port=$(read_input "DayZ Game Port (UDP)" "${preset_dz_port:-2302}" "Network Config")
+    [[ -z "$dz_port" ]] && return
+    
+    query_port=$(read_input "Steam Query Port (UDP)" "${preset_query_port:-27016}" "Network Config")
+    [[ -z "$query_port" ]] && return
+    
+    # 5. Steam Creds
+    local steam_user steam_pass
+    steam_user=$(read_input "Steam Username (for Mods)" "anonymous" "Steam Credentials")
+    [[ -z "$steam_user" ]] && return
+    
+    steam_pass=""
+    if [[ "$steam_user" != "anonymous" ]]; then
+        steam_pass=$(read_input "Steam Password" "" "Steam Credentials" "1") # Masked
+    fi
+    
+    # 6. Admin Pass
+    local admin_pass
+    admin_pass=$(read_input "DayZ Admin Password" "changeme$(date +%s)" "Security")
+    [[ -z "$admin_pass" ]] && return
+    
+    # Summary
+    # We set CLI vars then call run_cli_mode
+    CLI_NAME="$name"
+    CLI_DIR="$inst_dir"
+    CLI_HOST_NET="$use_host_net"
+    CLI_PORT="$dz_port"
+    CLI_QUERY_PORT="$query_port"
+    CLI_STEAM_USER="$steam_user"
+    CLI_STEAM_PASS="$steam_pass"
+    CLI_ADMIN_PASS="$admin_pass"
+    CLI_SYNC_ON_START="0"
+    CLI_UPDATE_ON_START="0"
+    
+    # Exit TUI
+    printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+    hr
+    info "Configuration complete. Starting installation..."
+    hr
+    
+    # Reset existing traps or colors if needed, but run_cli_mode handles most
+    run_cli_mode
+}
+
+tui_update_instance() {
+    local -a markers=("${@}")
+    local -a items=()
+    local -a paths=()
+    
+    for m in "${markers[@]}"; do
+        local n c d
+        n="$(marker_get "${m}" "INSTANCE_NAME")"
+        c="$(marker_get "${m}" "CONTAINER_NAME")"
+        d="$(dirname "${m}")"
+        items+=("${n:-?} (${d})")
+        paths+=("$d")
+    done
+    items+=("Cancel")
+    
+    if run_menu items "Update run.sh - Select Instance"; then
+        if [[ $MENU_RESULT -lt ${#paths[@]} ]]; then
+            local chosen="${paths[$MENU_RESULT]}"
+            printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+            update_run_sh_only "$chosen"
+        fi
+    fi
+}
+
+tui_delete_menu() {
+    local scan_root="$1"
+    local choices=("Marker-based Instances" "Containers detected by Docker" "Results from Scan Root" "Back")
+    
+    while true; do
+        if ! run_menu choices "Delete Instance"; then return; fi
+        
+        case $MENU_RESULT in
+            0) # Marker-based
+                mapfile -t markers < <(discover_instances_under "${scan_root}")
+                if [[ ${#markers[@]} -eq 0 ]]; then
+                    show_message "No instances found."
+                    continue
+                fi
+                local -a items=()
+                local -a paths=()
+                for m in "${markers[@]}"; do
+                    local n c d
+                    n="$(marker_get "${m}" "INSTANCE_NAME")"
+                    d="$(dirname "${m}")"
+                    items+=("${n} ($d)")
+                    paths+=("$d")
+                done
+                items+=("Back")
+                
+                if run_menu items "Select Instance to DELETE"; then
+                    [[ $MENU_RESULT -eq ${#paths[@]} ]] && continue
+                    
+                    local p="${paths[$MENU_RESULT]}"
+                    if confirm "DELETE directory and data: $p?" "n"; then
+                        printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+                        collect_presets_from_dir "$p"
+                        delete_instance_dir "$p"
+                        
+                        # Recreate?
+                        if confirm "Recreate with same settings?" "y"; then
+                             tui_create_instance_from_preset
+                             return 
+                        fi
+                        return
+                    fi
+                fi
+                ;;
+            1) # Containers
+                mapfile -t containers < <(list_dayz_containers)
+                 if [[ ${#containers[@]} -eq 0 ]]; then
+                    show_message "No containers found."
+                    continue
+                fi
+                local -a c_items=("${containers[@]}" "Back")
+                 if run_menu c_items "Select Container to DELETE"; then
+                    [[ $MENU_RESULT -eq ${#containers[@]} ]] && continue
+                    
+                    local ctn="${containers[$MENU_RESULT]}"
+                    if confirm "DELETE container $ctn?" "n"; then
+                         printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+                         collect_presets_from_container "$ctn"
+                         delete_container_only "$ctn"
+                         
+                         if confirm "Recreate with same settings?" "y"; then
+                             tui_create_instance_from_preset
+                             return
+                        fi
+                        return
+                    fi
+                 fi
+                 ;;
+            2) # Scan Root
+                 show_message "Feature not implemented."
+                 ;;
+            3) return ;;
+        esac
+    done
+}
+
+tui_create_instance_from_preset() {
+    # Helper to jumpstart creation with loaded presets
+    # run_cli_mode logic will use presets if vars are not set?? 
+    # No, run_cli_mode uses CLI variables.
+    # We must populate CLI variables from presets where applicable or re-prompt.
+    # Actually tui_create_instance uses `preset_name` etc as defaults.
+    tui_create_instance
+}
+
 main() {
   parse_args "$@"
   
@@ -1165,219 +1732,20 @@ main() {
 
   if [[ "${DOCKER_GROUP_ADDED_THIS_RUN}" == "1" && "${EUID}" -ne 0 ]]; then
     hr
-    warn "Docker group membership was changed during this run, but your current session is not refreshed yet."
-    warn "To prevent 'permission denied' errors on /var/run/docker.sock, the installer will now exit BEFORE creating any DayZ instance folders/files."
-    info "Do ONE of the following, then re-run this installer:"
-    info "  1) Log out and log back in"
-    info "  2) Or run in this terminal: newgrp docker"
-    info "Then re-run:"
-    info "  $0"
-    hr
+    warn "Docker group membership changed. Please re-login or run 'newgrp docker'."
     exit 0
   fi
 
-  # CLI mode branch - run non-interactively if args provided
   if [[ "${CLI_MODE}" == "1" ]]; then
     run_cli_mode
     exit 0
   fi
-
-  step "Step: Discovering existing DayZ instances"
-  local scan_root="${invoking_home}/servers"
-  info "Scanning under: ${scan_root}"
-
-  mapfile -t markers < <(discover_instances_under "${scan_root}")
-  mapfile -t containers < <(list_dayz_containers)
-
-  if [[ "${#markers[@]}" -gt 0 || "${#containers[@]}" -gt 0 ]]; then
-    if [[ "${#markers[@]}" -gt 0 ]]; then
-      ok "Found existing instances (marker-based):"
-      for m in "${markers[@]}"; do
-        local n c d
-        n="$(marker_get "${m}" "INSTANCE_NAME")"
-        c="$(marker_get "${m}" "CONTAINER_NAME")"
-        d="$(dirname "${m}")"
-        printf "  - %s (%s) at %s\n" "${n:-?}" "${c:-?}" "${d}" >&2
-      done
-    else
-      warn "No .dayz-instance markers found under ${scan_root}."
-    fi
-
-    if [[ "${#containers[@]}" -gt 0 ]]; then
-      ok "Found existing DayZ containers:"
-      for ctn in "${containers[@]}"; do
-        local wd=""
-        wd="$(compose_workdir_for_container "${ctn}")"
-        if [[ -n "${wd}" ]]; then
-          printf "  - %s (compose dir: %s)\n" "${ctn}" "${wd}" >&2
-        else
-          printf "  - %s\n" "${ctn}" >&2
-        fi
-      done
-    fi
-
-    hr
-    info "Choose action:"
-    info "  [1] Create NEW instance (does not touch existing containers/data)"
-    if [[ "${#markers[@]}" -gt 0 ]]; then
-      info "  [2] Update run.sh only for an existing marker-based instance"
-    else
-      info "  [2] Update run.sh only (unavailable: no markers found)"
-    fi
-    info "  [3] Delete an existing instance/container, then optionally recreate with same name"
-    info "  [4] Exit"
-    local choice=""
-    read -r -p "Select [1/2/3/4]: " choice || true
-    case "${choice}" in
-      1) ;;
-      2)
-        [[ "${#markers[@]}" -gt 0 ]] || die "No marker-based instances found to update."
-        local -a inst_dirs=()
-        for m in "${markers[@]}"; do inst_dirs+=( "$(dirname "${m}")" ); done
-        local chosen_dir
-        chosen_dir="$(select_from_list "${inst_dirs[@]}")"
-        update_run_sh_only "${chosen_dir}"
-        exit 0
-        ;;
-      3)
-        hr
-        info "Delete by:"
-        if [[ "${#markers[@]}" -gt 0 ]]; then
-          info "  [1] Marker-based instance (deletes container + directory)"
-        else
-          info "  [1] Marker-based instance (unavailable: no markers found)"
-        fi
-        if [[ "${#containers[@]}" -gt 0 ]]; then
-          info "  [2] Container (deletes container; deletes compose dir if detected and confirmed)"
-        else
-          info "  [2] Container (unavailable: no containers found)"
-        fi
-        info "  [3] Back"
-        local del_choice=""
-        read -r -p "Select [1/2/3]: " del_choice || true
-        case "${del_choice}" in
-          1)
-            [[ "${#markers[@]}" -gt 0 ]] || die "No marker-based instances found to delete."
-            local -a inst_dirs=()
-            for m in "${markers[@]}"; do inst_dirs+=( "$(dirname "${m}")" ); done
-            local del_dir
-            del_dir="$(select_from_list "${inst_dirs[@]}")"
-
-            collect_presets_from_dir "${del_dir}"
-            delete_instance_dir "${del_dir}" || exit 0
-
-            if ! prompt_yn "Recreate a fresh instance with the same name '${preset_name}' now?" "Y"; then
-              exit 0
-            fi
-            ;;
-          2)
-            [[ "${#containers[@]}" -gt 0 ]] || die "No DayZ containers found to delete."
-            local del_ctn
-            del_ctn="$(select_from_list "${containers[@]}")"
-
-            collect_presets_from_container "${del_ctn}"
-            delete_container_only "${del_ctn}" || exit 0
-
-            if ! prompt_yn "Recreate a fresh instance with the same name '${preset_name}' now?" "Y"; then
-              exit 0
-            fi
-            ;;
-          3) ;;
-          *) die "Invalid selection." ;;
-        esac
-        ;;
-      4) exit 0 ;;
-      *) die "Invalid selection." ;;
-    esac
-  fi
-
-  step "Step: DayZ docker setup parameters"
-
-  local name
-  while true; do
-    name="$(prompt_default "Instance name (letters/numbers/dash, e.g. server1)" "${preset_name:-server1}")"
-    [[ "${name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,31}$ ]] || { warn "Invalid name."; continue; }
-
-    if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -qx "dayz-${name}"; then
-      warn "Container already exists: dayz-${name}."
-      if prompt_yn "Delete existing '${name}' and recreate with the SAME name now?" "N"; then
-        delete_by_name_or_container "${scan_root}" "${name}" || true
-        break
-      fi
-      continue
-    fi
-    break
-  done
-
-  local base_dir="${invoking_home}/servers/dayz-${name}"
-  local default_dir=""
-
-  if [[ -n "${preset_dir}" && ! -e "${preset_dir}" ]]; then
-    default_dir="${preset_dir}"
-  else
-    default_dir="${base_dir}"
-    if [[ -e "${default_dir}" ]]; then
-      local n=2
-      while [[ -e "${base_dir}-${n}" ]]; do ((n++)); done
-      default_dir="${base_dir}-${n}"
-    fi
-  fi
-
-  local inst_dir
-  inst_dir="$(prompt_default "Install directory for this instance" "${default_dir}")"
-
-  local use_host_net="yes"
-  if prompt_yn "Use host networking? Recommended for game servers + UFW behavior." "Y"; then
-    use_host_net="yes"
-  else
-    use_host_net="no"
-  fi
-
-  local dz_port query_port
-  dz_port="$(prompt_default "DayZ game port (UDP base, will use +0..+3)" "${preset_dz_port:-2302}")"
-  [[ "${dz_port}" =~ ^[0-9]+$ ]] || die "Invalid port."
-  query_port="$(prompt_default "Steam query port (UDP)" "${preset_query_port:-27016}")"
-  [[ "${query_port}" =~ ^[0-9]+$ ]] || die "Invalid query port."
-
-  step "Step: Steam credentials"
-  info "For Workshop mods you need a Steam account; credentials are stored in .env (chmod 600)."
-  local steam_user steam_pass
-  steam_user="$(prompt_default "Steam username (required for Workshop mod downloads)" "anonymous")"
-  steam_pass=""
-  if [[ "${steam_user}" != "anonymous" ]]; then
-    read -r -s -p "Steam password: " steam_pass; echo ""
-  else
-    warn "Mods will not download as anonymous."
-  fi
-
-  local extra_params
-  extra_params="$(prompt_default "Extra DayZ start params (optional)" "${preset_extra_params:-}")"
-
-  local sync_on_start update_on_start
-  sync_on_start="0"; update_on_start="0"
-  if prompt_yn "Auto-sync mods on container start? (downloads on start)" "N"; then sync_on_start="1"; fi
-  if prompt_yn "Auto-update server on container start?" "N"; then update_on_start="1"; fi
-
-  configure_ufw "${dz_port}" "${query_port}" "${inst_dir}"
-  create_instance "${inst_dir}" "${name}" "${use_host_net}" "${dz_port}" "${query_port}" "${steam_user}" "${steam_pass}" "${extra_params}" "${sync_on_start}" "${update_on_start}"
-
-  step "Step: Building image"
-  run_shell "cd '${inst_dir}' && ${DOCKER[*]} compose build --no-cache"
-
-  if prompt_yn "Start the server container now?" "Y"; then
-    step "Step: Starting container"
-    run_shell "cd '${inst_dir}' && ${DOCKER[*]} compose up -d"
-    ok "Started: dayz-${name}"
-    info "Logs: cd '${inst_dir}' && ${DOCKER[*]} compose logs -f --tail=200"
-  else
-    info "Start later: cd '${inst_dir}' && ${DOCKER[*]} compose up -d"
-  fi
-
-  hr
-  ok "Inside-container commands (examples):"
-  info "  ${DOCKER[*]} exec -it dayz-${name} /dayz/run.sh status"
-  info "  ${DOCKER[*]} exec -it dayz-${name} /dayz/run.sh mod add 1559212036 1564026768"
-  info "  ${DOCKER[*]} exec -it dayz-${name} /dayz/run.sh sync-mods"
+  
+  # Start TUI
+  main_tui
 }
 
+# Run
 main "$@"
+
+
