@@ -253,7 +253,9 @@ draw_menu() {
         if [[ $i -eq $selected ]]; then
             # Strip ANSI color codes from selected item so BG_RED covers entire line
             local clean_item
-            clean_item=$(echo -e "$item" | sed 's/\x1b\[[0-9;]*m//g')
+            clean_item="${item//\\033\[*([0-9;])m/}"
+            # Fallback: use sed if parameter expansion doesn't strip all codes
+            clean_item=$(printf '%s' "$item" | sed $'s/\033\\[[0-9;]*m//g')
             printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
         else
             printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
@@ -521,6 +523,9 @@ mod_manager() {
             else
                 sed -i "s/^[[:space:]]*#[[:space:]]*${mid}[[:space:]]*$/${mid}/" "$mods_file"
             fi
+        elif [[ $MENU_RESULT -eq $mod_count ]]; then
+            # Separator - ignore
+            :
         elif [[ $MENU_RESULT -eq $((mod_count + 1)) ]]; then
             # Add mod
             local new_id
@@ -547,7 +552,8 @@ mod_manager() {
             else
                 run_with_output "Syncing Mods" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh sync-mods
             fi
-        else
+        elif [[ $MENU_RESULT -eq $((mod_count + 3)) ]]; then
+            # Back
             return
         fi
     done
