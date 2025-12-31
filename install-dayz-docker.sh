@@ -43,6 +43,14 @@ CLEAR_LINE="${ESC}[2K"
 # Move cursor
 move_to() { printf "${ESC}[%d;%dH" "$1" "$2"; }
 
+cleanup() {
+    printf "%s" "$SHOW_CURSOR"
+    tput sgr0 2>/dev/null || true
+    stty echo 2>/dev/null || true
+    printf "%s" "$CLEAR_SCREEN"
+}
+trap cleanup EXIT
+
 # -----------------------------------------------------------------------------
 # Terminal Setup
 # -----------------------------------------------------------------------------
