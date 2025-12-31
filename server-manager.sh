@@ -279,7 +279,7 @@ draw_menu() {
             clean_item="${item//\\033\[*([0-9;])m/}"
             # Fallback: use sed if parameter expansion doesn't strip all codes
             clean_item=$(printf '%s' "$item" | sed $'s/\033\\[[0-9;]*m//g')
-            printf "%s%s > %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
+            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
         else
             printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
         fi
@@ -506,8 +506,8 @@ select_instance() {
         local status
         status="$(get_container_status "$container")"
         
-        local status_icon="${RED}[-]${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}[*]${RESET}"
+        local status_icon="${RED}○${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
         
         items+=("$status_icon $name [$status]")
     done
@@ -671,17 +671,17 @@ mod_manager() {
             
             local status_icon type_label type_short
             case "$mtype" in
-                both)     status_icon="+"; type_label="[C+S]"; type_short="C+S" ;;
-                client)   status_icon="+"; type_label="[Cli]"; type_short="Cli" ;;
-                server)   status_icon="+"; type_label="[Srv]"; type_short="Srv" ;;
-                disabled) status_icon="x"; type_label="[Off]"; type_short="Off" ;;
+                both)     status_icon="✓"; type_label="[C+S]"; type_short="C+S" ;;
+                client)   status_icon="✓"; type_label="[Cli]"; type_short="Cli" ;;
+                server)   status_icon="✓"; type_label="[Srv]"; type_short="Srv" ;;
+                disabled) status_icon="✗"; type_label="[Off]"; type_short="Off" ;;
             esac
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
                 # Selected row - full red background with status icon
                 printf "%s%s" "$BG_RED" "$WHITE$BOLD"
-                printf " > %s  " "$status_icon"
+                printf " ▶ %s  " "$status_icon"
                 printf "%-$((col_id - col_name - 2))s" "$mname"
                 printf "%-14s" "$mid"
                 printf "[%s]" "$type_short"
@@ -822,20 +822,20 @@ main_menu() {
         status="$(get_container_status "$SELECTED_CONTAINER")"
         
         local status_text="${RED}STOPPED${RESET}"
-        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}[*] RUNNING${RESET}"
+        [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${RESET}"
         
         local -a items=(
-            "[>] Start Server"
-            "[=] Stop Server"
-            "[r] Restart Server"
+            "▶  Start Server"
+            "■  Stop Server"
+            "↻  Restart Server"
             "--------------------"
-            "[L] View Logs"
-            "[S] Enter Shell"
+            "📋 View Logs"
+            "💻 Enter Shell"
             "--------------------"
-            "[M] Manage Mods"
-            "[U] Update Server"
+            "🔧 Manage Mods"
+            "⬆  Update Server"
             "--------------------"
-            "[<] Switch Instance"
+            "← Switch Instance"
         )
         
         if ! run_menu items "DayZ: $SELECTED_NAME [$status_text]"; then
