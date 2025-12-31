@@ -789,8 +789,18 @@ mod_manager() {
     [[ -f "$servermods_file" ]] || touch "$servermods_file"
     
     local selected=0
+    local dirty=0
     
     while true; do
+        get_term_size
+        
+        # ... (rest of function until read input) ...
+        # (Wait, I need to preserve the loop body. This replaces lines 786-1082 is too big. I should use multi replace or target smaller chunks.)
+        # Skipping large block replacement. I will insert 'dirty=1' logic at modification points and 'prompt' at exit.
+        # Let's do multiple chunks logic.
+        
+    done
+}
         get_term_size
         
         # Get all unique mod IDs from both files
@@ -1004,6 +1014,7 @@ mod_manager() {
                      local mid="${mod_ids[$selected]}"
                      move_mod_up "$mid" "$mods_file" "$servermods_file"
                      selected=$((selected - 1))
+                     dirty=1
                 fi
                 continue
                 ;;
@@ -1012,6 +1023,7 @@ mod_manager() {
                      local mid="${mod_ids[$selected]}"
                      move_mod_down "$mid" "$mods_file" "$servermods_file"
                      selected=$((selected + 1))
+                     dirty=1
                 fi
                 continue
                 ;;
@@ -1026,6 +1038,7 @@ mod_manager() {
                         server) add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
+                    dirty=1
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
                     local new_id
@@ -1034,6 +1047,7 @@ mod_manager() {
                         if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
                             echo "$new_id" >> "$mods_file"
                             show_message "Added mod $new_id as [Client]" "Mod Added"
+                            dirty=1
                         else
                             show_message "Mod already in list" "Already Exists"
                         fi
@@ -1049,6 +1063,17 @@ mod_manager() {
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Back
+                    if [[ $dirty -eq 1 ]]; then
+                        if confirm "Mods changed. Run Sync now?" "y"; then
+                            local status
+                            status="$(get_container_status "$SELECTED_CONTAINER")"
+                            if [[ "$status" != "RUNNING" ]]; then
+                                show_message "Container must be running to sync"
+                            else
+                                run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                            fi
+                        fi
+                    fi
                     return
                 fi
                 ;;
@@ -1059,6 +1084,7 @@ mod_manager() {
                     if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
                         echo "$new_id" >> "$mods_file"
                         show_message "Added mod $new_id as [Client]" "Mod Added"
+                        dirty=1
                     else
                         show_message "Mod already in list" "Already Exists"
                     fi
@@ -1074,6 +1100,17 @@ mod_manager() {
                 fi
                 ;;
             'q'|'Q')
+                if [[ $dirty -eq 1 ]]; then
+                    if confirm "Mods changed. Run Sync now?" "y"; then
+                        local status
+                        status="$(get_container_status "$SELECTED_CONTAINER")"
+                        if [[ "$status" != "RUNNING" ]]; then
+                            show_message "Container must be running to sync"
+                        else
+                            run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                        fi
+                    fi
+                fi
                 return
                 ;;
         esac
@@ -1303,8 +1340,12 @@ main() {
     
     printf "%s" "$HIDE_CURSOR"
     
-    select_instance
-    main_menu
+    local selection=0
+    
+    while true; do
+        select_instance
+        main_menu
+    done
 }
 
 main "$@"
