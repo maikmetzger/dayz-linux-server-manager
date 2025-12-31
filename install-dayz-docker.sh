@@ -719,7 +719,445 @@ update_run_sh_only() {
   fi
 }
 
+# =============================================================================
+# CLI Mode Support
+# =============================================================================
+
+CLI_MODE=0
+CLI_NAME=""
+CLI_DIR=""
+CLI_PORT=""
+CLI_QUERY_PORT=""
+CLI_HOST_NET=""
+CLI_STEAM_USER=""
+CLI_STEAM_PASS=""
+CLI_ADMIN_PASS=""
+CLI_EXTRA_PARAMS=""
+CLI_SYNC_ON_START=""
+CLI_UPDATE_ON_START=""
+CLI_NO_UFW=0
+CLI_NO_START=0
+
+show_usage() {
+  cat <<'EOF'
+DayZ Docker Server Installer
+
+USAGE:
+  ./install-dayz-docker.sh                    # Interactive wizard mode
+  ./install-dayz-docker.sh [OPTIONS]          # CLI mode (non-interactive)
+
+REQUIRED OPTIONS (CLI mode):
+  --steam-user <user>     Steam account username (for Workshop mods)
+  --steam-pass <pass>     Steam account password
+  --admin-pass <pass>     Server admin password (passwordAdmin in serverDZ.cfg)
+
+OPTIONAL OPTIONS:
+  --name <name>           Instance name (default: server1)
+  --dir <path>            Install directory (default: ~/servers/dayz-<name>)
+  --port <port>           Game port UDP (default: 2302)
+  --query-port <port>     Steam query port UDP (default: 27016)
+  --host-net              Use host networking (default)
+  --no-host-net           Use bridge networking
+  --extra-params <str>    Extra DayZ launch parameters
+  --sync-on-start         Auto-sync mods on container start
+  --update-on-start       Auto-update server on container start
+  --no-ufw                Skip UFW firewall configuration
+  --no-start              Don't start container after creation
+  -h, --help              Show this help
+
+EXAMPLES:
+  # Quick install with defaults:
+  ./install-dayz-docker.sh --steam-user myuser --steam-pass mypass --admin-pass myadmin
+
+  # Custom ports and name:
+  ./install-dayz-docker.sh --steam-user myuser --steam-pass mypass --admin-pass myadmin \
+    --name vanilla --port 2402 --query-port 27017
+
+  # Full non-interactive install:
+  ./install-dayz-docker.sh \
+    --steam-user myuser \
+    --steam-pass mypass \
+    --admin-pass secretadmin \
+    --name modded \
+    --port 2302 \
+    --sync-on-start \
+    --no-start
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        show_usage
+        exit 0
+        ;;
+      --steam-user)
+        CLI_STEAM_USER="$2"
+        shift 2
+        ;;
+      --steam-pass)
+        CLI_STEAM_PASS="$2"
+        shift 2
+        ;;
+      --admin-pass)
+        CLI_ADMIN_PASS="$2"
+        shift 2
+        ;;
+      --name)
+        CLI_NAME="$2"
+        shift 2
+        ;;
+      --dir)
+        CLI_DIR="$2"
+        shift 2
+        ;;
+      --port)
+        CLI_PORT="$2"
+        shift 2
+        ;;
+      --query-port)
+        CLI_QUERY_PORT="$2"
+        shift 2
+        ;;
+      --host-net)
+        CLI_HOST_NET="yes"
+        shift
+        ;;
+      --no-host-net)
+        CLI_HOST_NET="no"
+        shift
+        ;;
+      --extra-params)
+        CLI_EXTRA_PARAMS="$2"
+        shift 2
+        ;;
+      --sync-on-start)
+        CLI_SYNC_ON_START="1"
+        shift
+        ;;
+      --update-on-start)
+        CLI_UPDATE_ON_START="1"
+        shift
+        ;;
+      --no-ufw)
+        CLI_NO_UFW=1
+        shift
+        ;;
+      --no-start)
+        CLI_NO_START=1
+        shift
+        ;;
+      *)
+        die "Unknown option: $1. Use --help for usage."
+        ;;
+    esac
+  done
+
+  # If any CLI args were provided, we're in CLI mode
+  if [[ -n "${CLI_STEAM_USER}" || -n "${CLI_STEAM_PASS}" || -n "${CLI_ADMIN_PASS}" || 
+        -n "${CLI_NAME}" || -n "${CLI_DIR}" || -n "${CLI_PORT}" ]]; then
+    CLI_MODE=1
+  fi
+
+  # Validate required args in CLI mode
+  if [[ "${CLI_MODE}" == "1" ]]; then
+    [[ -n "${CLI_STEAM_USER}" ]] || die "CLI mode requires --steam-user"
+    [[ -n "${CLI_STEAM_PASS}" ]] || die "CLI mode requires --steam-pass"
+    [[ -n "${CLI_ADMIN_PASS}" ]] || die "CLI mode requires --admin-pass"
+    
+    # Apply defaults for optional params
+    CLI_NAME="${CLI_NAME:-server1}"
+    CLI_PORT="${CLI_PORT:-2302}"
+    CLI_QUERY_PORT="${CLI_QUERY_PORT:-27016}"
+    CLI_HOST_NET="${CLI_HOST_NET:-yes}"
+    CLI_SYNC_ON_START="${CLI_SYNC_ON_START:-0}"
+    CLI_UPDATE_ON_START="${CLI_UPDATE_ON_START:-0}"
+    
+    # Validate
+    [[ "${CLI_NAME}" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,31}$ ]] || die "Invalid --name: must be alphanumeric with dashes, max 32 chars"
+    [[ "${CLI_PORT}" =~ ^[0-9]+$ ]] || die "Invalid --port: must be a number"
+    [[ "${CLI_QUERY_PORT}" =~ ^[0-9]+$ ]] || die "Invalid --query-port: must be a number"
+  fi
+}
+
+run_cli_mode() {
+  step "CLI Mode: Creating DayZ instance"
+  
+  local name="${CLI_NAME}"
+  local inst_dir="${CLI_DIR:-${invoking_home}/servers/dayz-${name}}"
+  local dz_port="${CLI_PORT}"
+  local query_port="${CLI_QUERY_PORT}"
+  local use_host_net="${CLI_HOST_NET}"
+  local steam_user="${CLI_STEAM_USER}"
+  local steam_pass="${CLI_STEAM_PASS}"
+  local extra_params="${CLI_EXTRA_PARAMS:-}"
+  local sync_on_start="${CLI_SYNC_ON_START}"
+  local update_on_start="${CLI_UPDATE_ON_START}"
+  
+  info "Instance name:    ${name}"
+  info "Install dir:      ${inst_dir}"
+  info "Game port:        ${dz_port}"
+  info "Query port:       ${query_port}"
+  info "Host networking:  ${use_host_net}"
+  
+  # Check if container already exists
+  if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -qx "dayz-${name}"; then
+    die "Container 'dayz-${name}' already exists. Use a different --name or remove it first."
+  fi
+  
+  # Check if directory exists
+  if [[ -e "${inst_dir}/.dayz-instance" ]]; then
+    die "Instance marker exists at ${inst_dir}. Remove it or choose a different --dir."
+  fi
+  
+  # UFW
+  if [[ "${CLI_NO_UFW}" != "1" ]]; then
+    configure_ufw "${dz_port}" "${query_port}" "${inst_dir}"
+  else
+    info "Skipping UFW configuration (--no-ufw)"
+  fi
+  
+  # Create instance - use CLI_ADMIN_PASS instead of prompting
+  step "Step: Creating instance files"
+  info "Instance directory: ${inst_dir}"
+  info "Container name:      dayz-${name}"
+  
+  local container_name="dayz-${name}"
+  
+  mkdir -p "${inst_dir}/data/serverfiles" "${inst_dir}/data/config" "${inst_dir}/data/profile" "${inst_dir}/data/state" "${inst_dir}/data/backups"
+  chmod 700 "${inst_dir}/data" "${inst_dir}/data/config" "${inst_dir}/data/state" || true
+  
+  [[ -f "${RUN_SH_SRC}" ]] || die "Missing ${RUN_SH_SRC}. Put run.sh next to install-dayz-docker.sh."
+  cp -f "${RUN_SH_SRC}" "${inst_dir}/run.sh"
+  chmod +x "${inst_dir}/run.sh"
+  sed -i 's/\r$//' "${inst_dir}/run.sh"
+  
+  write_file "${inst_dir}/data/config/serverDZ.cfg" \
+"hostname = \"DayZ ${name}\";
+password = \"\";
+passwordAdmin = \"${CLI_ADMIN_PASS}\";
+maxPlayers = 30;
+verifySignatures = 2;
+forceSameBuild = 1;
+persistent = 1;
+instanceId = 1;
+
+steamQueryPort = ${query_port};
+
+class Missions { class DayZ { template = \"dayzOffline.chernarusplus\"; }; };
+"
+  chmod 600 "${inst_dir}/data/config/serverDZ.cfg"
+  
+  write_file "${inst_dir}/data/config/BEServer_x64.cfg" \
+"RConPassword CHANGEME_RCON_PASSWORD
+RConPort $((dz_port+3))
+RestrictRCon 1
+"
+  chmod 600 "${inst_dir}/data/config/BEServer_x64.cfg"
+  
+  [[ -f "${inst_dir}/data/config/mods.txt" ]] || write_file "${inst_dir}/data/config/mods.txt" "# one Workshop ID per line\n"
+  [[ -f "${inst_dir}/data/config/servermods.txt" ]] || write_file "${inst_dir}/data/config/servermods.txt" "# one Workshop ID per line\n"
+  chmod 600 "${inst_dir}/data/config/mods.txt" "${inst_dir}/data/config/servermods.txt" || true
+  
+  write_file "${inst_dir}/Dockerfile" \
+"FROM debian:bullseye-slim
+ARG PUID=1000
+ARG PGID=1000
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \\
+&& apt-get install -y --no-install-recommends \\
+    ca-certificates curl jq \\
+    lib32gcc-s1 libstdc++6 libcurl4 \\
+    libtbb2 \\
+    procps iproute2 \\
+    tini tar gzip unzip \\
+&& rm -rf /var/lib/apt/lists/*
+RUN groupadd -g \${PGID} dayz \\
+&& useradd -u \${PUID} -g \${PGID} -m -d /dayz dayz \\
+&& mkdir -p /dayz /opt/steamcmd \\
+&& chown -R dayz:dayz /dayz /opt/steamcmd
+RUN curl -fsSL \"https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\" -o /tmp/steamcmd.tar.gz \\
+&& tar -xzf /tmp/steamcmd.tar.gz -C /opt/steamcmd \\
+&& rm -f /tmp/steamcmd.tar.gz \\
+&& chmod -R a+rX /opt/steamcmd \\
+&& chmod +x /opt/steamcmd/steamcmd.sh \\
+&& find /opt/steamcmd -type f -name steamcmd -exec chmod +x {} \\; || true \\
+&& chown -R dayz:dayz /opt/steamcmd
+ENV STEAMCMD=/opt/steamcmd/steamcmd.sh
+ENV HOME=/dayz
+WORKDIR /dayz
+USER dayz
+ENTRYPOINT [\"/usr/bin/tini\",\"--\"]
+"
+
+  write_file "${inst_dir}/.env" \
+"PUID=${PUID}
+PGID=${PGID}
+INSTANCE_NAME=$(env_quote "${name}")
+CONTAINER_NAME=$(env_quote "dayz-${name}")
+
+APPID=223350
+WORKSHOP_APPID=221100
+
+DZ_PORT=${dz_port}
+DZ_QUERY_PORT=${query_port}
+DZ_EXTRA_PARAMS=$(env_quote "${extra_params}")
+
+STEAM_USER=$(env_quote "${steam_user}")
+STEAM_PASS=$(env_quote "${steam_pass}")
+
+DZ_SYNC_ON_START=${sync_on_start}
+DZ_UPDATE_ON_START=${update_on_start}
+"
+  chmod 600 "${inst_dir}/.env"
+  
+  local restart_policy="on-failure:5"
+  
+  if [[ "${use_host_net}" == "yes" ]]; then
+    write_file "${inst_dir}/docker-compose.yml" \
+"services:
+  dayz:
+    build:
+      context: .
+      args:
+        PUID: \${PUID}
+        PGID: \${PGID}
+    container_name: \${CONTAINER_NAME}
+    restart: ${restart_policy}
+    network_mode: host
+    stop_signal: SIGINT
+    stop_grace_period: 90s
+    user: \"\${PUID}:\${PGID}\"
+    environment:
+      HOME: /dayz
+      APPID: \${APPID}
+      WORKSHOP_APPID: \${WORKSHOP_APPID}
+      STEAM_USER: \${STEAM_USER}
+      STEAM_PASS: \${STEAM_PASS}
+      DZ_PORT: \${DZ_PORT}
+      DZ_QUERY_PORT: \${DZ_QUERY_PORT}
+      DZ_EXTRA_PARAMS: \${DZ_EXTRA_PARAMS}
+      DZ_SYNC_ON_START: \${DZ_SYNC_ON_START}
+      DZ_UPDATE_ON_START: \${DZ_UPDATE_ON_START}
+      DZ_SERVERFILES: /dayz/serverfiles
+      DZ_CONFIG_DIR: /dayz/config
+      DZ_PROFILE: /dayz/profile
+      DZ_STATE: /dayz/state
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - ./data/serverfiles:/dayz/serverfiles
+      - ./data/config:/dayz/config
+      - ./data/profile:/dayz/profile
+      - ./data/state:/dayz/state
+      - ./data/backups:/dayz/backups
+      - ./run.sh:/dayz/run.sh:ro
+    command: [\"/dayz/run.sh\",\"foreground\"]
+    healthcheck:
+      test: [\"CMD-SHELL\",\"pgrep -f DayZServer >/dev/null || exit 1\"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+"
+  else
+    write_file "${inst_dir}/docker-compose.yml" \
+"services:
+  dayz:
+    build:
+      context: .
+      args:
+        PUID: \${PUID}
+        PGID: \${PGID}
+    container_name: \${CONTAINER_NAME}
+    restart: ${restart_policy}
+    stop_signal: SIGINT
+    stop_grace_period: 90s
+    user: \"\${PUID}:\${PGID}\"
+    ports:
+      - \"\${DZ_PORT}:\${DZ_PORT}/udp\"
+      - \"$((dz_port+1)):$((dz_port+1))/udp\"
+      - \"$((dz_port+2)):$((dz_port+2))/udp\"
+      - \"$((dz_port+3)):$((dz_port+3))/udp\"
+      - \"\${DZ_QUERY_PORT}:\${DZ_QUERY_PORT}/udp\"
+    environment:
+      HOME: /dayz
+      APPID: \${APPID}
+      WORKSHOP_APPID: \${WORKSHOP_APPID}
+      STEAM_USER: \${STEAM_USER}
+      STEAM_PASS: \${STEAM_PASS}
+      DZ_PORT: \${DZ_PORT}
+      DZ_QUERY_PORT: \${DZ_QUERY_PORT}
+      DZ_EXTRA_PARAMS: \${DZ_EXTRA_PARAMS}
+      DZ_SYNC_ON_START: \${DZ_SYNC_ON_START}
+      DZ_UPDATE_ON_START: \${DZ_UPDATE_ON_START}
+      DZ_SERVERFILES: /dayz/serverfiles
+      DZ_CONFIG_DIR: /dayz/config
+      DZ_PROFILE: /dayz/profile
+      DZ_STATE: /dayz/state
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - ./data/serverfiles:/dayz/serverfiles
+      - ./data/config:/dayz/config
+      - ./data/profile:/dayz/profile
+      - ./data/state:/dayz/state
+      - ./data/backups:/dayz/backups
+      - ./run.sh:/dayz/run.sh:ro
+    command: [\"/dayz/run.sh\",\"foreground\"]
+    healthcheck:
+      test: [\"CMD-SHELL\",\"pgrep -f DayZServer >/dev/null || exit 1\"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+"
+  fi
+  
+  write_file "${inst_dir}/.dayz-instance" \
+"INSTANCE_NAME=${name}
+CONTAINER_NAME=dayz-${name}
+DIR=${inst_dir}
+DZ_PORT=${dz_port}
+DZ_QUERY_PORT=${query_port}
+HOST_NETWORK=${use_host_net}
+"
+  chmod 600 "${inst_dir}/.dayz-instance" || true
+  
+  if [[ "${EUID}" -eq 0 ]]; then
+    chown -R "${invoking_user}:${invoking_user}" "${inst_dir}" || true
+  fi
+  
+  ok "Instance created."
+  
+  # Build image
+  step "Step: Building image"
+  run_shell "cd '${inst_dir}' && ${DOCKER[*]} compose build --no-cache"
+  
+  # Start if not --no-start
+  if [[ "${CLI_NO_START}" != "1" ]]; then
+    step "Step: Starting container"
+    run_shell "cd '${inst_dir}' && ${DOCKER[*]} compose up -d"
+    ok "Started: dayz-${name}"
+    info "Logs: cd '${inst_dir}' && ${DOCKER[*]} compose logs -f --tail=200"
+  else
+    info "Container not started (--no-start). Start later: cd '${inst_dir}' && ${DOCKER[*]} compose up -d"
+  fi
+  
+  hr
+  ok "CLI install complete!"
+  info "Instance directory: ${inst_dir}"
+  info "Container name: dayz-${name}"
+  info ""
+  info "Manage with: ./server-manager.sh"
+}
+
 main() {
+  parse_args "$@"
+  
   [[ -f "${RUN_SH_SRC}" ]] || die "Expected run.sh next to this installer: ${RUN_SH_SRC}"
 
   require_sudo_for_docker_socket
@@ -735,6 +1173,12 @@ main() {
     info "Then re-run:"
     info "  $0"
     hr
+    exit 0
+  fi
+
+  # CLI mode branch - run non-interactively if args provided
+  if [[ "${CLI_MODE}" == "1" ]]; then
+    run_cli_mode
     exit 0
   fi
 
