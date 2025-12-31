@@ -710,7 +710,7 @@ move_line_up() {
     [[ -f "$file" ]] || return 1
     
     local line_num
-    line_num=$(grep -n "$pattern" "$file" | head -n1 | cut -d: -f1)
+    line_num=$(grep -n "$pattern" "$file" 2>/dev/null | head -n1 | cut -d: -f1 || true)
     
     [[ -z "$line_num" || "$line_num" -le 1 ]] && return 0
     
@@ -737,7 +737,7 @@ move_line_down() {
     [[ -f "$file" ]] || return 1
     
     local line_num
-    line_num=$(grep -n "$pattern" "$file" | head -n1 | cut -d: -f1)
+    line_num=$(grep -n "$pattern" "$file" 2>/dev/null | head -n1 | cut -d: -f1 || true)
     
     # Count lines
     local total_lines
@@ -881,7 +881,7 @@ mod_manager() {
             # Check dependencies
             local dep_warn=""
             if [[ "$mtype" != "disabled" ]]; then
-                dep_warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}")"
+                dep_warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}" || true)"
             fi
             
             if [[ -n "$dep_warn" ]]; then
@@ -978,7 +978,7 @@ mod_manager() {
         if [[ $selected -lt $mod_count ]]; then
              local sel_mid="${mod_ids[$selected]}"
              local sel_warn
-             sel_warn="$(check_mod_dependencies "$sel_mid" "${mod_ids[@]}")"
+             sel_warn="$(check_mod_dependencies "$sel_mid" "${mod_ids[@]}" || true)"
              if [[ -n "$sel_warn" ]]; then
                  printf "%s%s WARN: %s %s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "$RESET"
              else
@@ -1081,6 +1081,76 @@ mod_manager() {
     done
 }
 
+    done
+}
+
+# -----------------------------------------------------------------------------
+# Wipe Menu
+# -----------------------------------------------------------------------------
+wipe_menu() {
+    local storage_root="${SELECTED_DIR}/data/serverfiles/mpmissions"
+    # Try to find storage_1
+    local storage_dir
+    storage_dir=$(find "${storage_root}" -name "storage_1" -type d -print -quit 2>/dev/null || true)
+    
+    if [[ -z "$storage_dir" ]]; then
+        show_message "Could not find storage_1 directory in ${storage_root}" "Error"
+        return
+    fi
+    
+    local -a states=(0 0 0) # Players, Vehicles, Bases/Loot
+    
+    while true; do
+        draw_header "Wipe Server Data - $SELECTED_NAME"
+        
+        local -a items=()
+        if [[ ${states[0]} -eq 1 ]]; then items+=(" [x] 👤 Wipe Players (players.db)"); else items+=(" [ ] 👤 Wipe Players (players.db)"); fi
+        if [[ ${states[1]} -eq 1 ]]; then items+=(" [x] 🚗 Wipe Vehicles (vehicles.bin)"); else items+=(" [ ] 🚗 Wipe Vehicles (vehicles.bin)"); fi
+        if [[ ${states[2]} -eq 1 ]]; then items+=(" [x] 🏰 Wipe Bases/Loot (Map Persistence)"); else items+=(" [ ] 🏰 Wipe Bases/Loot (Map Persistence)"); fi
+        
+        items+=("--------------------")
+        items+=("💀 EXECUTE SELECTED WIPE(S)")
+        items+=("❌ Cancel / Back")
+        
+        if run_menu items "Select Data to Wipe (Enter to Toggle)"; then
+            case $MENU_RESULT in
+                0) states[0]=$((1 - states[0])) ;;
+                1) states[1]=$((1 - states[1])) ;;
+                2) states[2]=$((1 - states[2])) ;;
+                3) ;; # Separator
+                4) # Execute
+                    local count=$((states[0] + states[1] + states[2]))
+                    if [[ $count -eq 0 ]]; then
+                        show_message "No items selected." "Error"
+                        continue
+                    fi
+                    
+                    if confirm "Wipe ${count} categories? This cannot be undone!" "n"; then
+                        printf "%s" "$SHOW_CURSOR"
+                        
+                        if [[ ${states[0]} -eq 1 ]]; then
+                            rm -f "${storage_dir}/players.db" "${storage_dir}/players.db-journal"
+                        fi
+                        if [[ ${states[1]} -eq 1 ]]; then
+                            rm -f "${storage_dir}/vehicles.bin" "${storage_dir}/vehicles.bin-journal"
+                        fi
+                        if [[ ${states[2]} -eq 1 ]]; then
+                             # Delete all except players and vehicles
+                             find "${storage_dir}" -type f -not -name "players.db" -not -name "players.db-journal" -not -name "vehicles.bin" -not -name "vehicles.bin-journal" -delete
+                        fi
+                        
+                        show_message "Wipe Complete." "Success"
+                        states=(0 0 0)
+                    fi
+                    ;;
+                5) return ;;
+            esac
+        else
+            return
+        fi
+    done
+}
+
 # -----------------------------------------------------------------------------
 # Main Menu
 # -----------------------------------------------------------------------------
@@ -1093,15 +1163,16 @@ main_menu() {
         [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${RESET}"
         
         local -a items=(
-            "▶  Start Server"
-            "■  Stop Server"
-            "↻  Restart Server"
+            "▶️  Start Server"
+            "⏹️  Stop Server"
+            "🔄  Restart Server"
             "--------------------"
-            "📋 View Logs"
+            "⚒️ Mod Manager"
+            "🧹 Wipe Server Data"
+            "📜 View Logs"
             "💻 Enter Shell"
             "--------------------"
-            "🔧 Manage Mods"
-            "⬆  Update Server"
+            "⬆️  Update Server"
             "--------------------"
             "← Switch Instance"
         )
@@ -1122,24 +1193,30 @@ main_menu() {
                 ;;
             3) # Separator
                 ;;
-            4) # Logs
-                trap : INT  # Ignore SIGINT in parent so Ctrl+C only stops the logs command
+            4) # View Logs
+                trap : INT
                 run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
-                trap - INT  # Restore default SIGINT behavior
+                trap - INT
                 ;;
-            5) # Shell
-                printf "%s%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
-                echo "Entering container shell (type 'exit' to return)..."
-                $DOCKER exec -it "$SELECTED_CONTAINER" /bin/bash || echo "Container not running"
-                read -rp "Press Enter to continue..."
-                printf "%s" "$HIDE_CURSOR"
+            5) # Wipe Data
+                wipe_menu
                 ;;
-            6) # Separator
-                ;;
-            7) # Mod Manager (unified)
+            6) # Mod Manager
                 mod_manager
                 ;;
-            8) # Update
+            7) # Shell
+                if [[ "$status" != "RUNNING" ]]; then
+                    show_message "Container must be running."
+                else
+                    printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+                    $DOCKER exec -it "$SELECTED_CONTAINER" /bin/bash || echo "Container not running"
+                    read -rp "Press Enter to continue..."
+                    printf "%s" "$HIDE_CURSOR"
+                fi
+                ;;
+            8) # Separator
+                ;;
+            9) # Update Server
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
@@ -1148,8 +1225,10 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            10) # Switch instance
-                select_instance
+            10) # Separator
+                ;;
+            11) # Switch Instance
+                return
                 ;;
         esac
     done
