@@ -1554,6 +1554,14 @@ HOST_NETWORK=${use_host_net}
 # -----------------------------------------------------------------------------
 main_tui() {
     local scan_root="${invoking_home}/servers"
+    
+    # DEBUG: Show what paths we're using
+    info "DEBUG: invoking_user=${invoking_user}"
+    info "DEBUG: invoking_home=${invoking_home}"
+    info "DEBUG: scan_root=${scan_root}"
+    info "DEBUG: SUDO_USER=${SUDO_USER:-unset}"
+    info "DEBUG: HOME=${HOME}"
+    sleep 2
 
     while true; do
         draw_header "DayZ Docker Installer"

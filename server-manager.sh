@@ -119,6 +119,14 @@ INVOKING_HOME="$(get_user_home "$INVOKING_USER")"
 # Standard search root: ~/servers
 SEARCH_ROOT="${INVOKING_HOME}/servers"
 
+# DEBUG: Show what paths we're using
+echo "DEBUG: INVOKING_USER=${INVOKING_USER}" >&2
+echo "DEBUG: INVOKING_HOME=${INVOKING_HOME}" >&2
+echo "DEBUG: SEARCH_ROOT=${SEARCH_ROOT}" >&2
+echo "DEBUG: SUDO_USER=${SUDO_USER:-unset}" >&2
+echo "DEBUG: HOME=${HOME}" >&2
+sleep 2
+
 # Instance Lists
 declare -a INSTANCE_DIRS=()
 declare -a INSTANCE_NAMES=()
