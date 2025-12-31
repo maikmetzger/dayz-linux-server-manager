@@ -978,33 +978,21 @@ mod_manager() {
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
-                # Selected row - full red background
-                printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+                # Selected row - fill entire line with red background first
+                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                 
-                # Column 1: Status (Arrow + Icon)
-                # Fixed spacing: " (arrow) (icon)  "
+                # Now draw text on top at correct positions
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
                 
-                # Column 2: Name
                 move_to $row $col_name
                 printf "%s" "$mname"
                 
-                # Column 3: ID
                 move_to $row $col_id
                 printf "%s" "$mid"
                 
-                # Column 4: Type
                 move_to $row $col_type
                 printf "[%s]" "$type_short"
-                
-                # Fill remaining space to end of line with red bg
-                local current_pos=$((col_type + 5))
-                local fill_len=$((TERM_COLS - current_pos + 1))
-                if [[ $fill_len -gt 0 ]]; then
-                    move_to $row $current_pos
-                    printf "%*s" "$fill_len" ""
-                fi
                 
                 printf "%s" "$RESET"
             else
