@@ -283,7 +283,7 @@ draw_menu() {
         else
             printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
         fi
-        ((i++))
+        ((i+=1))
     done
 }
 
@@ -318,8 +318,8 @@ run_menu() {
             $'\x1b')  # Escape sequence
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then ((selected-=1)); fi ;;  # Up
-                    '[B') if ((selected < count-1)); then ((selected+=1)); fi ;;  # Down
+                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;  # Up
+                    '[B') if ((selected < count-1)); then selected=$((selected+1)); fi ;;  # Down
                 esac
                 ;;
             '') # Enter
@@ -662,7 +662,7 @@ mod_manager() {
         if [[ $mod_count -eq 0 ]]; then
             move_to $row 1
             printf "%s  (No mods - press A to add)%s" "$DIM" "$RESET"
-            ((row++))
+            row=$((row+1))
         fi
         for i in "${!mod_ids[@]}"; do
             local mid="${mod_ids[$i]}"
@@ -705,7 +705,7 @@ mod_manager() {
                     disabled) printf "%s%s%s" "$RED" "$type_label" "$RESET" ;;
                 esac
             fi
-            ((row++))
+            row=$((row+1))
         done
         
         # Separator before actions
@@ -742,8 +742,8 @@ mod_manager() {
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then ((selected-=1)); fi ;;
-                    '[B') if ((selected < total_items - 1)); then ((selected+=1)); fi ;;
+                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
+                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
                 esac
                 ;;
             '')  # Enter
