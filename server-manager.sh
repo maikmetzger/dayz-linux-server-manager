@@ -1190,16 +1190,16 @@ main_menu() {
                 ;;
             3) # Separator
                 ;;
-            4) # View Logs
-                trap : INT
-                run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
-                trap - INT
+            4) # Mod Manager
+                mod_manager
                 ;;
             5) # Wipe Data
                 wipe_menu
                 ;;
-            6) # Mod Manager
-                mod_manager
+            6) # View Logs
+                trap : INT
+                run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
+                trap - INT
                 ;;
             7) # Shell
                 if [[ "$status" != "RUNNING" ]]; then
