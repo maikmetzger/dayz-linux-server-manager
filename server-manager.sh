@@ -81,12 +81,20 @@ if ! docker info &>/dev/null 2>&1; then
 fi
 
 # -----------------------------------------------------------------------------
-# Instance Discovery
+# User Identity & Paths
 # -----------------------------------------------------------------------------
+INVOKING_USER="${SUDO_USER:-$USER}"
+INVOKING_HOME="$(getent passwd "$INVOKING_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
+
+# Standard search root: ~/servers
+SEARCH_ROOT="${INVOKING_HOME}/servers"
+
+# Instance Lists
 declare -a INSTANCE_DIRS=()
 declare -a INSTANCE_NAMES=()
 declare -a INSTANCE_CONTAINERS=()
 
+# Selection State
 SELECTED_DIR=""
 SELECTED_NAME=""
 SELECTED_CONTAINER=""
@@ -96,25 +104,38 @@ scan_instances() {
     INSTANCE_NAMES=()
     INSTANCE_CONTAINERS=()
     
-    local invoking_user="${SUDO_USER:-$USER}"
-    local invoking_home
-    invoking_home="$(getent passwd "$invoking_user" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
-    local search_root="${invoking_home}/servers"
+    # Check multiple locations:
+    # 1. ~/servers (Standard)
+    # 2. SCRIPT_DIR/instances (Alternative)
+    # 3. SCRIPT_DIR/.. (If script is in a subfolder of the root)
     
-    [[ -d "$search_root" ]] || return 0
+    local -a search_paths=("$SEARCH_ROOT")
+    [[ -d "${SCRIPT_DIR}/instances" ]] && search_paths+=("${SCRIPT_DIR}/instances")
     
-    while IFS= read -r marker; do
-        [[ -f "$marker" ]] || continue
+    # If we are root but SUDO_USER exists, make sure we check the real user home
+    if [[ "$INVOKING_USER" != "$USER" && -d "/home/$INVOKING_USER/servers" ]]; then
+        search_paths+=("/home/$INVOKING_USER/servers")
+    fi
+
+    for root in "${search_paths[@]}"; do
+        [[ -d "$root" ]] || continue
+        
+        while IFS= read -r marker; do
+            [[ -f "$marker" ]] || continue
         local dir name container
         dir="$(dirname "$marker")"
         name="$(grep '^INSTANCE_NAME=' "$marker" 2>/dev/null | cut -d= -f2- | tr -d '"')"
         [[ -z "$name" ]] && name="$(basename "$dir")"
         container="dayz-${name}"
         
-        INSTANCE_DIRS+=("$dir")
-        INSTANCE_NAMES+=("$name")
-        INSTANCE_CONTAINERS+=("$container")
-    done < <(find "$search_root" -maxdepth 3 -name ".dayz-instance" 2>/dev/null || true)
+            INSTANCE_DIRS+=("$dir")
+            INSTANCE_NAMES+=("$name")
+            INSTANCE_CONTAINERS+=("$container")
+        done < <(find "$root" -maxdepth 3 -name ".dayz-instance" 2>/dev/null || true)
+    done
+
+    # Remove duplicates (in case overlapping search paths find same instance)
+    # (Optional, but good for stability)
 }
 
 get_container_status() {
