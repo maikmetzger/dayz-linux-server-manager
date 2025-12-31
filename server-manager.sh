@@ -251,7 +251,10 @@ draw_menu() {
         move_to $((start_row + i)) $start_col
         
         if [[ $i -eq $selected ]]; then
-            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$item" "$RESET"
+            # Strip ANSI color codes from selected item so BG_RED covers entire line
+            local clean_item
+            clean_item=$(echo -e "$item" | sed 's/\x1b\[[0-9;]*m//g')
+            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
         else
             printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
         fi
@@ -313,22 +316,30 @@ run_menu() {
 read_input() {
     local prompt="$1"
     local default="${2:-}"
+    local title="${3:-Input}"
     
     get_term_size
-    draw_header "Input"
+    draw_header "$title"
     
     local box_width=60
-    local box_height=7
+    [[ $box_width -gt $((TERM_COLS - 10)) ]] && box_width=$((TERM_COLS - 10))
+    local box_height=9
     local box_row=$(( (TERM_ROWS - box_height) / 2 ))
     local box_col=$(( (TERM_COLS - box_width) / 2 ))
     
-    draw_box $box_row $box_col $box_height $box_width
+    draw_box $box_row $box_col $box_height $box_width "$title"
     
+    # Prompt
     move_to $((box_row + 2)) $((box_col + 3))
     printf "%s%s%s" "$WHITE" "$prompt" "$RESET"
     
+    # Hint
     move_to $((box_row + 4)) $((box_col + 3))
-    printf "%s" "$SHOW_CURSOR"
+    printf "%s(Empty to cancel)%s" "$DIM" "$RESET"
+    
+    # Input field
+    move_to $((box_row + 6)) $((box_col + 3))
+    printf "%s▸ %s" "$RED" "$RESET$SHOW_CURSOR"
     
     local input
     read -r -e -i "$default" input
@@ -513,16 +524,19 @@ mod_manager() {
         elif [[ $MENU_RESULT -eq $((mod_count + 1)) ]]; then
             # Add mod
             local new_id
-            new_id=$(read_input "Enter Workshop ID:")
+            new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
             if [[ "$new_id" =~ ^[0-9]+$ ]]; then
                 if ! grep -qE "^[[:space:]]*#?[[:space:]]*${new_id}[[:space:]]*$" "$mods_file" 2>/dev/null; then
                     echo "$new_id" >> "$mods_file"
-                    show_message "Added mod $new_id"
+                    # Try to get the name for the confirmation
+                    local mod_name
+                    mod_name="$(get_mod_name "$new_id")"
+                    show_message "Added: $mod_name" "Mod Added"
                 else
-                    show_message "Mod already in list"
+                    show_message "Mod $new_id is already in your list" "Already Exists"
                 fi
             elif [[ -n "$new_id" ]]; then
-                show_message "Invalid Workshop ID"
+                show_message "Invalid Workshop ID - must be a number" "Error"
             fi
         elif [[ $MENU_RESULT -eq $((mod_count + 2)) ]]; then
             # Sync mods
