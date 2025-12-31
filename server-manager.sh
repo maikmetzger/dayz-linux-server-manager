@@ -104,38 +104,35 @@ scan_instances() {
     INSTANCE_NAMES=()
     INSTANCE_CONTAINERS=()
     
-    # Check multiple locations:
-    # 1. ~/servers (Standard)
-    # 2. SCRIPT_DIR/instances (Alternative)
-    # 3. SCRIPT_DIR/.. (If script is in a subfolder of the root)
+    # Use a single, canonical search root
+    # Resolve the real path to avoid duplicates from symlinks or different representations
+    local search_root
+    search_root="$(cd "$SEARCH_ROOT" 2>/dev/null && pwd -P || echo "$SEARCH_ROOT")"
     
-    local -a search_paths=("$SEARCH_ROOT")
-    [[ -d "${SCRIPT_DIR}/instances" ]] && search_paths+=("${SCRIPT_DIR}/instances")
+    [[ -d "$search_root" ]] || return 0
     
-    # If we are root but SUDO_USER exists, make sure we check the real user home
-    if [[ "$INVOKING_USER" != "$USER" && -d "/home/$INVOKING_USER/servers" ]]; then
-        search_paths+=("/home/$INVOKING_USER/servers")
-    fi
-
-    for root in "${search_paths[@]}"; do
-        [[ -d "$root" ]] || continue
+    # Track seen directories to avoid duplicates
+    local -A seen_dirs=()
+    
+    while IFS= read -r marker; do
+        [[ -f "$marker" ]] || continue
         
-        while IFS= read -r marker; do
-            [[ -f "$marker" ]] || continue
-        local dir name container
+        local dir name container real_dir
         dir="$(dirname "$marker")"
+        real_dir="$(cd "$dir" 2>/dev/null && pwd -P || echo "$dir")"
+        
+        # Skip if we've already seen this directory
+        [[ -n "${seen_dirs[$real_dir]:-}" ]] && continue
+        seen_dirs["$real_dir"]=1
+        
         name="$(grep '^INSTANCE_NAME=' "$marker" 2>/dev/null | cut -d= -f2- | tr -d '"')"
         [[ -z "$name" ]] && name="$(basename "$dir")"
         container="dayz-${name}"
         
-            INSTANCE_DIRS+=("$dir")
-            INSTANCE_NAMES+=("$name")
-            INSTANCE_CONTAINERS+=("$container")
-        done < <(find "$root" -maxdepth 3 -name ".dayz-instance" 2>/dev/null || true)
-    done
-
-    # Remove duplicates (in case overlapping search paths find same instance)
-    # (Optional, but good for stability)
+        INSTANCE_DIRS+=("$dir")
+        INSTANCE_NAMES+=("$name")
+        INSTANCE_CONTAINERS+=("$container")
+    done < <(find "$search_root" -maxdepth 3 -name ".dayz-instance" 2>/dev/null || true)
 }
 
 get_container_status() {
@@ -570,11 +567,15 @@ select_instance() {
             if [[ $idx -eq $count ]]; then
                 # Installer
              if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
+                 # Preserve user identity for the installer
+                 export SUDO_USER="$INVOKING_USER"
+                 export HOME="$INVOKING_HOME"
+                 
                  # Check access
                      if ! groups | grep -q "\bdocker\b"; then
                          if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
                              printf "%s" "$SHOW_CURSOR"
-                             exec sudo bash "${SCRIPT_DIR}/install-dayz-docker.sh"
+                             exec sudo -E bash "${SCRIPT_DIR}/install-dayz-docker.sh"
                          fi
                      fi
                  

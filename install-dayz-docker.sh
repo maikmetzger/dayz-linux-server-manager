@@ -1569,6 +1569,9 @@ main_tui() {
             # 3 is separator
             4) # Run Server Manager
                 if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
+                    # Preserve user identity for the manager
+                    export SUDO_USER="${invoking_user}"
+                    export HOME="${invoking_home}"
                     exec "${SCRIPT_DIR}/server-manager.sh"
                 else
                     show_message "server-manager.sh not found." "Error"
