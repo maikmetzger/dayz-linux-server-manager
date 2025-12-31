@@ -1526,7 +1526,7 @@ main_tui() {
         mapfile -t markers < <(discover_instances_under "${scan_root}")
         mapfile -t containers < <(list_dayz_containers)
         
-        local -a menu_items=("Create NEW Instance")
+        local -a menu_items=("✨ Run Server Manager" "Create NEW Instance")
         
         if [[ "${#markers[@]}" -gt 0 ]]; then
             menu_items+=("Update run.sh for Instance")
@@ -1540,22 +1540,29 @@ main_tui() {
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
         
         case $MENU_RESULT in
-            0) # Create
-                tui_create_instance
-                exit 0
+            0) # Run Server Manager
+                if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
+                    exec "${SCRIPT_DIR}/server-manager.sh"
+                else
+                    show_message "server-manager.sh not found." "Error"
+                fi
                 ;;
-            1) # Update
+            1) # Create
+                tui_create_instance
+                read -rp "Press Enter to return to menu..."
+                ;;
+            2) # Update
                 if [[ "${#markers[@]}" -eq 0 ]]; then
                     show_message "No marker-based instances found." "Error"
                     continue
                 fi
                 tui_update_instance "${markers[@]}"
-                exit 0
+                read -rp "Press Enter to return to menu..."
                 ;;
-            2) # Delete
+            3) # Delete
                 tui_delete_menu "${scan_root}"
                 ;;
-            3) # Exit
+            4) # Exit
                 exit 0
                 ;;
         esac

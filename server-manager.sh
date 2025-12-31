@@ -512,10 +512,42 @@ select_instance() {
         items+=("$status_icon $name [$status]")
     done
     
+    items+=("--------------------")
+    items+=("✨ Install/Manage Instances")
+    items+=("❌ Quit")
+    
     if run_menu items "DayZ Server Manager - Select Instance"; then
-        SELECTED_DIR="${INSTANCE_DIRS[$MENU_RESULT]}"
-        SELECTED_NAME="${INSTANCE_NAMES[$MENU_RESULT]}"
-        SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$MENU_RESULT]}"
+        local idx=$MENU_RESULT
+        local count=${#INSTANCE_NAMES[@]}
+        
+        if [[ $idx -lt $count ]]; then
+            SELECTED_DIR="${INSTANCE_DIRS[$idx]}"
+            SELECTED_NAME="${INSTANCE_NAMES[$idx]}"
+            SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$idx]}"
+        elif [[ $idx -eq $((count + 1)) ]]; then
+            # Installer
+             if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
+                 # Check access
+                 if [[ $EUID -ne 0 ]]; then
+                     if ! groups | grep -q "\bdocker\b"; then
+                         if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
+                             printf "%s" "$SHOW_CURSOR"
+                             sudo "${SCRIPT_DIR}/install-dayz-docker.sh"
+                             printf "%s" "$HIDE_CURSOR"
+                             continue # Return to menu
+                         fi
+                     fi
+                 fi
+                 
+                 printf "%s" "$SHOW_CURSOR"
+                 "${SCRIPT_DIR}/install-dayz-docker.sh"
+                 printf "%s" "$HIDE_CURSOR"
+             else
+                 show_message "install-dayz-docker.sh not found."
+             fi
+        elif [[ $idx -eq $((count + 2)) ]]; then
+            exit 0
+        fi
     else
         exit 0
     fi
@@ -867,7 +899,6 @@ main_menu() {
             "🔧 Manage Mods"
             "⬆  Update Server"
             "--------------------"
-            "✨ Install/Manage Instances"
             "← Switch Instance"
         )
         
@@ -913,18 +944,7 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            9) # Separator
-                ;;
-            10) # Installer
-                 if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
-                     printf "%s" "$SHOW_CURSOR"
-                     "${SCRIPT_DIR}/install-dayz-docker.sh"
-                     printf "%s" "$HIDE_CURSOR"
-                 else
-                     show_message "install-dayz-docker.sh not found."
-                 fi
-                 ;;
-            11) # Switch instance
+            10) # Switch instance
                 select_instance
                 ;;
         esac
