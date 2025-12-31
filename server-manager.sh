@@ -9,16 +9,16 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# ANSI Colors - DayZ Theme (Black/Red)
+# ANSI Colors - DayZ Theme (Black/Blood Red #b20000)
 # -----------------------------------------------------------------------------
 ESC=$'\033'
 RESET="${ESC}[0m"
 BOLD="${ESC}[1m"
 DIM="${ESC}[2m"
 
-# Colors
+# Colors (24-bit true color for #b20000 = RGB 178,0,0)
 BLACK="${ESC}[30m"
-RED="${ESC}[31m"
+RED="${ESC}[38;2;178;0;0m"          # #b20000
 GREEN="${ESC}[32m"
 YELLOW="${ESC}[33m"
 WHITE="${ESC}[37m"
@@ -26,7 +26,7 @@ GRAY="${ESC}[90m"
 
 # Backgrounds
 BG_BLACK="${ESC}[40m"
-BG_RED="${ESC}[41m"
+BG_RED="${ESC}[48;2;178;0;0m"       # #b20000
 BG_DARKGRAY="${ESC}[100m"
 
 # Cursor control
@@ -245,14 +245,16 @@ draw_box() {
 MENU_RESULT=0
 
 draw_menu() {
-    local -n items=$1
+    local _arr_name=$1
     local selected=$2
     local start_row=$3
     local start_col=$4
     local width=$5
     
+    eval "local -a _items=(\"\${${_arr_name}[@]}\")"
+    
     local i=0
-    for item in "${items[@]}"; do
+    for item in "${_items[@]}"; do
         move_to $((start_row + i)) $start_col
         
         if [[ $i -eq $selected ]]; then
@@ -265,10 +267,11 @@ draw_menu() {
 }
 
 run_menu() {
-    local -n menu_items=$1
+    local _menu_arr_name=$1
     local title="$2"
     local selected=0
-    local count=${#menu_items[@]}
+    
+    eval "local count=\${#${_menu_arr_name}[@]}"
     
     [[ $count -eq 0 ]] && return 1
     
@@ -285,7 +288,7 @@ run_menu() {
         local box_col=$(( (TERM_COLS - box_width) / 2 ))
         
         draw_box $box_row $box_col $box_height $box_width
-        draw_menu menu_items $selected $((box_row + 2)) $((box_col + 2)) $((box_width - 4))
+        draw_menu "$_menu_arr_name" $selected $((box_row + 2)) $((box_col + 2)) $((box_width - 4))
         
         # Read key
         IFS= read -rsn1 key
