@@ -351,19 +351,15 @@ except: pass
     while true; do
         # 1. Scan everything (calls the Python implementation)
         local ce_result
-        # Capture error to log
-        echo "DEBUG: inst_dir=$inst_dir SCRIPT_DIR=$SCRIPT_DIR" >> "${SCRIPT_DIR}/loot_manager_debug.log"
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>> "${SCRIPT_DIR}/loot_manager_debug.log" | tail -n 1)
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null | tail -n 1)
         
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
-        echo "DEBUG: Result raw: $ce_result" >> "${SCRIPT_DIR}/loot_manager_debug.log"
 
         # 2. Parse result into arrays
         local -a src_paths smod_names sfile_names sce_types states
         parse_scan_result "$ce_result"
         
         local count=${#src_paths[@]}
-        echo "DEBUG: Count=$count" >> "${SCRIPT_DIR}/loot_manager_debug.log"
         if [[ $count -eq 0 ]]; then
             show_message "No mod CE definitions detected." "Info"
             # Fallback to manual browse if empty
@@ -618,6 +614,11 @@ EOF
 scan_dayz_ce_files_python() {
     local instance_dir="$1"
     local workshop_dir="$2"
+    
+    # Path Auto-correction: Ensure we point to the data directory
+    if [[ ! -d "$instance_dir/config" && -d "$instance_dir/data/config" ]]; then
+        instance_dir="${instance_dir}/data"
+    fi
     
     local mission_path
     mission_path=$(get_mission_path "$instance_dir") || return 1
