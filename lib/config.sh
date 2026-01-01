@@ -49,16 +49,32 @@ config_parser_exec() {
     local args=("$@")
     
     local parser_script="${SCRIPT_DIR}/lib/config_parser.py"
-    [[ -f "${parser_script}" ]] || { echo '{"status":"error","message":"Parser script not found"}'; return 1; }
+    [[ -f "${parser_script}" ]] || { echo '{"status":"error","message":"Parser script not found"}'; return 0; }
+    
+    # Disable exit on error for docker commands
+    set +e
     
     # Copy script to container
-    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null || {
-        echo '{"status":"error","message":"Failed to copy parser to container"}'
-        return 1
-    }
+    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null
+    if [[ $? -ne 0 ]]; then
+        set -e
+        echo '{"status":"error","message":"Failed to copy parser to container. Is the container running?"}'
+        return 0
+    fi
     
     # Execute in container
-    $DOCKER exec "${container}" python3 /tmp/config_parser.py "${args[@]}" 2>/dev/null
+    local output
+    output=$($DOCKER exec "${container}" python3 /tmp/config_parser.py "${args[@]}" 2>&1)
+    local exit_code=$?
+    
+    set -e
+    
+    if [[ $exit_code -ne 0 ]]; then
+        echo "{\"status\":\"error\",\"message\":\"Parser failed: ${output}\"}"
+        return 0
+    fi
+    
+    echo "$output"
 }
 
 # Parse JSON response from Python
