@@ -205,6 +205,70 @@ declare -A SERVERDZ_MEMOS=(
     ["clientPort"]="Force client connection port"
 )
 
+# Validation Rules (Format: type[:min[-max]])
+# Types: int, float, bool (0/1), string
+declare -A SERVERDZ_VALIDATION=(
+    ["hostname"]="string:1-255"
+    ["description"]="string:0-255"
+    ["password"]="string:0-32"
+    ["passwordAdmin"]="string:0-32"
+    ["enableWhitelist"]="bool"
+    ["disableBanlist"]="bool"
+    ["disablePrioritylist"]="bool"
+    ["maxPlayers"]="int:1-127"
+    ["verifySignatures"]="int:0-2"
+    ["forceSameBuild"]="bool"
+    ["disableVoN"]="bool"
+    ["vonCodecQuality"]="int:0-30"
+    ["disable3rdPerson"]="bool"
+    ["disableCrosshair"]="bool"
+    ["serverTime"]="string"
+    ["serverTimeAcceleration"]="float:0.1-64"
+    ["serverNightTimeAcceleration"]="float:0.1-64"
+    ["serverTimePersistent"]="bool"
+    ["guaranteedUpdates"]="int:1-1"
+    ["loginQueueConcurrentPlayers"]="int:1-100"
+    ["loginQueueMaxPlayers"]="int:1-2000"
+    ["instanceId"]="int:1-255"
+    ["storageAutoFix"]="bool"
+    ["respawnTime"]="int:0-3600"
+    ["motd"]="string"
+    ["motdInterval"]="int:1-3600"
+    ["BattlEye"]="bool"
+    ["steamQueryPort"]="int:1024-65535"
+    ["allowFilePatching"]="bool"
+    ["adminLogPlayerHitsOnly"]="bool"
+    ["adminLogPlacement"]="bool"
+    ["adminLogBuildActions"]="bool"
+    ["adminLogPlayerList"]="bool"
+    ["disableMultiAccountMitigation"]="bool"
+    ["enableDebugMonitor"]="bool"
+    ["timeStampFormat"]="enum:Short,Full"
+    ["logAverageFps"]="int:1-3600"
+    ["logMemory"]="int:1-3600"
+    ["logPlayers"]="int:1-3600"
+    ["multithreadedReplication"]="bool"
+    ["speedhackDetection"]="int:1-10"
+    ["networkRangeClose"]="int:1-10000"
+    ["networkRangeNear"]="int:1-10000"
+    ["networkRangeFar"]="int:1-10000"
+    ["networkRangeDistantEffect"]="int:1-10000"
+    ["networkObjectBatchEnforceBandwidthLimits"]="bool"
+    ["defaultVisibility"]="int:100-10000"
+    ["defaultObjectViewDistance"]="int:100-10000"
+    ["lightingConfig"]="int:0-2"
+    ["disablePersonalLight"]="bool"
+    ["disableBaseDamage"]="bool"
+    ["disableContainerDamage"]="bool"
+    ["disableRespawnDialog"]="bool"
+    ["pingWarning"]="int:0-2000"
+    ["pingCritical"]="int:0-2000"
+    ["MaxPing"]="int:0-2000"
+    ["serverFpsWarning"]="int:11-200"
+    ["shotValidation"]="bool"
+    ["clientPort"]="int:1024-65535"
+)
+
 # =============================================================================
 # Python Parser Wrapper
 # =============================================================================
@@ -449,13 +513,13 @@ config_table_editor() {
         
         # Column Definitions (Fixed widths for alignment)
         local col_key=2
-        local w_key=22
+        local w_key=32
         
         local col_val=$((col_key + w_key))
-        local w_val=20
+        local w_val=15
         
         local col_def=$((col_val + w_val))
-        local w_def=15
+        local w_def=12
         
         local col_memo=$((col_def + w_def))
         # remaining width for memo
@@ -622,14 +686,37 @@ config_table_editor() {
         local current_val="${values[$selection]}"
         [[ "$current_val" == "(empty)" ]] && current_val=""
         
-        local new_val
-        new_val=$(read_input "Edit $selected_key" "$current_val" "$title")
+        # Validation Hint
+        local valid_rule="${SERVERDZ_VALIDATION[$selected_key]:-}"
+        local hint=""
+        local type="string"
+        if [[ -n "$valid_rule" ]]; then
+            type="${valid_rule%%:*}"
+            local range="${valid_rule#*:}"
+            case "$type" in
+                "bool") hint="(0 or 1)" ;;
+                "int"|"float") hint="($range)" ;;
+                "enum") hint="($range)" ;;
+            esac
+        fi
         
-        if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
-            local set_result
-            set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_val")
-            if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
-                show_message "Failed to save: $(json_get "$set_result" "message")" "Error"
+        local new_val
+        new_val=$(read_input "Edit $selected_key $hint" "$current_val" "$title")
+        
+        if [[ -n "$new_val" ]]; then
+            # Validation Warning
+            if [[ "$type" == "bool" ]]; then
+                if [[ "$new_val" != "0" && "$new_val" != "1" ]]; then
+                     show_message "Warning: $selected_key expects 0 or 1" "Validation"
+                fi
+            fi
+            
+            if [[ "$new_val" != "$current_val" ]]; then
+                local set_result
+                set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_val")
+                if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
+                    show_message "Failed to save: $(json_get "$set_result" "message")" "Error"
+                fi
             fi
         fi
     done
