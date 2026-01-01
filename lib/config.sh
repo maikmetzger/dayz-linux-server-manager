@@ -404,6 +404,12 @@ types_selection_menu() {
         local -a items=()
         local -a paths=()
         
+        # 0. Quick Access: Modular Manager
+        items+=("🛰️|Manage Modular Loot...")
+        paths+=("MANAGE_MODULAR")
+        items+=("--------------------")
+        paths+=("")
+
         # 1. Main types.xml
         local main_types=$(find_types_xml "$inst_dir")
         if [[ -n "$main_types" ]]; then
@@ -442,10 +448,8 @@ types_selection_menu() {
             done < <(find "$custom_ce" -name "*.xml" -type f | sort)
         fi
         
-        items+=("--------------------")
-        paths+=("")
-        items+=("🛰️|Manage Modular Loot...")
-        paths+=("MANAGE_MODULAR")
+        # items+=("--------------------") # Removed from here
+        # paths+=("")
         items+=("←|Back")
         paths+=("")
         
