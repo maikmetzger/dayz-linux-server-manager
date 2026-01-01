@@ -52,6 +52,8 @@ config_xml_editor() {
     local -a items=()
     local count=0
     
+    local table_start=3 # Standard start row for separators
+    
     while true; do
         if [[ $f_changed -eq 1 ]]; then
             # 1. Fetch filtered items
@@ -71,10 +73,15 @@ for x in data:
             f_changed=0
         fi
         
-        # 2. Draw Table
-        draw_header "Loot Economy Editor - $(basename "$xml_file")"
+        get_term_size
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
         
-        # Filter status line
+        # 1. Header Bar
+        local filename=$(basename "$xml_file")
+        move_to 1 1
+        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Loot Economy Editor - $filename" "$RESET"
+        
+        # Filter status line (Line 2)
         local filter_str=""
         [[ -n "$f_name" ]] && filter_str+="Name: $f_name "
         [[ -n "$f_cat" ]] && filter_str+="Cat: $f_cat "
@@ -88,16 +95,34 @@ for x in data:
             printf "%sTotal Items: %s%d%s" "$YLW" "$WHITE" "$count" "$RESET"
         fi
         
-        # Table Header
-        local col_name=34 col_nom=8 col_min=8 col_life=10 col_rs=10
-        move_to 4 2
-        printf "%s%-*s %-*s %-*s %-*s %-*s%s" "$BOLD$WHITE" \
-            $col_name "Name" $col_nom "Nom" $col_min "Min" $col_life "Life" $col_rs "RS" "$RESET"
-        move_to 5 2
-        printf "%s%s%s" "$WHITE" "$(printf '%.0s─' $(seq 1 $((col_name+col_nom+col_min+col_life+col_rs+4))))" "$RESET"
+        # 2. Table Header
+        move_to $table_start 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
+        
+        local col_name=2 w_name=34
+        local col_nom=$((col_name + w_name)) w_nom=8
+        local col_min=$((col_nom + w_nom)) w_min=8
+        local col_life=$((col_min + w_min)) w_life=10
+        local col_rs=$((col_life + w_life)) w_rs=10
+        
+        move_to $((table_start + 1)) $col_name
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_name "NAME" "$RESET"
+        move_to $((table_start + 1)) $col_nom
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_nom "NOM" "$RESET"
+        move_to $((table_start + 1)) $col_min
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_min "MIN" "$RESET"
+        move_to $((table_start + 1)) $col_life
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_life "LIFE" "$RESET"
+        move_to $((table_start + 1)) $col_rs
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_rs "RS" "$RESET"
+        
+        move_to $((table_start + 2)) 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
         
         # Viewport variables
-        local start_row=6
+        local start_row=$((table_start + 3))
         local v_height=$((TERM_ROWS - 14))
         [[ $v_height -lt 5 ]] && v_height=5
         
@@ -107,7 +132,7 @@ for x in data:
         
         for ((i=0; i<v_height; i++)); do
             local idx=$((offset + i))
-            move_to $((start_row + i)) 2
+            move_to $((start_row + i)) 1
             
             if [[ $idx -lt $count ]]; then
                 IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$idx]}"
@@ -115,20 +140,39 @@ for x in data:
                 local style="$WHITE"
                 [[ $idx -eq $selection ]] && style="$BG_RED$WHITE$BOLD"
                 
-                # Truncate name if needed
-                local disp_name="${name:0:$((col_name-1))}"
+                # Draw Highlight background for full width? (As established in menu.sh fix)
+                # But here we just use the styled text for columns.
+                # If we want consistent AAA highlighting, we should fill the width.
+                if [[ $idx -eq $selection ]]; then
+                    printf "%s%*s%s" "$BG_RED" "$TERM_COLS" "" "$RESET"
+                    move_to $((start_row + i)) 1
+                fi
                 
-                printf "%s%-*s %*s %*s %*s %*s%s" "$style" \
-                    $col_name "$disp_name" $col_nom "$nom" $col_min "$min" $col_life "$life" $col_rs "$rs" "$RESET"
+                # Truncate visuals
+                local d_name="$name"
+                [[ ${#d_name} -ge $((w_name-2)) ]] && d_name="${d_name:0:$((w_name-4))}.."
+                
+                move_to $((start_row + i)) $col_name
+                printf "%s%-*s%s" "$style" $w_name "$d_name" "$RESET"
+                move_to $((start_row + i)) $col_nom
+                printf "%s%*s%s" "$style" $((w_nom-1)) "$nom" "$RESET"
+                move_to $((start_row + i)) $col_min
+                printf "%s%*s%s" "$style" $((w_min-1)) "$min" "$RESET"
+                move_to $((start_row + i)) $col_life
+                printf "%s%*s%s" "$style" $((w_life-1)) "$life" "$RESET"
+                move_to $((start_row + i)) $col_rs
+                printf "%s%*s%s" "$style" $((w_rs-1)) "$rs" "$RESET"
             else
-                printf "%$((col_name+col_nom+col_min+col_life+col_rs+4))s" ""
+                # printf "%$((TERM_COLS))s" "" # Clear row if needed
+                :
             fi
         done
         
         # 3. Footer (Detail Pane)
         local footer_row=$((start_row + v_height + 1))
-        move_to $footer_row 2
-        printf "%s%s%s" "$WHITE" "$(printf '%.0s─' $(seq 1 $((col_name+col_nom+col_min+col_life+col_rs+4))))" "$RESET"
+        move_to $footer_row 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
         
         if [[ $count -gt 0 ]]; then
             IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]}"
@@ -137,7 +181,7 @@ for x in data:
             move_to $((footer_row + 2)) 2
             printf "%sTiers:    %s%s" "$YLW" "$WHITE" "$tiers"
             
-            # Flags
+            # Flags (Optimized parse skip if possible, but keep for now)
             local f_map f_hoarder f_cargo f_player f_crafted f_deloot
             f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_map'])")
             f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_hoarder'])")
@@ -157,7 +201,12 @@ for x in data:
                 "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
         fi
         
-        draw_footer "↑↓ Navigate  Enter Edit  f Filter  x Clear  q Back"
+        # Static footer hint bar ( AAA style matching config.sh )
+        move_to $((TERM_ROWS - 1)) 1
+        local footer_text=" [↑↓] Navigate   [Enter] Edit   [f] Filter   [x] Clear   [q] Back"
+        local pad_len=$((TERM_COLS - ${#footer_text}))
+        [[ $pad_len -lt 0 ]] && pad_len=0
+        printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
 
         # 4. Input Handling
         IFS= read -rsn1 key
