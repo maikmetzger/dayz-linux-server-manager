@@ -305,6 +305,7 @@ _view_mod_details() {
     timeout 30s python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>> /tmp/workshop_crash.log
     local py_exit=$?
     echo "PYTHON EXIT CODE: $py_exit" >> /tmp/workshop_crash.log
+    echo "DEBUG: After py_exit" >> /tmp/workshop_crash.log
     
     if [[ $py_exit -ne 0 ]]; then
         echo "PYTHON FAILED, using defaults" >> /tmp/workshop_crash.log
