@@ -245,6 +245,9 @@ config_flat_editor() {
 # =============================================================================
 
 config_table_editor() {
+    # Disable exit on error for this function scope
+    set +e
+    
     echo "--- config_table_editor start ---" >> /tmp/dayz_debug.log
     local container="$1"
     local config_path="$2"
