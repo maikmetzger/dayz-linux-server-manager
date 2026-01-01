@@ -319,25 +319,19 @@ except Exception as e:
 ")
     rm -f "$tmp_json"
     
-    echo "EVAL CONTENT..." >> /tmp/workshop_crash.log
     eval "$parse_out"
-    echo "EVAL DONE." >> /tmp/workshop_crash.log
-    
-    # Restore strict modes
-    set -eu
     
     local scroll=0
     local focus=0 # 0=Desc, 1=Images
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
-    echo "ENTERING LOOP..." >> /tmp/workshop_crash.log
     while true; do
         _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
-            read -rsn2 -t 0.1 s || { return; } # ESC
+            read -rsn2 -t 0.1 s || { set -eu; return; } # ESC - restore strict
             case "$s" in
                 "[A") 
                     if [[ $focus -eq 0 ]]; then [[ $scroll -gt 0 ]] && ((scroll--)); 
@@ -346,7 +340,8 @@ except Exception as e:
                     if [[ $focus -eq 0 ]]; then ((scroll++)); 
                     else [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); fi ;;
             esac
-        elif [[ "$k" == "q" || "$k" == "Q" ]]; then return
+        elif [[ "$k" == "q" || "$k" == "Q" ]]; then 
+            set -eu; return
         elif [[ "$k" == $'\t' ]]; then 
              # Toggle focus if we have images
              if [[ ${#mimages[@]} -gt 0 ]]; then focus=$((1 - focus)); fi
@@ -365,7 +360,7 @@ except Exception as e:
                 else show_message "URL: $url" "Image Link"; fi
             fi
         elif [[ "$k" == "" ]]; then
-             return 10 # Signal to install
+             set -eu; return 10 # Signal to install
         fi
     done
 }
