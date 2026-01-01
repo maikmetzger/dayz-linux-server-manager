@@ -266,8 +266,6 @@ _draw_workshop_details_screen() {
 _view_mod_details() {
     local mid="$1" instance_dir="$2" mods_txt="$3" rules_json="$4"
     
-    echo "Step 1: Start Details" > /tmp/debug_workshop.log
-    
     # Run ENTIRE fetch/parse block in permissive mode
     set +e
     
@@ -275,17 +273,17 @@ _view_mod_details() {
     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
     printf "%s%s Fetching Full Details... %s" "$BG_BLUE" "$WHITE$BOLD" "$RESET"
     
-    echo "Step 2: Calling Python Fetch" >> /tmp/debug_workshop.log
-    local json_str
-    json_str=$(python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid")
-    echo "Step 3: Python Fetch Done. Length: ${#json_str}" >> /tmp/debug_workshop.log
+    # Use temp file to avoid subshell exit issues
+    local tmp_json="/tmp/workshop_details_${mid}.json"
+    python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>/dev/null
     
     # Parse Python output
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
     local -a mimages=()
     
     local parse_out
-    parse_out=$(echo "$json_str" | python3 -c "
+    # Feed temp file to parser
+    parse_out=$(cat "$tmp_json" | python3 -c "
 import sys, json, datetime, shlex
 try:
     data = json.load(sys.stdin)
@@ -310,16 +308,13 @@ try:
         img_str = ' '.join([shlex.quote(i) for i in imgs])
         print(f'mimages=({img_str})')
 except Exception as e:
-    print(f'# Error: {e}')
     print('mname=\"Error Parsing Data\"')
     print('mauthor=\"Unknown\"')
     print('mdesc=\"Failed to load mod details.\"')
 ")
-    echo "Step 4: Parse Out Generated. Length: ${#parse_out}" >> /tmp/debug_workshop.log
-    echo "Content: $parse_out" >> /tmp/debug_workshop.log
+    rm -f "$tmp_json"
     
     eval "$parse_out"
-    echo "Step 5: Eval Done" >> /tmp/debug_workshop.log
     set -e
     
     local scroll=0
@@ -327,11 +322,8 @@ except Exception as e:
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
-    echo "Step 6: Entering Loop" >> /tmp/debug_workshop.log
-    
     while true; do
         _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
-        echo "Step 7: Draw Done" >> /tmp/debug_workshop.log
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || { return; } # ESC
