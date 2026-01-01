@@ -6,13 +6,33 @@ import urllib.parse
 import re
 import argparse
 import os
+import time
 
 DAYZ_APPID = "221100"
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "workshop_cache.json")
+CACHE_EXPIRY_SEARCH = 3600 # 1 hour
+CACHE_EXPIRY_DETAILS = 86400 # 24 hours
+
+def load_cache():
+    if not os.path.exists(CACHE_FILE): return {}
+    try:
+        with open(CACHE_FILE, 'r') as f: return json.load(f)
+    except: return {}
+
+def save_cache(cache):
+    try:
+        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+        with open(CACHE_FILE, 'w') as f: json.dump(cache, f, indent=2)
+    except: pass
 
 def search_workshop(text, sort="trend", num=25, page=1):
-    """
-    Scrapes Mod IDs from Steam Workshop browse page.
-    """
+    cache = load_cache()
+    cache_key = f"search_{text}_{sort}_{num}_{page}"
+    if cache_key in cache:
+        entry = cache[cache_key]
+        if time.time() - entry['timestamp'] < CACHE_EXPIRY_SEARCH:
+            return entry['data']
+
     encoded_text = urllib.parse.quote(text)
     url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}&browsesort={sort}&section=readytouseitems&actualsort={sort}&p={page}"
     
@@ -28,16 +48,15 @@ def search_workshop(text, sort="trend", num=25, page=1):
             if fid not in ids:
                 ids.append(fid)
                 if len(ids) >= num: break
+        
+        cache[cache_key] = {'timestamp': time.time(), 'data': ids}
+        save_cache(cache)
         return ids
     except Exception as e:
         print(f"Search Error: {e}", file=sys.stderr)
         return []
 
 def scrape_dependencies(mod_id):
-    """
-    Fallback: Scrape 'Required items' from the Workshop HTML.
-    Steam API often omits these for standard WebAPI queries.
-    """
     url = f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -45,113 +64,119 @@ def scrape_dependencies(mod_id):
         with urllib.request.urlopen(req) as response:
             html = response.read().decode('utf-8', errors='ignore')
         
-        # Look for the RequiredItems_container
         sidebar_id = 'id="RequiredItems_container"'
         if sidebar_id in html:
             container = html.split(sidebar_id)[1].split('</div>')[0]
             return re.findall(r'id=([0-9]+)', container)
         
-        # Broad fallback
         if "Required items" in html:
             section = html.split("Required items")[1].split("</div>")[0]
             return re.findall(r'id=([0-9]+)', section)
-            
         return []
     except Exception: return []
 
 def get_mod_details(mod_ids, recursive=False, update_rules=None):
-    """
-    Fetches rich metadata for a list of Mod IDs using official public WebAPI.
-    """
     if not mod_ids: return []
-        
-    api_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
-    all_details = {}
-    to_fetch = set(mod_ids)
-    fetched = set()
+    cache = load_cache()
     
-    while to_fetch:
-        batch = list(to_fetch)[:100]
-        for mid in batch:
-            to_fetch.remove(mid)
-            fetched.add(mid)
-            
-        data_dict = {"itemcount": len(batch)}
-        for i, mid in enumerate(batch):
-            data_dict[f"publishedfileids[{i}]"] = mid
-            
-        encoded_data = urllib.parse.urlencode(data_dict).encode('utf-8')
-        
-        try:
-            req = urllib.request.Request(api_url, data=encoded_data)
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                
-            details = res_data.get('response', {}).get('publishedfiledetails', [])
-            for d in details:
-                mid = d.get('publishedfileid')
-                if not mid: continue
-                
-                subs = d.get('subscriptions', 0)
-                formatted_subs = "{:,}".format(subs).replace(",", ".")
-                
-                size_bytes = int(d.get('file_size', 0))
-                if size_bytes > 1024**3:
-                    size_str = f"{size_bytes / (1024**3):.1f} GB"
-                else:
-                    size_str = f"{size_bytes / (1024**2):.1f} MB"
-                
-                req_items = [r.get('publishedfileid') for r in d.get('required_items', [])]
-                if not req_items:
-                    req_items = scrape_dependencies(mid)
-                
-                all_details[mid] = {
-                    "id": mid,
-                    "name": d.get('title', f"Mod {mid}"),
-                    "subscribers": subs,
-                    "subscribers_f": formatted_subs,
-                    "size": size_str,
-                    "size_bytes": size_bytes,
-                    "updated": d.get('time_updated', 0),
-                    "description": d.get('description', ""),
-                    "dependencies": req_items
-                }
-                
-                if recursive:
-                    for r_id in req_items:
-                        if r_id not in fetched: to_fetch.add(r_id)
-                            
-        except Exception as e:
-            print(f"Detail Error: {e}", file=sys.stderr)
-            break
-            
     results = []
-    seen_in_results = set()
+    to_fetch = []
     
-    def add_to_results(mid):
-        if mid not in all_details or mid in seen_in_results: return
-        for dep_id in all_details[mid].get('dependencies', []):
-            add_to_results(dep_id)
-        if mid not in seen_in_results:
-            results.append(all_details[mid])
-            seen_in_results.add(mid)
+    for mid in mod_ids:
+        cache_key = f"details_{mid}"
+        if cache_key in cache:
+            entry = cache[cache_key]
+            if time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
+                results.append(entry['data'])
+                continue
+        to_fetch.append(mid)
 
-    for mid in mod_ids: add_to_results(mid)
+    if to_fetch:
+        api_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+        fetched_details = {}
+        fetch_queue = set(to_fetch)
+        processed = set()
         
+        while fetch_queue:
+            batch = list(fetch_queue)[:100]
+            for mid in batch: fetch_queue.remove(mid); processed.add(mid)
+            
+            data_dict = {"itemcount": len(batch)}
+            for i, mid in enumerate(batch): data_dict[f"publishedfileids[{i}]"] = mid
+            encoded_data = urllib.parse.urlencode(data_dict).encode('utf-8')
+            
+            try:
+                req = urllib.request.Request(api_url, data=encoded_data)
+                with urllib.request.urlopen(req) as response:
+                    res_data = json.loads(response.read().decode('utf-8'))
+                details = res_data.get('response', {}).get('publishedfiledetails', [])
+                for d in details:
+                    mid = d.get('publishedfileid')
+                    if not mid: continue
+                    
+                    subs = d.get('subscriptions', 0)
+                    formatted_subs = "{:,}".format(subs).replace(",", ".")
+                    size_bytes = int(d.get('file_size', 0))
+                    size_str = f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 1024**3 else f"{size_bytes / (1024**2):.1f} MB"
+                    
+                    req_items = [r.get('publishedfileid') for r in d.get('required_items', [])]
+                    if not req_items: req_items = scrape_dependencies(mid)
+                    
+                    details_obj = {
+                        "id": mid, "name": d.get('title', f"Mod {mid}"),
+                        "subscribers": subs, "subscribers_f": formatted_subs,
+                        "size": size_str, "size_bytes": size_bytes,
+                        "updated": d.get('time_updated', 0), "description": d.get('description', ""),
+                        "dependencies": req_items
+                    }
+                    fetched_details[mid] = details_obj
+                    cache[f"details_{mid}"] = {'timestamp': time.time(), 'data': details_obj}
+                    
+                    if recursive:
+                        for r_id in req_items:
+                            if r_id not in processed: fetch_queue.add(r_id)
+            except Exception as e:
+                print(f"Detail Error: {e}", file=sys.stderr)
+                break
+        
+        save_cache(cache)
+        # Combine and preserve order
+        for mid in mod_ids:
+            if mid in fetched_details: results.append(fetched_details[mid])
+            elif f"details_{mid}" in cache: results.append(cache[f"details_{mid}"]['data'])
+
+    # Recursive resolver for results
+    final_results = []
+    seen = set()
+    def resolve(obj):
+        if obj['id'] in seen: return
+        if recursive:
+            for dep_id in obj.get('dependencies', []):
+                # Ensure we have details for dependency (might be in cache)
+                d_key = f"details_{dep_id}"
+                if d_key in cache: resolve(cache[d_key]['data'])
+        if obj['id'] not in seen:
+            final_results.append(obj)
+            seen.add(obj['id'])
+
+    for res in results: resolve(res)
+    
     if update_rules and os.path.exists(update_rules):
         try:
             with open(update_rules, 'r') as f: rules = json.load(f)
-            rules_changed = False
-            if 'dependencies' not in rules: rules['dependencies'] = {}
-            for mid, info in all_details.items():
-                if mid not in rules['dependencies'] or rules['dependencies'][mid] != info['dependencies']:
-                    rules['dependencies'][mid] = info['dependencies']
-                    rules_changed = True
-            if rules_changed:
+            ch = False
+            if 'dependencies' not in rules: rules['dependencies'] = {}; ch = True
+            for mid, entry in cache.items():
+                if not mid.startswith("details_"): continue
+                item = entry['data']
+                iid = item['id']
+                if iid not in rules['dependencies'] or rules['dependencies'][iid] != item['dependencies']:
+                    rules['dependencies'][iid] = item['dependencies']; ch = True
+            if ch:
                 with open(update_rules, 'w') as f: json.dump(rules, f, indent=4)
         except Exception as e: print(f"Rules Update Error: {e}", file=sys.stderr)
         
-    return results
+    return final_results
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DayZ Workshop Search Backend')
@@ -162,14 +187,12 @@ if __name__ == "__main__":
     parser.add_argument('--details', help='Comma-separated Mod IDs for direct details')
     parser.add_argument('--recursive', action='store_true', help='Resolve dependencies recursively')
     parser.add_argument('--update-rules', help='Path to workshop_rules.json to update')
-    
     args = parser.parse_args()
     
     if args.details:
-        mod_ids = args.details.split(',')
-        print(json.dumps(get_mod_details(mod_ids, args.recursive, args.update_rules)))
+        ids = args.details.split(',')
+        print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
     elif args.search:
         ids = search_workshop(args.search, args.sort, args.num, args.page)
         print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
-    else:
-        parser.print_help()
+    else: parser.print_help()

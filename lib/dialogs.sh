@@ -98,7 +98,8 @@ read_input() {
     
     printf "%s" "$HIDE_CURSOR" >/dev/tty
     
-    # If empty and we have a default, use the default
+    # If empty or contains Escape (\e), use the default or return empty (cancel)
+    input="${input//[$'\e']/}"
     if [[ -z "$input" && -n "$default" ]]; then
         echo "$default"
     else

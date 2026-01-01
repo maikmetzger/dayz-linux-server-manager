@@ -1,0 +1,22 @@
+{
+  "search_DayZ_trend_1_1": {
+    "timestamp": 1767266556.9923918,
+    "data": [
+      "3633183287"
+    ]
+  },
+  "details_3633183287": {
+    "timestamp": 1767266557.606156,
+    "data": {
+      "id": "3633183287",
+      "name": "DayZLifeCore",
+      "subscribers": 251,
+      "subscribers_f": "251",
+      "size": "4.6 GB",
+      "size_bytes": 4964944557,
+      "updated": 1767088024,
+      "description": "[b]RESERVED MODPACK[/b]",
+      "dependencies": []
+    }
+  }
+}
