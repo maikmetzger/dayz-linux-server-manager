@@ -9,9 +9,18 @@ import os
 import time
 
 DAYZ_APPID = "221100"
-CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "workshop_cache.json")
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "workshop_cache_v2.json")
 CACHE_EXPIRY_SEARCH = 3600 # 1 hour
 CACHE_EXPIRY_DETAILS = 86400 # 24 hours
+
+SORT_MAP = {
+    "trend": "trend",
+    "mostsubscribed": "totaluniquesubscribers",
+    "mostsubscribed_asc": "totaluniquesubscribers", # Steam only has DESC, we reverse locally
+    "newestfirst": "mostrecent",
+    "lastupdated": "lastupdated",
+    "relevance": "relevance"
+}
 
 def load_cache():
     if not os.path.exists(CACHE_FILE): return {}
@@ -34,14 +43,15 @@ def search_workshop(text, sort="trend", num=25, page=1):
             return entry['data']
 
     encoded_text = urllib.parse.quote(text)
-    sort_param = f"&browsesort={sort}" if sort != "relevance" else ""
+    api_sort = SORT_MAP.get(sort, "trend")
+    sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
     
     # FIX: If searching for "DayZ" (app name), treat as empty search to enable global Browsing Sort
     # Search mode forces 'Relevance', Browsing mode allows 'Most Subscribed' etc.
     if text.lower() == "dayz" or not text.strip():
-        url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
+        url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={api_sort}&p={page}"
     else:
-        url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
+        url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={api_sort}&p={page}"
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -81,9 +91,14 @@ def scrape_dependencies(mod_id):
             reqs = re.findall(r'id=([0-9]+)', section)
         
         author = "Unknown"
-        if 'class="friendBlockContent"' in html:
-             try: author = html.split('class="friendBlockContent"')[1].split('>')[1].split('<')[0].strip()
-             except: pass
+        # Robust Author Regex: Look for friendBlockContent, then capture text inside (or inside anchor)
+        # Matches: <div class="friendBlockContent">Username</div> OR <div ...><a ...>Username</a>...
+        try:
+            m = re.search(r'class="friendBlockContent"[^>]*>[\s\r\n]*?(?:<a[^>]*>)?([^<]+)(?:</a>)?', html)
+            if m:
+                author = m.group(1).strip()
+        except: pass
+        
         return reqs, author
     except Exception: return [], "Unknown"
 
