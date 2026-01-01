@@ -77,21 +77,25 @@ register_modular_loot() {
     local instance_dir="$1"
     local source_xml="$2"
     local mod_name="$3"
+    local silent="${4:-0}"
     
     local mission_path
     if ! mission_path=$(get_mission_path "$instance_dir"); then
-        show_message "Could not find mission path in serverDZ.cfg" "Error"
+        [[ "$silent" == "0" ]] && show_message "Could not find mission path in serverDZ.cfg" "Error"
         return 1
     fi
     
     setup_modular_loot "$mission_path"
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
-    local target_filename="${mod_name}_types.xml"
+    local bname=$(basename "$source_xml")
+    local target_filename="${mod_name}_${bname}"
+    # Clean target name for FS safety
+    target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
     local target_path="${mission_path}/CustomCE/types/${target_filename}"
     
-    if [[ -f "$target_path" ]]; then
-        if ! confirm "Loot file already exists in CustomCE. Overwrite?" "n"; then
+    if [[ -f "$target_path" && "$silent" == "0" ]]; then
+        if ! confirm "Loot file '$target_filename' already exists. Overwrite?" "n"; then
             return 0
         fi
     fi
@@ -137,90 +141,199 @@ except Exception as e:
     sys.exit(1)
 EOF
     
-    show_message "Registered $target_filename in cfgeconomycore.xml" "Success"
+    if [[ "$silent" == "0" ]]; then
+        show_message "Registered $target_filename in cfgeconomycore.xml" "Success"
+    fi
 }
 
-# Discover loot XMLs in all active mods and allow registration
-mod_loot_discovery_menu() {
+# Unregister a modular include
+unregister_modular_loot() {
+    local instance_dir="$1"
+    local target_filename="$2"
+    
+    local mission_path=$(get_mission_path "$instance_dir")
+    [[ -z "$mission_path" ]] && return 1
+    
+    local core_xml="${mission_path}/cfgeconomycore.xml"
+    local target_path="${mission_path}/CustomCE/types/${target_filename}"
+    
+    # 1. Remove file
+    rm -f "$target_path"
+    
+    # 2. Remove from cfgeconomycore.xml
+    python3 <<EOF
+import xml.etree.ElementTree as ET
+import sys
+
+core_path = "$core_xml"
+file_to_rem = "$target_filename"
+
+try:
+    tree = ET.parse(core_path)
+    root = tree.getroot()
+    ce_node = root.find('ce')
+    if ce_node is not None:
+        rem_count = 0
+        for f in ce_node.findall('file'):
+            if f.get('name') == file_to_rem:
+                ce_node.remove(f)
+                rem_count += 1
+        
+        if rem_count > 0:
+            if hasattr(ET, 'indent'):
+                ET.indent(tree, space="\t", level=0)
+            tree.write(core_path, encoding='UTF-8', xml_declaration=True)
+            print("Success")
+except Exception as e:
+    print(f"Error: {e}")
+    sys.exit(1)
+EOF
+}
+
+# The new Modular Loot Manager (Professional Bulk View)
+modular_loot_manager() {
     local inst_dir="$1"
     local workshop_base="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
-    
-    # Files to look for IDs
     local mods_file="${inst_dir}/data/config/mods.txt"
     local servermods_file="${inst_dir}/data/config/servermods.txt"
     
-    # 1. Get ALL active mod IDs
-    local -a mod_ids=()
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        mod_ids+=("$line")
-    done < <(get_all_mod_ids "$mods_file" "$servermods_file")
-    
-    if [[ ${#mod_ids[@]} -eq 0 ]]; then
-        show_message "No active mods found in configuration." "Info"
-        return
-    fi
-    
-    # 2. Scan workshop folders
-    show_message "Scanning mod folders for loot definitions...\n(This scans all .xml files in active mods)" "Loot Discovery"
-    
-    local -a items=()
-    local -a paths=()
-    
-    for mid in "${mod_ids[@]}"; do
-        local mod_path="${workshop_base}/${mid}"
-        [[ ! -d "$mod_path" ]] && continue
-        
-        local mname=$(get_mod_name "$mid")
-        
-        # Look for XML files up to 4 levels deep
-        while IFS= read -r xml_file; do
-            [[ -z "$xml_file" ]] && continue
-            
-            # Check if it's a types file
-            if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
-                local bname=$(basename "$xml_file")
-                items+=("🧩|${mname} » ${bname}")
-                paths+=("${xml_file}|${mid}")
-            fi
-        done < <(find "$mod_path" -maxdepth 4 -name "*.xml" -type f 2>/dev/null)
-    done
-    
-    if [[ ${#items[@]} -eq 0 ]]; then
-        show_message "No unlinked loot definitions found in mods." "Info"
-        return
-    fi
-    
-    # 3. Present Discovery Menu
     local selection=0
+    local offset=0
+    
     while true; do
-        items+=("--------------------")
-        paths+=("")
-        items+=("←|Back")
-        paths+=("")
+        # 1. Scan everything
+        local -a mod_ids=()
+        while IFS= read -r line; do [[ -n "$line" ]] && mod_ids+=("$line"); done < <(get_all_mod_ids "$mods_file" "$servermods_file")
         
-        if ! run_menu items "Discovered Mod Loot Files" $selection; then
+        local -a items=()     # Display string
+        local -a src_paths=() # workshop path
+        local -a smod_names=()
+        local -a sfile_names=()
+        local -a states=()    # 0=unlinked, 1=linked
+        
+        local mission_path=$(get_mission_path "$inst_dir")
+        local custom_ce="${mission_path}/CustomCE/types"
+        
+        # Get currently linked files for status
+        local linked_files=""
+        if [[ -f "${mission_path}/cfgeconomycore.xml" ]]; then
+            linked_files=$(grep -o '<file name="[^"]*"' "${mission_path}/cfgeconomycore.xml" | cut -d'"' -f2)
+        fi
+
+        for mid in "${mod_ids[@]}"; do
+            local mod_path="${workshop_base}/${mid}"
+            [[ ! -d "$mod_path" ]] && continue
+            local mname=$(get_mod_name "$mid")
+            
+            while IFS= read -r xml_file; do
+                [[ -z "$xml_file" ]] && continue
+                # Basic name filter to skip obvious non-loot
+                local bn=$(basename "$xml_file" | tr '[:upper:]' '[:lower:]')
+                if [[ "$bn" == *"types"* || "$bn" == *"loot"* || "$bn" == *"classname"* ]]; then
+                     if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
+                        local bname=$(basename "$xml_file")
+                        local target_name="${mname}_${bname}"
+                        # Clean target name for FS safety
+                        target_name=$(echo "$target_name" | tr -cd '[:alnum:]_.-')
+                        
+                        src_paths+=("$xml_file")
+                        smod_names+=("$mname")
+                        sfile_names+=("$bname")
+                        
+                        if echo "$linked_files" | grep -qF "$target_name"; then
+                            states+=(1)
+                        else
+                            states+=(0)
+                        fi
+                     fi
+                fi
+            done < <(find "$mod_path" -maxdepth 4 -name "*.xml" -type f 2>/dev/null)
+        done
+        
+        local count=${#src_paths[@]}
+        if [[ $count -eq 0 ]]; then
+            show_message "No mod loot definitions found. Ensure mods are synced." "Info"
             return
         fi
+
+        # 2. Draw TUI
+        get_term_size
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        move_to 1 1
+        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Modular Loot Manager - $SELECTED_NAME" "$RESET"
         
-        selection=$MENU_RESULT
-        local selected_item="${items[$MENU_RESULT]}"
-        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
+        local table_start=3
+        move_to $table_start 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
+        
+        move_to $((table_start + 1)) 1
+        printf "  %-12s %-30s %-30s" "STATUS" "MOD NAME" "FILE NAME"
+        
+        move_to $((table_start + 2)) 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
+        
+        local v_height=$((TERM_ROWS - 10))
+        [[ $v_height -lt 5 ]] && v_height=5
+        if [[ $selection -lt $offset ]]; then offset=$selection; fi
+        if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
+
+        for ((i=0; i<v_height; i++)); do
+            local idx=$((offset + i))
+            [[ $idx -ge $count ]] && break
+            
+            local row=$((table_start + 3 + i))
+            local status_str="[ UNLINKED ]"
+            local color="$WHITE"
+            [[ ${states[$idx]} -eq 1 ]] && { status_str="[  LINKED  ]"; color="$GRN"; }
+            
+            move_to $row 1
+            if [[ $idx -eq $selection ]]; then
+                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+                move_to $row 3
+                printf "%-12s %-30s %-30s" "$status_str" "${smod_names[$idx]}" "${sfile_names[$idx]}"
+                printf "%s" "$RESET"
+            else
+                move_to $row 3
+                printf "%s%-12s%s %-30s %-30s" "$color" "$status_str" "$RESET" "${smod_names[$idx]}" "${sfile_names[$idx]}"
+            fi
+        done
+        
+        # Footer
+        move_to $((TERM_ROWS - 1)) 1
+        local footer=" [↑↓] Navigate   [Enter] Toggle Link   [q] Back"
+        printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
+        
+        # 3. Handle Input
+        IFS= read -rsn1 key
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 seq || true
+            case "$seq" in
+                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+            esac
+        elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
+        elif [[ "$key" == "" ]]; then
+            local midx=$selection
+            local src="${src_paths[$midx]}"
+            local mn="${smod_names[$midx]}"
+            local fn="${sfile_names[$midx]}"
+            local tn="${mn}_${fn}"
+            tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
+            
+            if [[ ${states[$midx]} -eq 0 ]]; then
+                # Use silent mode (1) for instant toggle in manager
+                register_modular_loot "$inst_dir" "$src" "$mn" 1
+            else
+                # We still confirm unlinking as it's destructive (removes your edits)
+                if confirm "Unlink modular loot '$tn'? (This deletes the custom XML file)" "n"; then
+                    unregister_modular_loot "$inst_dir" "$tn"
+                fi
+            fi
+            # Implicitly re-loops and re-scans
         fi
-        
-        local selected_info="${paths[$MENU_RESULT]}"
-        IFS='|' read -r full_path smid <<< "$selected_info"
-        local smname=$(get_mod_name "$smid")
-        
-        if confirm "Register '${smname}' loot as Modular?" "y"; then
-            register_modular_loot "$inst_dir" "$full_path" "$smname"
-            return # Exit back to list
-        fi
-        
-        # Just keep menu open if not confirmed
-        items=("${items[@]:0:${#items[@]}-3}")
-        paths=("${paths[@]:0:${#paths[@]}-3}")
     done
 }
 
