@@ -479,7 +479,7 @@ mod_manager() {
                     # Scan for CE files (Phase 3-4)
                     local ce_result
                     echo "DEBUG: Running scan on $SELECTED_DIR" > "${SELECTED_DIR}/debug_post_sync.log"
-                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" | tail -n 1)
+                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>> "${SELECTED_DIR}/debug_post_sync.log" | tail -n 1)
                     
                     echo "DEBUG: CE Result raw: '$ce_result'" >> "${SELECTED_DIR}/debug_post_sync.log"
 
@@ -495,7 +495,7 @@ mod_manager() {
                     
                     echo "DEBUG: New Count: $new_ce_count" >> "${SELECTED_DIR}/debug_post_sync.log"
                     
-                    show_message "Debug: Check debug_post_sync.log (Count: $new_ce_count)" "Debug"
+                    show_message "Debug: Check ${SELECTED_DIR}/debug_post_sync.log (Count: $new_ce_count)" "Debug"
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
                         # Ask user if they want to link new CE files

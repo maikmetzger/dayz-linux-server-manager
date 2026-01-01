@@ -607,7 +607,10 @@ try:
             })
     
     print(json.dumps(files))
+    print(json.dumps(files))
 except Exception as e:
+    import sys
+    sys.stderr.write(f"DEBUG: Python Error: {e}\n")
     print('[]')
 EOF
 }
