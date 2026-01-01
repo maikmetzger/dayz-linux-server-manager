@@ -231,15 +231,20 @@ config_flat_editor() {
 # =============================================================================
 
 config_table_editor() {
+    echo "--- config_table_editor start ---" >> /tmp/dayz_debug.log
     local container="$1"
     local config_path="$2"
     local title="$3"
     local keys_csv="$4"
     
+    echo "Container: $container" >> /tmp/dayz_debug.log
+    echo "Config: $config_path" >> /tmp/dayz_debug.log
+    
     local container_path="/dayz/config/$(basename "$config_path")"
     
     # Parse keys
     IFS=',' read -ra keys <<< "$keys_csv"
+    echo "Keys count: ${#keys[@]}" >> /tmp/dayz_debug.log
     
     local selection=0
     
@@ -250,8 +255,11 @@ config_table_editor() {
         local result
         result=$(config_parser_exec "$container" getall cfg "$container_path")
         
+        echo "Parser Result: $result" >> /tmp/dayz_debug.log
+        
         # DEBUG: Show what we got
         if [[ -z "$result" ]]; then
+            echo "ERROR: Empty result" >> /tmp/dayz_debug.log
             show_message "DEBUG: Empty result from parser\nContainer: $container\nPath: $container_path" "Debug"
             return
         fi
