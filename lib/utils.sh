@@ -135,16 +135,26 @@ dotenv_get() {
 # Find active mission path from serverDZ.cfg
 get_mission_path() {
     local instance_dir="$1"
-    local cfg="${instance_dir}/data/config/serverDZ.cfg"
-    [[ ! -f "$cfg" ]] && cfg="${instance_dir}/serverDZ.cfg"
-    [[ ! -f "$cfg" ]] && return 1
+    local cfg=""
     
+    # Try common config locations
+    local cfg_paths=(
+        "${instance_dir}/data/config/serverDZ.cfg"
+        "${instance_dir}/data/serverfiles/serverDZ.cfg"
+        "${instance_dir}/serverfiles/serverDZ.cfg"
+        "${instance_dir}/serverDZ.cfg"
+    )
+    for p in "${cfg_paths[@]}"; do
+        if [[ -f "$p" ]]; then cfg="$p"; break; fi
+    done
+
     local template=""
-    # Use grep to avoid python dependency in core utils
-    template=$(grep -i '^template' "$cfg" | sed -E 's/template\s*=\s*"([^"]+)".*/\1/')
+    if [[ -n "$cfg" ]]; then
+        # More flexible regex for template (handles indentation and spaces)
+        template=$(grep -i '^[[:space:]]*template' "$cfg" | sed -E 's/.*template\s*=\s*"([^"]+)".*/\1/' | head -n 1)
+    fi
     
     if [[ -n "$template" ]]; then
-        # Try both common mount structures
         local paths=(
             "${instance_dir}/data/serverfiles/mpmissions/${template}"
             "${instance_dir}/data/mpmissions/${template}"
@@ -155,5 +165,14 @@ get_mission_path() {
             [[ -d "$p" ]] && { echo "$p"; return 0; }
         done
     fi
+
+    # Fallback: Find mission by looking for economy files
+    local fallback
+    fallback=$(find "${instance_dir}" -maxdepth 6 -name "cfgeconomycore.xml" -o -name "economy.xml" 2>/dev/null | head -n 1)
+    if [[ -n "$fallback" ]]; then
+        dirname "$fallback"
+        return 0
+    fi
+
     return 1
 }

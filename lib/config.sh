@@ -26,15 +26,18 @@ find_types_xml() {
     local mission_path=$(get_mission_path "$inst_dir")
     
     if [[ -n "$mission_path" ]]; then
+        # 1. Standard DB location
         local p="${mission_path}/db/types.xml"
-        if [[ -f "$p" ]]; then
-            echo "$p"
-            return
-        fi
+        [[ -f "$p" ]] && { echo "$p"; return; }
+        
+        # 2. Search anywhere inside mission folder
+        local m_search
+        m_search=$(find "$mission_path" -name "types.xml" -type f 2>/dev/null | head -n 1)
+        [[ -n "$m_search" ]] && { echo "$m_search"; return; }
     fi
     
-    # Global search fallback
-    find "${inst_dir}" -maxdepth 6 -name "types.xml" -type f 2>/dev/null | head -n 1
+    # Global search fallback (increased depth for complex server layouts)
+    find "${inst_dir}" -maxdepth 8 -name "types.xml" -type f 2>/dev/null | head -n 1
 }
 
 # =============================================================================
