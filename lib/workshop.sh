@@ -300,10 +300,11 @@ _view_mod_details() {
     # Use temp file to avoid subshell exit issues
     local tmp_json="/tmp/workshop_details_${mid}.json"
     echo "FETCHING PYTHON..." >> /tmp/workshop_crash.log
+    echo "XYZZY_SYNC_CHECK_2026" >> /tmp/workshop_crash.log
     
     # Timeout after 30s, capture stderr for debugging
     timeout 30s python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>> /tmp/workshop_crash.log
-    echo "DEBUG: Before py_exit" >> /tmp/workshop_crash.log
+    echo "XYZZY_AFTER_TIMEOUT" >> /tmp/workshop_crash.log
     local py_exit=$?
     echo "PYTHON EXIT CODE: $py_exit" >> /tmp/workshop_crash.log
     echo "DEBUG: After py_exit" >> /tmp/workshop_crash.log
