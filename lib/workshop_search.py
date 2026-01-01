@@ -196,8 +196,8 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
         cache_key = f"details_{mid}"
         if cache_key in cache:
             entry = cache[cache_key]
-            # If we need author/images and it's missing (legacy cache), re-fetch
-            if 'author' not in entry['data'] or 'images' not in entry['data']: to_fetch.append(mid)
+            # If we need author/images and it's missing (legacy cache) or Unknown, re-fetch
+            if 'author' not in entry['data'] or 'images' not in entry['data'] or entry['data']['author'] == "Unknown": to_fetch.append(mid)
             elif time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
                 results.append(entry['data'])
                 continue
