@@ -376,10 +376,14 @@ mod_config_browser() {
     while true; do
         get_term_size
         printf "%s" "$CLEAR_SCREEN"
-        draw_header "Mod Configs"
+        draw_header "Mod Config Editor"
+        
+        # Breadcrumbs
+        move_to 2 2
+        printf "%s%sMod Configs%s" "$DIM" "ROOT > " "$RESET"
         
         # Draw folder list
-        local row=3
+        local row=4
         for ((i=0; i<count && row<TERM_ROWS-2; i++)); do
             local name=$(basename "${folders[$i]}")
             local file_count=$(find "${folders[$i]}" -maxdepth 1 -type f 2>/dev/null | wc -l)
@@ -439,10 +443,14 @@ mod_folder_browser() {
     while true; do
         get_term_size
         printf "%s" "$CLEAR_SCREEN"
-        draw_header "$folder_name"
+        draw_header "Mod Config Editor"
+        
+        # Breadcrumbs
+        move_to 2 2
+        printf "%s%sMod Configs > %s%s" "$DIM" "ROOT > " "$folder_name" "$RESET"
         
         # Draw file list
-        local row=3
+        local row=4
         for ((i=0; i<count && row<TERM_ROWS-2; i++)); do
             local name=$(basename "${files[$i]}")
             local icon=$(get_file_icon "${files[$i]}")
