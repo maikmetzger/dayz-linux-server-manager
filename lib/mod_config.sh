@@ -324,26 +324,30 @@ modular_loot_dashboard() {
         local json="$1"
         # Reset arrays
         src_paths=()
+        smod_ids=()
         smod_names=()
         sfile_names=()
         sce_types=()
         states=()
+        slinked_names=()
         
-        while IFS='|' read -r sp mn fn ct st; do
+        while IFS='|' read -r sp mid mn fn ct st ln; do
             [[ -z "$sp" ]] && continue
             src_paths+=("$sp")
+            smod_ids+=("$mid")
             smod_names+=("$mn")
             sfile_names+=("$fn")
             sce_types+=("$ct")
             states+=("$st")
+            slinked_names+=("$ln")
         done < <(echo "$json" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
     for i in data:
-        # Convert status 'linked' to 1, else 0
         st = 1 if i.get('status') == 'linked' else 0
-        print(f\"{i['file_path']}|{i['mod_id']}|{i['filename']}|{i['ce_type']}|{st}\")
+        ln = i.get('linked_filename', '')
+        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', i['mod_id'])}|{i['filename']}|{i['ce_type']}|{st}|{ln}\")
 except: pass
 ")
     }
@@ -354,12 +358,12 @@ except: pass
         local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
         if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
         
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>>"${inst_dir}/debug_tui.log" | tail -n 1)
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
         
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
 
         # 2. Parse result into arrays
-        local -a src_paths smod_names sfile_names sce_types states
+        local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names
         parse_scan_result "$ce_result"
         
         local count=${#src_paths[@]}
@@ -489,15 +493,21 @@ except: pass
             
             if [[ ${states[$midx]} -eq 1 ]]; then
                 # LINKED -> Unlink
-                local target_to_unlink="${smod_names[$midx]}_${fn}"
+                local target_to_unlink="${smod_ids[$midx]}_${fn}"
+                
+                # Use ACTUAL linked filename if detected (handles legacy names like ModName_File.xml)
+                if [[ -n "${slinked_names[$midx]}" ]]; then
+                    target_to_unlink="${slinked_names[$midx]}"
+                fi
+                
                 if confirm "Unlink '$target_to_unlink' calling unregister?" "y"; then
                     unregister_modular_loot "$inst_dir" "$target_to_unlink"
                     show_message "Unlinked $target_to_unlink" "Success"
                 fi
             else
                 # UNLINKED -> Link
-                if confirm "Link '$fn' ($ct) to your economy?" "y"; then
-                     register_modular_loot "$inst_dir" "$src" "$mn" 1
+                if confirm "Link '$fn' (${smod_names[$midx]}) to your economy?" "y"; then
+                     register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1
                      show_message "Linked $fn ($ct)" "Success"
                 fi
             fi
@@ -668,7 +678,7 @@ scan_dayz_ce_files_python() {
     export DAYZ_SCRIPT_DIR="$SCRIPT_DIR"
     export DAYZ_MISSION_PATH="$mission_path"
     
-    python3 <<PYTHON_CE_SCAN
+    python3 <<'PYTHON_CE_SCAN'
 import os
 import json
 import sys
@@ -697,11 +707,7 @@ except:
 
 # Get all mod IDs from files
 mod_ids = set()
-mod_name_map = {} # Map ID to Name if possible? 
-# We don't have mod name easily here without reading meta.cpp easily. 
-# But we can try to guess or just use ID. 
-# Actually get_mod_name is a bash function. 
-# We can't call it easily. We'll use ID as name or try to find meta.cpp simple parse.
+mod_name_map = {} # Populated after mod_ids collected
 
 for f in [mods_file, servermods_file]:
     if f and os.path.exists(f):
@@ -710,6 +716,19 @@ for f in [mods_file, servermods_file]:
                 mid = line.strip().split('|')[0].strip()
                 if mid.isdigit():
                     mod_ids.add(mid)
+
+def get_mod_name(workshop_dir, mod_id):
+    meta_path = os.path.join(workshop_dir, mod_id, 'meta.cpp')
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, 'r', errors='ignore') as f:
+                import re
+                match = re.search(r'name\s*=\s*"([^"]+)"', f.read())
+                if match: return match.group(1)
+        except: pass
+    return mod_id
+
+mod_name_map = {mid: get_mod_name(workshop_dir, mid) for mid in mod_ids}
 
 results = []
 scanned_files = set() # To track which files we found in mods, to identify orphans later
@@ -771,10 +790,12 @@ for mod_id in sorted(mod_ids):
             
             results.append({
                 "mod_id": mod_id,
+                "mod_name": mod_name_map.get(mod_id, mod_id),
                 "file_path": fpath,
                 "filename": fname,
                 "ce_type": ce_type,
-                "status": status
+                "status": status,
+                "linked_filename": linked_name if is_linked else ""
             })
             
             # Track for orphan detection (exact relative path in CustomCE?)
