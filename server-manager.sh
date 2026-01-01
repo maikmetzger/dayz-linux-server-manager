@@ -482,8 +482,7 @@ mod_manager() {
                     
                     # Count new CE files
                     new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>/dev/null || echo "0")
-                    
-                    show_message "DEBUG: Scan finished. Detected: $new_ce_count NEW files." "Debug" # Temporary Debug
+
 
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
