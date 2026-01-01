@@ -263,7 +263,8 @@ try:
     for x in data:
         updated_dt = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
         # id|name|subs_f|size|updated_f|desc|children|subs_raw
-        print(f\"{x['id']}|{x['name']}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{x.get('description','')[:500].replace('|',' ')}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
+        desc = x.get('description','')[:500].replace('|',' ').replace('\n', ' ').replace('\r', ' ')
+        print(f\"{x['id']}|{x['name']}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
 except Exception as e:
     pass
 ")
