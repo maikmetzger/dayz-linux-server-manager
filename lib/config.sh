@@ -426,6 +426,8 @@ types_selection_menu() {
         
         items+=("--------------------")
         paths+=("")
+        items+=("🔍|Discover from Mods...")
+        paths+=("SCAN_MODS")
         items+=("←|Back")
         paths+=("")
         
@@ -439,6 +441,9 @@ types_selection_menu() {
         
         if [[ "$selected_item" == "←|Back" ]]; then
             return
+        elif [[ "$selected_path" == "SCAN_MODS" ]]; then
+            mod_loot_discovery_menu "$inst_dir"
+            continue
         fi
         
         if [[ -n "$selected_path" ]]; then

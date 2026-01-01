@@ -140,6 +140,90 @@ EOF
     show_message "Registered $target_filename in cfgeconomycore.xml" "Success"
 }
 
+# Discover loot XMLs in all active mods and allow registration
+mod_loot_discovery_menu() {
+    local inst_dir="$1"
+    local workshop_base="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+    
+    # Files to look for IDs
+    local mods_file="${inst_dir}/data/config/mods.txt"
+    local servermods_file="${inst_dir}/data/config/servermods.txt"
+    
+    # 1. Get ALL active mod IDs
+    local -a mod_ids=()
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        mod_ids+=("$line")
+    done < <(get_all_mod_ids "$mods_file" "$servermods_file")
+    
+    if [[ ${#mod_ids[@]} -eq 0 ]]; then
+        show_message "No active mods found in configuration." "Info"
+        return
+    fi
+    
+    # 2. Scan workshop folders
+    show_message "Scanning mod folders for loot definitions...\n(This scans all .xml files in active mods)" "Loot Discovery"
+    
+    local -a items=()
+    local -a paths=()
+    
+    for mid in "${mod_ids[@]}"; do
+        local mod_path="${workshop_base}/${mid}"
+        [[ ! -d "$mod_path" ]] && continue
+        
+        local mname=$(get_mod_name "$mid")
+        
+        # Look for XML files up to 4 levels deep
+        while IFS= read -r xml_file; do
+            [[ -z "$xml_file" ]] && continue
+            
+            # Check if it's a types file
+            if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
+                local bname=$(basename "$xml_file")
+                items+=("🧩|${mname} » ${bname}")
+                paths+=("${xml_file}|${mid}")
+            fi
+        done < <(find "$mod_path" -maxdepth 4 -name "*.xml" -type f 2>/dev/null)
+    done
+    
+    if [[ ${#items[@]} -eq 0 ]]; then
+        show_message "No unlinked loot definitions found in mods." "Info"
+        return
+    fi
+    
+    # 3. Present Discovery Menu
+    local selection=0
+    while true; do
+        items+=("--------------------")
+        paths+=("")
+        items+=("←|Back")
+        paths+=("")
+        
+        if ! run_menu items "Discovered Mod Loot Files" $selection; then
+            return
+        fi
+        
+        selection=$MENU_RESULT
+        local selected_item="${items[$MENU_RESULT]}"
+        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
+            return
+        fi
+        
+        local selected_info="${paths[$MENU_RESULT]}"
+        IFS='|' read -r full_path smid <<< "$selected_info"
+        local smname=$(get_mod_name "$smid")
+        
+        if confirm "Register '${smname}' loot as Modular?" "y"; then
+            register_modular_loot "$inst_dir" "$full_path" "$smname"
+            return # Exit back to list
+        fi
+        
+        # Just keep menu open if not confirmed
+        items=("${items[@]:0:${#items[@]}-3}")
+        paths=("${paths[@]:0:${#paths[@]}-3}")
+    done
+}
+
 # =============================================================================
 # Specialized Mod Config Actions
 # =============================================================================

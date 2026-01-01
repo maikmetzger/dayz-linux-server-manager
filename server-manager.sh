@@ -166,7 +166,7 @@ mod_manager() {
         fi
         
         local mod_count=${#mod_ids[@]}
-        local total_items=$((mod_count + 4))
+        local total_items=$((mod_count + 6))
         
         [[ $selected -lt 0 ]] && selected=0
         [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
@@ -379,7 +379,7 @@ mod_manager() {
                     esac
                     dirty=1; needs_rebuild=1
                 elif [[ $selected -eq $mod_count ]]; then
-                    # Add (This is the [A] Add action)
+                    # Add
                     local new_id
                     new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
                     if [[ "$new_id" =~ ^[0-9]+$ ]]; then
@@ -392,10 +392,23 @@ mod_manager() {
                         fi
                     fi
                 elif [[ $selected -eq $((mod_count + 1)) ]]; then
+                    # Remove
+                    if [[ $selected -lt $mod_count ]]; then
+                        local mid="${mod_ids[$selected]}"
+                        local mname=$(get_mod_name "$mid")
+                        if confirm "Remove mod '$mname' from list?" "n"; then
+                            removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
+                            show_message "Removed: $mname" "Success"
+                            dirty=1; needs_rebuild=1
+                        fi
+                    else
+                        show_message "Select a mod to remove first" "Info"
+                    fi
+                elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Workshop
                     workshop_browser "$SELECTED_DIR"
                     needs_rebuild=1
-                elif [[ $selected -eq $((mod_count + 2)) ]]; then
+                elif [[ $selected -eq $((mod_count + 3)) ]]; then
                     # Sync
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -404,8 +417,8 @@ mod_manager() {
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                elif [[ $selected -eq $((mod_count + 3)) ]]; then
-                    # FixMods (sync lowercase)
+                elif [[ $selected -eq $((mod_count + 4)) ]]; then
+                    # FixMods
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
                     if [[ "$status" != "RUNNING" ]]; then
@@ -413,7 +426,7 @@ mod_manager() {
                     else
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                elif [[ $selected -eq $((mod_count + 4)) ]]; then
+                elif [[ $selected -eq $((mod_count + 5)) ]]; then
                     return
                 fi
                 ;;
