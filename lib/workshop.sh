@@ -22,7 +22,7 @@ _fetch_workshop_details() {
     local ids="$1"
     local recursive="${2:-""}"
     local rules_path="${3:-""}"
-    local cmd="python3 \"${SCRIPT_DIR}/lib/workshop_search.py\" --details \"$ids\""
+    local cmd="timeout 90s python3 \"${SCRIPT_DIR}/lib/workshop_search.py\" --details \"$ids\""
     [[ "$recursive" == "1" ]] && cmd="$cmd --recursive"
     [[ -n "$rules_path" ]] && cmd="$cmd --update-rules \"$rules_path\""
     eval "$cmd"
@@ -593,9 +593,19 @@ except Exception as e:
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
                 if [[ -z "${installed_mods[$mid]:-}" ]]; then
-                    show_message "Resolving full dependency chain for '$mname'..." "Workshop"
+                    # Non-blocking status banner
+                    local msg="Fetching dependency chain for '$mname'..."
+                    move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - ${#msg} / 2))
+                    printf "%s%s%s%s" "$BG_BLUE" "$WHITE$BOLD" " $msg " "$RESET"
+                    
                     local chain_json
                     chain_json=$(_fetch_workshop_details "$mid" "1" "$rules_json")
+                    
+                    if [[ -z "$chain_json" ]]; then
+                        show_message "Failed to fetch dependencies (timeout or network error)." "Error"
+                        continue
+                    fi
+                    
                     local -a to_install_ids=() to_install_names=() frameworks_found=()
                     while IFS='|' read -r cid cname; do
                         if [[ -n "$cid" && -z "${installed_mods[$cid]:-}" ]]; then
