@@ -207,8 +207,10 @@ _draw_workshop_details_screen() {
                 local style="$DIM"
                 [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_CYN$WHITE$BOLD"
                 local img_url="${_images_ref[$idx]}"
-                local short_url="${img_url:8:30}..." # Trim https://
-                printf "%s%-34s%s" "$style" "$short_url" "$RESET"
+                # Display more of the URL so it's clickable in terminals
+                # Remove protocol for display to save space, but keep domain/path
+                local disp_url="${img_url#*://}" # Remove https://
+                printf "%s%-36s%s" "$style" "${disp_url:0:36}" "$RESET"
             fi
         done
     fi
@@ -221,18 +223,12 @@ _draw_workshop_details_screen() {
     if [[ $desc_width -gt 20 ]]; then
         draw_box 3 $desc_col $desc_height $desc_width "Description"
         
-        # Simple word wrapping and scrolling
+        # Use fold to wrap lines nicely respecting paragraphs
         local -a lines=()
-        local current_line=""
-        for word in $mdesc; do
-            if [[ $((${#current_line} + ${#word} + 1)) -lt $((desc_width - 2)) ]]; then
-                current_line+="$word "
-            else
-                lines+=("$current_line")
-                current_line="$word "
-            fi
-        done
-        lines+=("$current_line")
+        # Ensure we don't trip set -e with empty output or subshell failures
+        while IFS= read -r line; do
+            lines+=("$line")
+        done < <(echo -e "$mdesc" | fold -s -w $((desc_width - 2)))
         
         local view_height=$((desc_height - 2))
         local total_lines=${#lines[@]}
@@ -258,7 +254,7 @@ _draw_workshop_details_screen() {
 
     # 5. Footer Actions
     move_to $((TERM_ROWS)) 1
-    local footer=" [Enter] Install  [b] Open Steam Page  [i] Open Image  [Tab] Switch Focus  [Esc/q] Back "
+    local footer=" [Enter] Install  [b] Steam  [i] Image  [Tab] Switch  [←→] Page  [Desc] Scroll  [Esc] Back "
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
 }
 
@@ -299,7 +295,8 @@ try:
         def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
         
         desc = x.get('description_clean', x.get('description', ''))
-        desc = desc.replace('\n', ' ').replace('\r', ' ')
+        # Do NOT strip newlines - we want paragraphs now!
+        # desc = desc.replace('\n', ' ').replace('\r', ' ')
         
         print(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}')
         print(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}')
@@ -339,6 +336,10 @@ except Exception as e:
                 "[B") 
                     if [[ $focus -eq 0 ]]; then ((scroll++)); 
                     else [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); fi ;;
+                "[D") # Page Up
+                    if [[ $focus -eq 0 ]]; then scroll=$((scroll - 20)); [[ $scroll -lt 0 ]] && scroll=0; fi ;;
+                "[C") # Page Down
+                    if [[ $focus -eq 0 ]]; then scroll=$((scroll + 20)); fi ;;
             esac
         elif [[ "$k" == "q" || "$k" == "Q" ]]; then 
             set -eu; return
