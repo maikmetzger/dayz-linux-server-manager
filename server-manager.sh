@@ -478,7 +478,7 @@ mod_manager() {
                     
                     # Scan for CE files (Phase 3-4)
                     local ce_result
-                    ce_result=$(scan_mods_for_ce_files "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null || echo "[]")
+                    ce_result=$(scan_mods_for_ce_files "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null | tail -n 1 || echo "[]")
                     
                     # Count new CE files
                     new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>/dev/null || echo "0")
