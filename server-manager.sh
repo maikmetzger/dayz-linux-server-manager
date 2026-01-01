@@ -348,6 +348,21 @@ mod_manager() {
                     fi
                 fi
                 ;;
+            'r'|'R')
+                if [[ $selected -lt $mod_count ]]; then
+                    local mid="${mod_ids[$selected]}"
+                    local mname=$(get_mod_name "$mid")
+                    
+                    if confirm "Remove mod '$mname' from list?" "n"; then
+                        local removed_keys
+                        removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file")
+                        show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
+                        dirty=1; needs_rebuild=1
+                        [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
+                        [[ $selected -lt 0 ]] && selected=0
+                    fi
+                fi
+                ;;
             '')  # Enter
                 if [[ $selected -lt $mod_count ]]; then
                     local mid="${mod_ids[$selected]}"

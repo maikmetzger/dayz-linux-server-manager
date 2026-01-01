@@ -160,6 +160,55 @@ remove_mod_from_file() {
     sed -i "s/^[[:space:]]*${mod_id}[[:space:]]*$/# ${mod_id}/" "$file"
 }
 
+# Fully delete mod ID from file (not just comment)
+delete_mod_from_file() {
+    local mod_id="$1"
+    local file="$2"
+    [[ -f "$file" ]] && sed -i "/^[[:space:]]*#*[[:space:]]*${mod_id}[[:space:]]*$/d" "$file"
+}
+
+# Get mod's .bikey filenames from its keys/ folder
+# Usage: while read key; do ...; done < <(get_mod_bikeys "$mod_id" "$workshop_content_path")
+get_mod_bikeys() {
+    local mod_id="$1"
+    local workshop_base="${2:-/dayz/steamapps/workshop/content/221100}"
+    local keys_dir="${workshop_base}/${mod_id}/keys"
+    
+    if [[ -d "$keys_dir" ]]; then
+        find "$keys_dir" -maxdepth 1 -name "*.bikey" -exec basename {} \; 2>/dev/null
+    fi
+}
+
+# Uninstall mod completely
+# - Remove from mods.txt/servermods.txt
+# - Delete matching .bikey from global keys/ folder
+# Returns: number of keys deleted
+uninstall_mod() {
+    local mod_id="$1"
+    local mods_file="$2"
+    local servermods_file="$3"
+    local server_keys_dir="${4:-/dayz/keys}"
+    local workshop_base="${5:-/dayz/steamapps/workshop/content/221100}"
+    
+    # 1. Remove from both files
+    delete_mod_from_file "$mod_id" "$mods_file"
+    delete_mod_from_file "$mod_id" "$servermods_file"
+    
+    # 2. Get and delete .bikey files
+    local key_count=0
+    while IFS= read -r key; do
+        if [[ -n "$key" ]]; then
+            local global_key="${server_keys_dir}/${key}"
+            if [[ -f "$global_key" ]]; then
+                rm -f "$global_key"
+                ((key_count++))
+            fi
+        fi
+    done < <(get_mod_bikeys "$mod_id" "$workshop_base")
+    
+    echo "$key_count"
+}
+
 # -----------------------------------------------------------------------------
 # Mod Ordering
 # -----------------------------------------------------------------------------
