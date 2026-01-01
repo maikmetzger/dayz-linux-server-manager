@@ -310,6 +310,8 @@ _view_mod_details() {
         echo "PYTHON FAILED, using defaults" >> /tmp/workshop_crash.log
     fi
     
+    echo "PARSING JSON..." >> /tmp/workshop_crash.log
+    
     # Parse Python output
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
     local -a mimages=()
@@ -317,7 +319,7 @@ _view_mod_details() {
     local tmp_source="/tmp/workshop_source_${mid}.sh"
     
     # Python writes direct shell assignments to file
-    cat "$tmp_json" | python3 -c "
+    cat "$tmp_json" 2>/dev/null | python3 -c "
 import sys, json, datetime, shlex
 try:
     data = json.load(sys.stdin)
@@ -343,16 +345,20 @@ try:
             img_str = ' '.join([shlex.quote(i) for i in imgs])
             f.write(f'mimages=({img_str})\\n')
 except Exception as e:
-    pass # Defaults will remain
-"
+    print(f'PARSE ERROR: {e}', file=sys.stderr)
+" 2>> /tmp/workshop_crash.log
     rm -f "$tmp_json"
+    
+    echo "SOURCING..." >> /tmp/workshop_crash.log
     
     # Source the generated file (Safe loading of variables)
     if [[ -f "$tmp_source" ]]; then
-        source "$tmp_source"
+        source "$tmp_source" 2>> /tmp/workshop_crash.log
         rm -f "$tmp_source"
     fi
     rm -f "$tmp_json"
+    
+    echo "ENTERING UI LOOP..." >> /tmp/workshop_crash.log
     
     # Run UI loop in permissive mode to prevent crashes from fold/printf
     set +eu
