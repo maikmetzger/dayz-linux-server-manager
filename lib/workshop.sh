@@ -616,6 +616,7 @@ except Exception as e:
                     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - ${#msg} / 2)) 2>> /tmp/workshop_crash.log || true
                     echo "INSTALL_DEBUG: line 615 - printf" >> /tmp/workshop_crash.log
                     printf "%s%s%s%s" "$BG_BLUE" "$WHITE$BOLD" " $msg " "$RESET" 2>> /tmp/workshop_crash.log || true
+                    echo "INSTALL_DEBUG: after printf" >> /tmp/workshop_crash.log
                     
                     echo "INSTALL: Calling _fetch_workshop_details" >> /tmp/workshop_crash.log
                     local chain_json=""
