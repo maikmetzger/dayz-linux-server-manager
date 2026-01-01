@@ -246,8 +246,8 @@ _draw_workshop_details_screen() {
                 local line="${lines[$l_idx]}"
                 # RICH TEXT RENDERING
                 if [[ "$line" == ">> "* ]]; then
-                     # HEADER: Yellow/Bold
-                     printf "%s%s%s" "$YEL$BOLD" "${line//>>/}" "$RESET"
+                     # HEADER: Red/Bold (DayZ Style)
+                     printf "%s%s%s" "$RED$BOLD" "${line//>>/}" "$RESET"
                 else
                      # INLINE PARSING: *bold* -> BOLD, _italic_ -> ITALIC
                      # We use simple sed replacement for standard ANSI codes
@@ -299,10 +299,10 @@ _view_mod_details() {
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
     local -a mimages=()
     
-    local parse_out
-    echo "PARSING PYTHON..." >> /tmp/workshop_crash.log
-    # Feed temp file to parser
-    parse_out=$(cat "$tmp_json" | python3 -c "
+    local tmp_source="/tmp/workshop_source_${mid}.sh"
+    
+    # Python writes direct shell assignments to file
+    cat "$tmp_json" | python3 -c "
 import sys, json, datetime, shlex
 try:
     data = json.load(sys.stdin)
@@ -313,25 +313,30 @@ try:
         def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
         
         desc = x.get('description_clean', x.get('description', ''))
-        # Do NOT strip newlines - we want paragraphs now!
-        # desc = desc.replace('\n', ' ').replace('\r', ' ')
         
-        print(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}')
-        print(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}')
-        print(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}')
-        print(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}')
-        print(f'mupdated={shlex.quote(ud)}')
-        print(f'mdesc={shlex.quote(clean(desc))}')
-        print(f'mdeps={len(x.get(\"dependencies\",[]))}')
-        
-        imgs = x.get('images', [])
-        img_str = ' '.join([shlex.quote(i) for i in imgs])
-        print(f'mimages=({img_str})')
+        # Write to file instead of stdout for eval
+        with open('$tmp_source', 'w') as f:
+            f.write(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}\\n')
+            f.write(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}\\n')
+            f.write(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}\\n')
+            f.write(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}\\n')
+            f.write(f'mupdated={shlex.quote(ud)}\\n')
+            f.write(f'mdesc={shlex.quote(clean(desc))}\\n')
+            f.write(f'mdeps={len(x.get(\"dependencies\",[]))}\\n')
+            
+            imgs = x.get('images', [])
+            img_str = ' '.join([shlex.quote(i) for i in imgs])
+            f.write(f'mimages=({img_str})\\n')
 except Exception as e:
-    print('mname=\"Error Parsing Data\"')
-    print('mauthor=\"Unknown\"')
-    print('mdesc=\"Failed to load mod details.\"')
-")
+    pass # Defaults will remain
+"
+    rm -f "$tmp_json"
+    
+    # Source the generated file (Safe loading of variables)
+    if [[ -f "$tmp_source" ]]; then
+        source "$tmp_source"
+        rm -f "$tmp_source"
+    fi
     rm -f "$tmp_json"
     
     # Restore strict modes

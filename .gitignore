@@ -1,5 +1,6 @@
 # Workshop Cache
 data/workshop_cache.json
+debug_crash.json
 
 # Test Output
 test_output.json
