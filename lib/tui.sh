@@ -27,11 +27,22 @@ get_term_size() {
 # -----------------------------------------------------------------------------
 # Restore terminal state on exit
 # Call: trap cleanup EXIT
+# Enable alternate screen buffer
+tui_init() {
+    tput smcup 2>/dev/null || printf "${ESC}[?1049h"
+    printf "%s" "$HIDE_CURSOR"
+}
+
+# -----------------------------------------------------------------------------
+# Cleanup Handler
+# -----------------------------------------------------------------------------
+# Restore terminal state on exit
+# Call: trap cleanup EXIT
 cleanup() {
     printf "%s" "$SHOW_CURSOR"
     tput sgr0 2>/dev/null || true
     stty echo 2>/dev/null || true
-    printf "%s" "$CLEAR_SCREEN"
+    tput rmcup 2>/dev/null || printf "${ESC}[?1049l"
 }
 
 # -----------------------------------------------------------------------------

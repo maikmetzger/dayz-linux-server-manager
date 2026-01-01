@@ -19,6 +19,7 @@ done
 
 # Set up cleanup trap
 trap cleanup EXIT
+tui_init
 
 # =============================================================================
 # Docker & User Identity
