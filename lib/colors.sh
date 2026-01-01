@@ -31,6 +31,7 @@ DARKGRAY="${ESC}[38;2;55;55;55m"
 
 # Legacy color aliases (used by installer)
 CYN="${ESC}[36m"
+CYAN="${CYN}"
 BLU="${ESC}[34m"
 YLW="${YELLOW}"
 GRN="${GREEN}"

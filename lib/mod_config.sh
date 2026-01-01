@@ -13,16 +13,7 @@ _DAYZ_MOD_CONFIG_LOADED=1
 
 # lib/mod_config.sh
 MOD_CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Debug logging setup
-MOD_DEBUG_LOG="/tmp/dayz_debug.log"
-mod_log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] MOD_CONFIG: $*" >> "$MOD_DEBUG_LOG"
-}
-mod_log "Library sourcing file_browser.sh from: $MOD_CONFIG_LIB_DIR"
-
 source "${MOD_CONFIG_LIB_DIR}/file_browser.sh"
-mod_log "file_browser.sh sourced successfully"
 
 # =============================================================================
 # File Type Handler Registry (Specialized for Mod Configs)
@@ -79,29 +70,22 @@ xml_edit_file() {
 # Main entry point - Browse mod config folders in profile directory
 mod_config_browser() {
     local profile_dir="$1"
-    mod_log "mod_config_browser entry. profile_dir='$profile_dir'"
     
     if [[ ! -d "$profile_dir" ]]; then
-        mod_log "ERROR: Profile directory not found: $profile_dir"
         show_message "Profile directory not found: $profile_dir" "Error"
         return 1
     fi
     
     # Use generic browser in folder mode with system folder ignore pattern
     local ignore="^(storage_|DataCache|users)$"
-    mod_log "Calling fb_browse_dir with ignore='$ignore'"
     fb_browse_dir "$profile_dir" "Mod Config Editor" "ROOT" "mod_folder_browser" "folders" "$ignore"
-    mod_log "fb_browse_dir returned"
 }
 
 # Browse files within a mod config folder
 mod_folder_browser() {
     local folder="$1"
-    mod_log "mod_folder_browser entry. folder='$folder'"
     [[ ! -d "$folder" ]] && return 0
     
     local folder_name=$(basename "$folder")
-    mod_log "Calling fb_browse_dir for files in '$folder_name'"
     fb_browse_dir "$folder" "Mod Config Editor" "ROOT > Mod Configs" "mod_config_on_select" "all"
-    mod_log "fb_browse_dir (files) returned"
 }
