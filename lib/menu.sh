@@ -68,7 +68,7 @@ draw_menu() {
                 # Label at fixed column
                 move_to $((start_row + i)) $((start_col + label_offset))
                 printf "%s" "$label"
-                # Re-apply selection color/boldness just in case
+                # Re-apply selection color
                 printf "%s%s" "$BG_RED" "$WHITE$BOLD"
             else
                 # No icon, label right after selector
@@ -76,8 +76,24 @@ draw_menu() {
                 # Re-apply selection color
                 printf "%s%s" "$BG_RED" "$WHITE$BOLD"
             fi
-            # Use Erase Line to fill background to the end of the menu width
-            printf "%s" "${ESC}[K"
+            
+            # Calculate remaining space to fill within 'width'
+            local clean_label
+            clean_label=$(printf '%s' "$label" | sed $'s/\033\\[[0-9;]*m//g')
+            local vis_len=${#clean_label}
+            
+            local current_pos
+            if [[ -n "$icon" ]]; then
+                current_pos=$((label_offset + vis_len))
+            else
+                current_pos=$((3 + vis_len))
+            fi
+            
+            local padding=$((width - current_pos))
+            if [[ $padding -gt 0 ]]; then
+                printf "%*s" "$padding" ""
+            fi
+            
             printf "%s" "$RESET"
         else
             # Non-selected row
