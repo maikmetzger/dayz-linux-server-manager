@@ -36,6 +36,9 @@ def save_cache(cache):
 
 def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     cache = load_cache()
+    # Cache key reflects query args, but we might fetch different steam pages internally
+    # We'll rely on url-based caching inside the loop if possible, or just cache per user-query
+    # Actually, simpler to just fetch needed pages and let user-query cache handle the result
     cache_key = f"search_{text}_{sort}_{num}_{page}_{mode}"
     if cache_key in cache:
         entry = cache[cache_key]
@@ -46,51 +49,77 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     api_sort = SORT_MAP.get(sort, "trend")
     sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
     
-    # FIX: If searching for "DayZ" (app name), treat as empty search to enable global Browsing Sort
-    if text.lower() == "dayz" or not text.strip():
-        url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={api_sort}&p={page}"
-    else:
-        url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={api_sort}&p={page}"
+    # Steam Logic: Page size is fixed at 30 for Browse
+    STEAM_PAGE_SIZE = 30
     
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req) as response:
-            html = response.read().decode('utf-8')
-        
-        ids = []
-        
-        if mode == "author" and text.strip() and text.lower() != "dayz":
-            # Strict Author Filter: Parse blocks to find author name
-            # Block: <div class="workshopItem"> ... data-publishedfileid="ID" ... <div class="workshopItemAuthorName">...<a ...>NAME</a>
-            items = html.split('class="workshopItem"')
-            for item in items[1:]: # Skip first split (header)
-                try:
-                    fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
-                    if not fid_m: continue
-                    fid = fid_m.group(1)
-                    
-                    author_m = re.search(r'class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>', item)
-                    if author_m:
-                        author_name = author_m.group(1).strip()
-                        if text.lower() in author_name.lower():
-                            if fid not in ids: ids.append(fid)
-                except: pass
-                if len(ids) >= num: break
+    # Calculate Global Item Range
+    global_start = (page - 1) * num
+    global_end = global_start + num
+    
+    # Calculate Required Steam Pages
+    steam_start_p = (global_start // STEAM_PAGE_SIZE) + 1
+    steam_end_p = ((global_end - 1) // STEAM_PAGE_SIZE) + 1
+    
+    all_found_ids = []
+    
+    # Fetch Loop
+    for p in range(steam_start_p, steam_end_p + 1):
+        if text.lower() == "dayz" or not text.strip():
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={api_sort}&p={p}"
         else:
-            # Standard Title/Desc Search (just grab IDs)
-            found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
-            for fid in found:
-                if fid not in ids:
-                    ids.append(fid)
-                    if len(ids) >= num: break
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={api_sort}&p={p}"
         
-        cache[cache_key] = {'timestamp': time.time(), 'data': ids}
-        save_cache(cache)
-        return ids
-    except Exception as e:
-        print(f"Search Error: {e}", file=sys.stderr)
-        return []
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req) as response:
+                html = response.read().decode('utf-8')
+            
+            page_ids = []
+            
+            if mode == "author" and text.strip() and text.lower() != "dayz":
+                # Strict Author Filter
+                items = html.split('class="workshopItem"')
+                for item in items[1:]:
+                    try:
+                        fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
+                        if not fid_m: continue
+                        fid = fid_m.group(1)
+                        if fid in page_ids: continue 
+                        
+                        author_m = re.search(r'class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>', item)
+                        if author_m:
+                            author_name = author_m.group(1).strip()
+                            if text.lower() in author_name.lower():
+                                page_ids.append(fid)
+                    except: pass
+            else:
+                # Standard Search
+                found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
+                for fid in found:
+                    if fid not in page_ids: page_ids.append(fid)
+            
+            all_found_ids.extend(page_ids)
+            
+        except Exception as e:
+            print(f"Fetch Error Page {p}: {e}", file=sys.stderr)
+            break
+            
+    # Slice the result to match user request
+    # Indices relative to the first fetched page's start
+    # We fetched starting at steam_start_p.
+    # The first item in all_found_ids corresponds to global index: (steam_start_p - 1) * 30
+    
+    base_index = (steam_start_p - 1) * STEAM_PAGE_SIZE
+    local_start = global_start - base_index
+    local_end = local_start + num
+    
+    # Safety slice
+    final_ids = all_found_ids[local_start:local_end]
+    
+    cache[cache_key] = {'timestamp': time.time(), 'data': final_ids}
+    save_cache(cache)
+    return final_ids
 
 def scrape_dependencies(mod_id):
     url = f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"
