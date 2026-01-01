@@ -7,12 +7,14 @@
 
 # Fetch workshop items via Python backend
 _fetch_workshop_items() {
-    local text="$1"
-    local sort="$2"
-    local num="${3:-25}"
-    local page="${4:-1}"
-    
-    python3 "${SCRIPT_DIR}/lib/workshop_search.py" --search "$text" --sort "$sort" --num "$num" --page "$page"
+    local text="$1" sort="$2" num="$3" page="$4" mode="${5:-title}" clear_flag="${6:-}"
+    # Use python backend
+    python3 "${SCRIPT_DIR}/lib/workshop_search.py" \
+        --search "$text" \
+        --sort "$sort" \
+        --num "$num" \
+        --page "$page" \
+        --mode "$mode" $clear_flag
 }
 
 # Fetch details for specific IDs (used for dependencies)
@@ -446,7 +448,7 @@ _draw_workshop_filter_dialog() {
                 1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 0; fi ;;
                 2) if run_menu _lim_opts "Select Items Per Page"; then _fl="${_lim_opts[$MENU_RESULT]}"; return 0; fi ;;
                 3) if run_menu _mode_opts "Select Search Mode"; then _fm="${_mode_opts[$MENU_RESULT]}"; return 0; fi ;;
-                4) _fn="DayZ"; _fs="mostsubscribed"; _fl="Fill"; _fm="Title"; return 0 ;;
+                4) _fn="DayZ"; _fs="mostsubscribed"; _fl="Fill"; _fm="Title"; return 2 ;;
             esac
         fi
     done
@@ -459,7 +461,7 @@ workshop_browser() {
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
     local f_text="DayZ" f_sort="mostsubscribed" f_limit="Fill" f_mode="Title" current_page=1
-    local selection=0 offset=0 f_changed=1 count=0 last_fetch_limit=0
+    local selection=0 offset=0 f_changed=1 count=0 last_fetch_limit=0 f_clear=0
     local -a items=()
     declare -A installed_mods workshop_rules
 
@@ -483,7 +485,9 @@ workshop_browser() {
             
             local json
             local clean_mode="title"; [[ "$f_mode" == "Author" ]] && clean_mode="author"
-            json=$(_fetch_workshop_items "$f_text" "$f_sort" "$fetch_count" "$current_page" "$clean_mode")
+            local clear_arg=""; [[ $f_clear -eq 1 ]] && clear_arg="--clear"
+            json=$(_fetch_workshop_items "$f_text" "$f_sort" "$fetch_count" "$current_page" "$clean_mode" "$clear_arg")
+            f_clear=0
             
             # Robust JSON conversion
             local read_items=()
@@ -561,11 +565,16 @@ except Exception as e:
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            if _draw_workshop_filter_dialog f_text f_sort f_limit f_mode; then
+            _draw_workshop_filter_dialog f_text f_sort f_limit f_mode
+            local d_res=$?
+            if [[ $d_res -eq 0 ]]; then
                 current_page=1; selection=0; f_changed=1; continue
+            elif [[ $d_res -eq 2 ]]; then
+                # Reset triggered from dialog
+                f_clear=1; current_page=1; selection=0; f_changed=1; continue
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_sort="mostsubscribed"; f_limit="Fill"; f_mode="Title"; current_page=1; selection=0; f_changed=1; continue
+            f_text="DayZ"; f_sort="mostsubscribed"; f_limit="Fill"; f_mode="Title"; current_page=1; selection=0; f_clear=1; f_changed=1; continue
         elif [[ "$key" == "o" || "$key" == "O" || "$key" == " " ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"

@@ -9,14 +9,14 @@ import os
 import time
 
 DAYZ_APPID = "221100"
-CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "workshop_cache_v2.json")
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "workshop_cache_v3.json")
 CACHE_EXPIRY_SEARCH = 3600 # 1 hour
 CACHE_EXPIRY_DETAILS = 86400 # 24 hours
 
 SORT_MAP = {
     "trend": "trend",
-    "mostsubscribed": "mostsubscribed",
-    "mostsubscribed_asc": "mostsubscribed", # Steam only has DESC, we reverse locally
+    "mostsubscribed": "totaluniquesubscribers",
+    "mostsubscribed_asc": "totaluniquesubscribers", # Steam only has DESC, we reverse locally
     "newestfirst": "mostrecent",
     "lastupdated": "lastupdated",
     "relevance": "relevance"
@@ -47,7 +47,18 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
 
     encoded_text = urllib.parse.quote(text)
     api_sort = SORT_MAP.get(sort, "trend")
-    sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
+    
+    # Logic for Most Subscribed: 
+    # Steam often needs browsesort=trend AND actualsort=totaluniquesubscribers for "All Time"
+    # Otherwise it might default to "Week" or just Trend.
+    sort_param = ""
+    actual_sort_param = f"&actualsort={api_sort}"
+    
+    if api_sort == "totaluniquesubscribers":
+        sort_param = "&browsesort=trend" # Force browse context
+    elif api_sort != "relevance":
+        sort_param = f"&browsesort={api_sort}"
+
     
     # Steam Logic: Page size is fixed at 30 for Browse
     STEAM_PAGE_SIZE = 30
@@ -65,9 +76,11 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     # Fetch Loop
     for p in range(steam_start_p, steam_end_p + 1):
         if text.lower() == "dayz" or not text.strip():
-            url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={api_sort}&p={p}"
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems{actual_sort_param}&p={p}"
         else:
-            url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={api_sort}&p={p}"
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems{actual_sort_param}&p={p}"
+            
+        # print(f"DEBUG_URL: {url}", file=sys.stderr)
         
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -292,7 +305,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
     return final_results
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='DayZ Workshop Search Backend')
+    parser = argparse.ArgumentParser(description='DayZ Workshop Search Backend V3')
     parser.add_argument('--search', help='Search text')
     parser.add_argument('--sort', default='trend', help='Sort order')
     parser.add_argument('--num', type=int, default=25, help='Max results per page')
@@ -300,7 +313,12 @@ if __name__ == "__main__":
     parser.add_argument('--details', help='Comma-separated Mod IDs for direct details')
     parser.add_argument('--recursive', action='store_true', help='Resolve dependencies recursively')
     parser.add_argument('--update-rules', help='Path to workshop_rules.json to update')
+    parser.add_argument("--clear", "--clear-cache", action="store_true", help="Clear cache before searching")
     args = parser.parse_args()
+
+    if args.clear and os.path.exists(CACHE_FILE):
+        try: os.remove(CACHE_FILE)
+        except: pass
     
     if args.details:
         ids = args.details.split(',')
