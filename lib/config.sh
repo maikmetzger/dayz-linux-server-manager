@@ -481,7 +481,7 @@ types_selection_menu() {
         if [[ "$selected_item" == "←|Back" ]]; then
             return
         elif [[ "$selected_path" == "MANAGE_MODULAR" ]]; then
-            modular_loot_manager "$inst_dir"
+            modular_loot_dashboard "$inst_dir"
             continue
         fi
         

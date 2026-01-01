@@ -305,9 +305,14 @@ EOF
 
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
-# Uses scan_mods_for_ce_files to get data
-modular_loot_manager() {
+# Uses scan_dayz_ce_files_python to get data
+modular_loot_dashboard() {
     local inst_dir="$1"
+    
+    # Path Auto-correction: Ensure we point to the data directory
+    if [[ ! -d "$inst_dir/config" && -d "$inst_dir/data/config" ]]; then
+        inst_dir="${inst_dir}/data"
+    fi
     
     local selection=0
     local offset=0
