@@ -42,6 +42,18 @@ def metadata(xml_path):
     }
     print(json.dumps(result))
 
+def is_types_xml(xml_path):
+    """Checks if the file is a DayZ types/loot XML file."""
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        if root.tag == 'types' and root.find('type') is not None:
+            print("true")
+        else:
+            print("false")
+    except:
+        print("false")
+
 def query(xml_path, name=None, cat=None, usage=None, tier=None, vanilla_path=None):
     _, root = get_types_root(xml_path)
     vanilla_root = None
@@ -177,6 +189,10 @@ if __name__ == "__main__":
     p_meta = subparsers.add_parser('metadata')
     p_meta.add_argument('file', help='Path to types.xml')
     
+    # Is-Types detection
+    p_ist = subparsers.add_parser('is-types')
+    p_ist.add_argument('file', help='Path to XML file')
+
     # Query
     p_query = subparsers.add_parser('query')
     p_query.add_argument('file', help='Path to types.xml')
@@ -197,6 +213,8 @@ if __name__ == "__main__":
     
     if args.command == 'metadata':
         metadata(args.file)
+    elif args.command == 'is-types':
+        is_types_xml(args.file)
     elif args.command == 'query':
         query(args.file, args.name, args.cat, args.usage, args.tier, args.vanilla)
     elif args.command == 'update':

@@ -182,16 +182,24 @@ _draw_xml_editor_screen() {
     
     # 6. Keyboard Hints
     move_to $((TERM_ROWS - 1)) 1
-    local footer_text=" [↑↓] Navigate   [Enter] Edit   [f] Filter   [x] Clear   [q] Back"
+    local footer_text=" [↑↓] Navigate   [Enter] Edit   [f] Filter   [x] Clear"
+    
+    # Only show "Register modular" if we are NOT already in the main mission folder
+    if [[ "$xml_file" != *"/mpmissions/"* ]]; then
+        footer_text="$footer_text   [m] Register Modular"
+    fi
+    footer_text="$footer_text   [q] Back"
+    
     local pad_len=$((TERM_COLS - ${#footer_text}))
     [[ $pad_len -lt 0 ]] && pad_len=0
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
 }
 
 config_xml_editor() {
-    local container="$1"
+    local instance_dir="${1:-}"
     local xml_file="$2"
-    local id="$3"
+    local id="${3:-}"
+    local container="${4:-N/A}"
     
     # Create vanilla backup if needed
     local vanilla_file="${xml_file}.vanilla"
@@ -247,6 +255,17 @@ config_xml_editor() {
             _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@] \
                 "$xml_file" count selection "$offset" items "$vanilla_file"
             f_changed=0 # No need to re-fetch, dialog does it
+        elif [[ "$key" == "m" || "$key" == "M" ]]; then
+            if [[ "$xml_file" != *"/mpmissions/"* ]]; then
+                local mod_name
+                mod_name=$(basename "$(dirname "$(dirname "$xml_file")")")
+                # Fallback if folder structure is weird
+                [[ -z "$mod_name" || "$mod_name" == "." ]] && mod_name="custom"
+                
+                if confirm "Add to Modular Loot (CustomCE)?" "y"; then
+                    register_modular_loot "$instance_dir" "$xml_file" "$mod_name"
+                fi
+            fi
         elif [[ "$key" == "" ]]; then
             if [[ $count -gt 0 ]]; then
                 _edit_xml_item "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items

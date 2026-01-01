@@ -23,31 +23,17 @@ declare -A CONFIG_REGISTRY=(
 # Helper to find types.xml within mpmissions
 find_types_xml() {
     local inst_dir="$1"
-    local cfg="${inst_dir}/data/config/serverDZ.cfg"
-    local template=""
+    local mission_path=$(get_mission_path "$inst_dir")
     
-    # 1. Try mapping via serverDZ.cfg template
-    if [[ -f "$cfg" ]]; then
-        template=$(grep -i '^template' "$cfg" | sed -E 's/template\s*=\s*"([^"]+)".*/\1/')
+    if [[ -n "$mission_path" ]]; then
+        local p="${mission_path}/db/types.xml"
+        if [[ -f "$p" ]]; then
+            echo "$p"
+            return
+        fi
     fi
     
-    if [[ -n "$template" ]]; then
-        # Try both common mount structures
-        local paths=(
-            "${inst_dir}/data/serverfiles/mpmissions/${template}/db/types.xml"
-            "${inst_dir}/data/mpmissions/${template}/db/types.xml"
-            "${inst_dir}/serverfiles/mpmissions/${template}/db/types.xml"
-            "${inst_dir}/mpmissions/${template}/db/types.xml"
-        )
-        for p in "${paths[@]}"; do
-            if [[ -f "$p" ]]; then
-                echo "$p"
-                return
-            fi
-        done
-    fi
-    
-    # 2. Global search in instance directory (limited depth for speed)
+    # Global search fallback
     find "${inst_dir}" -maxdepth 6 -name "types.xml" -type f 2>/dev/null | head -n 1
 }
 
@@ -405,6 +391,63 @@ json_get_keys() {
         sed 's/.*\[\(.*\)\].*/\1/' | tr ',' '\n' | sed 's/[" ]//g' || true
 }
 
+# Sub-menu for Loot selection (Main vs Modular)
+types_selection_menu() {
+    local inst_dir="$1"
+    local container="$2"
+    local selection=0
+    
+    while true; do
+        local -a items=()
+        local -a paths=()
+        
+        # 1. Main types.xml
+        local main_types=$(find_types_xml "$inst_dir")
+        if [[ -n "$main_types" ]]; then
+            items+=("📦|Main Economy (types.xml)")
+            paths+=("$main_types")
+        fi
+        
+        # 2. Modular types from CustomCE
+        local mission_path=$(get_mission_path "$inst_dir")
+        local custom_ce="${mission_path}/CustomCE/types"
+        
+        if [[ -d "$custom_ce" ]]; then
+            items+=("--------------------")
+            paths+=("")
+            
+            # Find all XMLs in CustomCE/types
+            while IFS= read -r p; do
+                [[ -z "$p" ]] && continue
+                items+=("🧩|$(basename "$p")")
+                paths+=("$p")
+            done < <(find "$custom_ce" -name "*.xml" -type f | sort)
+        fi
+        
+        items+=("--------------------")
+        paths+=("")
+        items+=("←|Back")
+        paths+=("")
+        
+        if ! run_menu items "Select Loot Economy File" $selection; then
+            return
+        fi
+        
+        selection=$MENU_RESULT
+        local selected_item="${items[$MENU_RESULT]}"
+        local selected_path="${paths[$MENU_RESULT]}"
+        
+        if [[ "$selected_item" == "←|Back" ]]; then
+            return
+        fi
+        
+        if [[ -n "$selected_path" ]]; then
+            # Re-use config_xml_editor for these modular types
+            config_xml_editor "$inst_dir" "$selected_path" "types" "$container"
+        fi
+    done
+}
+
 # =============================================================================
 # Config Editor Main Menu
 # =============================================================================
@@ -465,7 +508,13 @@ config_editor_menu() {
         
         # Route to appropriate editor based on format/ID
         case "$fmt" in
-            "xml") config_xml_editor "$container" "$full_path" "$selected_id" ;;
+            "xml")
+                if [[ "$selected_id" == "types" ]]; then
+                    types_selection_menu "$inst_dir" "$container"
+                else
+                    config_xml_editor "$inst_dir" "$full_path" "$selected_id" "$container"
+                fi
+                ;;
             "mod")
                 # Mod configs browser - uses profile directory
                 local profile_dir="${inst_dir}/data/profile"

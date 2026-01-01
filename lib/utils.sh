@@ -127,3 +127,33 @@ dotenv_get() {
     fi
     printf "%s" "${val}"
 }
+
+# -----------------------------------------------------------------------------
+# Mission Resolution
+# -----------------------------------------------------------------------------
+
+# Find active mission path from serverDZ.cfg
+get_mission_path() {
+    local instance_dir="$1"
+    local cfg="${instance_dir}/data/config/serverDZ.cfg"
+    [[ ! -f "$cfg" ]] && cfg="${instance_dir}/serverDZ.cfg"
+    [[ ! -f "$cfg" ]] && return 1
+    
+    local template=""
+    # Use grep to avoid python dependency in core utils
+    template=$(grep -i '^template' "$cfg" | sed -E 's/template\s*=\s*"([^"]+)".*/\1/')
+    
+    if [[ -n "$template" ]]; then
+        # Try both common mount structures
+        local paths=(
+            "${instance_dir}/data/serverfiles/mpmissions/${template}"
+            "${instance_dir}/data/mpmissions/${template}"
+            "${instance_dir}/serverfiles/mpmissions/${template}"
+            "${instance_dir}/mpmissions/${template}"
+        )
+        for p in "${paths[@]}"; do
+            [[ -d "$p" ]] && { echo "$p"; return 0; }
+        done
+    fi
+    return 1
+}
