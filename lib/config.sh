@@ -31,15 +31,23 @@ find_types_xml() {
     fi
     
     if [[ -n "$template" ]]; then
-        local p="${inst_dir}/data/mpmissions/${template}/db/types.xml"
-        if [[ -f "$p" ]]; then
-            echo "$p"
-            return
-        fi
+        # Try both common mount structures
+        local paths=(
+            "${inst_dir}/data/serverfiles/mpmissions/${template}/db/types.xml"
+            "${inst_dir}/data/mpmissions/${template}/db/types.xml"
+            "${inst_dir}/serverfiles/mpmissions/${template}/db/types.xml"
+            "${inst_dir}/mpmissions/${template}/db/types.xml"
+        )
+        for p in "${paths[@]}"; do
+            if [[ -f "$p" ]]; then
+                echo "$p"
+                return
+            fi
+        done
     fi
     
-    # 2. Global search in mpmissions
-    find "${inst_dir}/data/mpmissions" -name "types.xml" 2>/dev/null | head -n 1
+    # 2. Global search in instance directory (limited depth for speed)
+    find "${inst_dir}" -maxdepth 6 -name "types.xml" -type f 2>/dev/null | head -n 1
 }
 
 # =============================================================================
