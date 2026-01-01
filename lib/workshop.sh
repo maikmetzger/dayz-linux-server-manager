@@ -165,7 +165,6 @@ _draw_workshop_details_screen() {
     local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" scroll_offset="$9"
     local -n _images_ref=${10}
     local img_sel=${11}
-    local focus=${12:-0} # 0=Desc, 1=Images
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -193,7 +192,7 @@ _draw_workshop_details_screen() {
     local img_height=$((TERM_ROWS - meta_height - 6))
     if [[ $img_height -gt 4 ]]; then
         local img_color="$RED"
-        [[ $focus -eq 1 ]] && img_color="$CYN$BOLD"
+        # Removed dynamic focus color - always RED border to match theme
         draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
         
         local start_img_row=$((5 + meta_height))
@@ -208,7 +207,7 @@ _draw_workshop_details_screen() {
             if [[ $idx -lt ${#_images_ref[@]} ]]; then
                 move_to $((start_img_row + i)) 4
                 local style="$DIM"
-                [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_CYN$WHITE$BOLD"
+                [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_RED$WHITE$BOLD"
                 local img_url="${_images_ref[$idx]}"
                 # Display more of the URL so it's clickable in terminals
                 # Remove protocol for display to save space, but keep domain/path
@@ -245,11 +244,18 @@ _draw_workshop_details_screen() {
             if [[ $l_idx -lt $total_lines ]]; then
                 move_to $((5 + i)) $((desc_col + 2))
                 local line="${lines[$l_idx]}"
-                # HEADER DETECTION: If line starts with ">>", make it Yellow/Bold
+                # RICH TEXT RENDERING
                 if [[ "$line" == ">> "* ]]; then
-                     printf "%s%s%s" "$YEL$BOLD" "${line//>>/}" "$RESET" # Strip markers, colorize
+                     # HEADER: Yellow/Bold
+                     printf "%s%s%s" "$YEL$BOLD" "${line//>>/}" "$RESET"
                 else
-                     printf "%s" "$line"
+                     # INLINE PARSING: *bold* -> BOLD, _italic_ -> ITALIC
+                     # We use simple sed replacement for standard ANSI codes
+                     # Note: This is simple and might break on mixed edge cases but works for standard desc
+                     local styled_line="$line"
+                     styled_line=$(echo "$styled_line" | sed "s/\*\([^*]*\)\*/${WHITE}${BOLD}\1${RESET}/g")
+                     styled_line=$(echo "$styled_line" | sed "s/_\([^_]*\)_/${ITALIC}\1${RESET}/g")
+                     printf "%s" "$styled_line"
                 fi
             fi
         done
