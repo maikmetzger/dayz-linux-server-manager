@@ -408,10 +408,25 @@ types_selection_menu() {
             paths+=("$main_types")
         fi
         
-        # 2. Modular types from CustomCE
+        # 2. Mission Core & DB Files
         local mission_path=$(get_mission_path "$inst_dir")
-        local custom_ce="${mission_path}/CustomCE/types"
+        if [[ -n "$mission_path" ]]; then
+            items+=("--------------------")
+            paths+=("")
+            
+            # Core
+            local core_xml="${mission_path}/cfgeconomycore.xml"
+            [[ -f "$core_xml" ]] && { items+=("⚙️|Economy Core (cfgeconomycore.xml)"); paths+=("$core_xml"); }
+            
+            # DB Files
+            for db_file in globals.xml events.xml economy.xml messages.xml; do
+                local p="${mission_path}/db/${db_file}"
+                [[ -f "$p" ]] && { items+=("📄|$db_file"); paths+=("$p"); }
+            done
+        fi
         
+        # 3. Modular types from CustomCE
+        local custom_ce="${mission_path}/CustomCE/types"
         if [[ -d "$custom_ce" ]]; then
             items+=("--------------------")
             paths+=("")
@@ -447,8 +462,15 @@ types_selection_menu() {
         fi
         
         if [[ -n "$selected_path" ]]; then
-            # Re-use config_xml_editor for these modular types
-            config_xml_editor "$inst_dir" "$selected_path" "types" "$container"
+            # Smart Routing: Loot Files -> XML Editor, Structural -> Nano
+            local is_types
+            is_types=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$selected_path" 2>/dev/null || echo "false")
+            
+            if [[ "$is_types" == "true" ]]; then
+                config_xml_editor "$inst_dir" "$selected_path" "types" "$container"
+            else
+                fb_edit_file_nano "$selected_path" "$(basename "$selected_path")"
+            fi
         fi
     done
 }
