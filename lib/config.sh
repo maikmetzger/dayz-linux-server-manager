@@ -306,10 +306,11 @@ config_table_editor() {
             printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
             
             # 1. Header Bar
-            move_to 1 1
+            move_to 2 1
             printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Config Editor - $filename - $title" "$RESET"
             
             # 2. Table Header
+            local table_start=4
             move_to $table_start 1
             printf "%s%s" "$DIM" "$RED"
             printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
