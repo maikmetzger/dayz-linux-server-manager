@@ -227,28 +227,68 @@ modular_loot_manager() {
             
             while IFS= read -r xml_file; do
                 [[ -z "$xml_file" ]] && continue
-                # Basic name filter to skip obvious non-loot
-                local bn=$(basename "$xml_file" | tr '[:upper:]' '[:lower:]')
-                if [[ "$bn" == *"types"* || "$bn" == *"loot"* || "$bn" == *"classname"* ]]; then
-                     if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
-                        local bname=$(basename "$xml_file")
-                        local target_name="${mname}_${bname}"
-                        # Clean target name for FS safety
-                        target_name=$(echo "$target_name" | tr -cd '[:alnum:]_.-')
-                        
-                        src_paths+=("$xml_file")
-                        smod_names+=("$mname")
-                        sfile_names+=("$bname")
-                        
-                        if echo "$linked_files" | grep -qF "$target_name"; then
-                            states+=(1)
-                        else
-                            states+=(0)
-                        fi
-                     fi
+                
+                # Check if it's a types file (no name filter, rely on content)
+                if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
+                    local bname=$(basename "$xml_file")
+                    local target_name="${mname}_${bname}"
+                    # Clean target name for FS safety
+                    target_name=$(echo "$target_name" | tr -cd '[:alnum:]_.-')
+                    
+                    src_paths+=("$xml_file")
+                    smod_names+=("$mname")
+                    sfile_names+=("$bname")
+                    
+                    if echo "$linked_files" | grep -qF "$target_name"; then
+                        states+=(1) # Linked
+                    else
+                        states+=(0) # Unlinked
+                    fi
                 fi
-            done < <(find "$mod_path" -maxdepth 4 -name "*.xml" -type f 2>/dev/null)
+            done < <(find "$mod_path" -maxdepth 6 -name "*.xml" -type f 2>/dev/null)
         done
+
+        # 1b. Add Orphans (Files in CustomCE that don't match our scan)
+        if [[ -d "$custom_ce" ]]; then
+            while IFS= read -r ce_file; do
+                [[ -z "$ce_file" ]] && continue
+                local ce_bname=$(basename "$ce_file")
+                
+                # Check if this filename was already handled in the scan
+                local matched=0
+                # Normalize CE filename for fuzzy matching (remove non-alnum)
+                local ce_norm=$(echo "$ce_bname" | tr -cd '[:alnum:]_.-')
+                
+                for ((j=0; j<${#src_paths[@]}; j++)); do
+                    local mn="${smod_names[$j]}"
+                    local fn="${sfile_names[$j]}"
+                    local expected="${mn}_${fn}"
+                    expected=$(echo "$expected" | tr -cd '[:alnum:]_.-')
+                    
+                    if [[ "$ce_norm" == "$expected" ]]; then
+                        matched=1; break
+                    fi
+                done
+                
+                if [[ $matched -eq 0 ]]; then
+                    # Final check: Does it start with ANY active mod name?
+                    local owner="UNKNOWN/OLD"
+                    for ((j=0; j<${#mod_ids[@]}; j++)); do
+                        local mn=$(get_mod_name "${mod_ids[$j]}")
+                        local mn_clean=$(echo "$mn" | tr -cd '[:alnum:]_.-')
+                        if [[ "$ce_norm" == "${mn_clean}"* ]]; then
+                            owner="STRAY ($mn)"
+                            break
+                        fi
+                    done
+                    
+                    src_paths+=("ORPHAN")
+                    smod_names+=("$owner")
+                    sfile_names+=("$ce_bname")
+                    states+=(2) # Orphaned/Stray
+                fi
+            done < <(find "$custom_ce" -name "*.xml" -type f 2>/dev/null | sort)
+        fi
         
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
@@ -286,7 +326,13 @@ modular_loot_manager() {
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
             local color="$WHITE"
-            [[ ${states[$idx]} -eq 1 ]] && { status_str="[  LINKED  ]"; color="$GRN"; }
+            if [[ ${states[$idx]} -eq 1 ]]; then
+                status_str="[  LINKED  ]"
+                color="$GRN"
+            elif [[ ${states[$idx]} -eq 2 ]]; then
+                status_str="[ ORPHANED ]"
+                color="$RED"
+            fi
             
             move_to $row 1
             if [[ $idx -eq $selection ]]; then
@@ -326,10 +372,16 @@ modular_loot_manager() {
             if [[ ${states[$midx]} -eq 0 ]]; then
                 # Use silent mode (1) for instant toggle in manager
                 register_modular_loot "$inst_dir" "$src" "$mn" 1
-            else
+            elif [[ ${states[$midx]} -eq 1 ]]; then
                 # We still confirm unlinking as it's destructive (removes your edits)
                 if confirm "Unlink modular loot '$tn'? (This deletes the custom XML file)" "n"; then
                     unregister_modular_loot "$inst_dir" "$tn"
+                fi
+            else
+                # Orphaned - Simple delete
+                if confirm "File '$fn' is orphaned and not found in any active mod. Delete it?" "y"; then
+                    unregister_modular_loot "$inst_dir" "$fn"
+                    show_message "Deleted orphaned file." "Success"
                 fi
             fi
             # Implicitly re-loops and re-scans
