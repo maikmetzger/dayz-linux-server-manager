@@ -748,25 +748,27 @@ main_tui() {
         
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
         
-        case $MENU_RESULT in
-            0) tui_create_instance ;;
-            1)
+        local selected_item="${menu_items[$MENU_RESULT]}"
+        case "$selected_item" in
+            "🆕|Create NEW Instance") tui_create_instance ;;
+            "🔄|Update run.sh"*)
                 if [[ "${#markers[@]}" -eq 0 ]]; then
                     show_message "No marker-based instances found." "Error"
                     continue
                 fi
                 tui_update_instance "${markers[@]}"
                 ;;
-            2) tui_delete_menu "${scan_root}" ;;
-            3) ;;
-            4)
+            "🗑️|Delete Instance/Container") tui_delete_menu "${scan_root}" ;;
+            "✨|Run Server Manager")
                 if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
                     exec "${SCRIPT_DIR}/server-manager.sh"
                 else
                     show_message "server-manager.sh not found."
                 fi
                 ;;
-            5) exit 0 ;;
+            "❌|Exit"|----*)
+                exit 0
+                ;;
         esac
     done
 }
@@ -877,8 +879,9 @@ tui_delete_menu() {
     while true; do
         if ! run_menu choices "Delete Instance"; then return; fi
         
-        case $MENU_RESULT in
-            0)
+        local selected_choice="${choices[$MENU_RESULT]}"
+        case "$selected_choice" in
+            "🏷️|Marker-based Instances")
                 mapfile -t markers < <(discover_instances_under "${scan_root}")
                 if [[ ${#markers[@]} -eq 0 ]]; then
                     show_message "No instances found."
@@ -889,14 +892,16 @@ tui_delete_menu() {
                     local n d
                     n="$(marker_get "${m}" "INSTANCE_NAME")"
                     d="$(dirname "${m}")"
-                items+=("🗑️|${n} ($d)")
+                    items+=("🗑️|${n} ($d)")
                     paths+=("$d")
                 done
                 items+=("--------------------")
                 items+=("←|Back")
                 
                 if run_menu items "Select Instance to DELETE"; then
-                    [[ $MENU_RESULT -eq ${#paths[@]} ]] && continue
+                    local selected_item="${items[$MENU_RESULT]}"
+                    if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then continue; fi
+                    
                     local p="${paths[$MENU_RESULT]}"
                     if confirm "DELETE directory and data: $p?" "n"; then
                         printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
@@ -906,7 +911,7 @@ tui_delete_menu() {
                     fi
                 fi
                 ;;
-            1)
+            "🐳|Containers detected by Docker")
                 mapfile -t containers < <(list_dayz_containers)
                 if [[ ${#containers[@]} -eq 0 ]]; then
                     show_message "No containers found."
@@ -917,7 +922,9 @@ tui_delete_menu() {
                 c_items+=("--------------------")
                 c_items+=("←|Back")
                 if run_menu c_items "Select Container to DELETE"; then
-                    [[ $MENU_RESULT -eq ${#containers[@]} ]] && continue
+                    local selected_item="${c_items[$MENU_RESULT]}"
+                    if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then continue; fi
+                    
                     local ctn="${containers[$MENU_RESULT]}"
                     if confirm "DELETE container $ctn?" "n"; then
                         printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
@@ -927,7 +934,7 @@ tui_delete_menu() {
                     fi
                 fi
                 ;;
-            2) return ;;
+            "←|Back"|----*) return ;;
         esac
     done
 }

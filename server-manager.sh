@@ -64,22 +64,19 @@ select_instance() {
         
         if run_menu items "DayZ Server Manager - Select Instance" $selection; then
             selection=$MENU_RESULT
-            local idx=$MENU_RESULT
+            local selected_item="${items[$MENU_RESULT]}"
             local count=${#INSTANCE_NAMES[@]}
             
-            if [[ ${#INSTANCE_NAMES[@]} -gt 0 ]]; then
-                if [[ $idx -lt $count ]]; then
-                    SELECTED_DIR="${INSTANCE_DIRS[$idx]}"
-                    SELECTED_NAME="${INSTANCE_NAMES[$idx]}"
-                    SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$idx]}"
-                    return
-                fi
-                idx=$((idx - 1))
-            else
-                idx=$((idx - 2))
+            # 1. Handle dynamic instances
+            if [[ $MENU_RESULT -lt $count ]]; then
+                SELECTED_DIR="${INSTANCE_DIRS[$MENU_RESULT]}"
+                SELECTED_NAME="${INSTANCE_NAMES[$MENU_RESULT]}"
+                SELECTED_CONTAINER="${INSTANCE_CONTAINERS[$MENU_RESULT]}"
+                return
             fi
             
-            if [[ $idx -eq $count ]]; then
+            # 2. Handle static menu items by content
+            if [[ "$selected_item" == "✨|Install/Manage Instances" ]]; then
                 # Installer
                 if [[ -f "${SCRIPT_DIR}/install-dayz-docker.sh" ]]; then
                     export DAYZ_USER="$INVOKING_USER"
@@ -97,7 +94,7 @@ select_instance() {
                 else
                     show_message "install-dayz-docker.sh not found."
                 fi
-            elif [[ $idx -eq $((count + 1)) ]]; then
+            elif [[ "$selected_item" == "❌|Quit" ]]; then
                 exit 0
             fi
         else
@@ -540,33 +537,33 @@ main_menu() {
         
         selection=$MENU_RESULT
         
-        case $MENU_RESULT in
-            0) run_with_output "Starting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose up -d" ;;
-            1) run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
-            2) run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
-            3) ;;
-            4) mod_manager ;;
-            5) config_editor_menu ;;
-            6) wipe_menu ;;
-            7) ;;
-            8)
+        selection=$MENU_RESULT
+        local selected_item="${items[$MENU_RESULT]}"
+        
+        case "$selected_item" in
+            "▶️|Start Server") run_with_output "Starting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose up -d" ;;
+            "⏹️|Stop Server") run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
+            "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
+            "⚒️|Mod Manager") mod_manager ;;
+            "📝|Config Editor") config_editor_menu ;;
+            "🧹|Wipe Server Data") wipe_menu ;;
+            "🎮|RCON Console")
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  set +e
                  "${SCRIPT_DIR}/rcon.sh" "$SELECTED_DIR"
                  local ret=$?
                  set -e
-                 
                  if [[ $ret -ne 130 ]]; then
                      printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
                      read -rsn1
                  fi
                  ;;
-            9)
+            "📜|View Logs")
                 trap : INT
                 run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
                 trap - INT
                 ;;
-            10)
+            "💻|Enter Shell")
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running."
                 else
@@ -576,8 +573,7 @@ main_menu() {
                     printf "%s" "$HIDE_CURSOR"
                 fi
                 ;;
-            11) ;;
-            12)
+            "⬆️|Update Server")
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
@@ -586,8 +582,9 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            13) ;;
-            14) return ;;
+            "←|Switch Instance"|----*)
+                return
+                ;;
         esac
     done
 }

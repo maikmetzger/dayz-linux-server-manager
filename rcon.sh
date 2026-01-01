@@ -144,7 +144,8 @@ main_menu() {
         items+=("❌|Exit")
         
         if run_menu items "Select Instance to Connect"; then
-            if [[ $MENU_RESULT -eq ${#paths[@]} ]]; then
+            local selected_item="${items[$MENU_RESULT]}"
+            if [[ "$selected_item" == "❌|Exit" || "$selected_item" == ----* ]]; then
                 exit 0
             fi
             
