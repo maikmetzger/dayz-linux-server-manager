@@ -507,37 +507,43 @@ wipe_menu() {
                         continue
                     fi
                     
+                    # Safety Check: Server Status
+                    local status
+                    status="$(get_container_status "$SELECTED_CONTAINER")"
+                    if [[ "$status" == "RUNNING" ]]; then
+                        show_message "Server is currently RUNNING. Please STOP it before wiping data to avoid database corruption." "Safety Warning"
+                        continue
+                    fi
+
                     if confirm "Wipe ${count} categories? This cannot be undone!" "n"; then
                         printf "%s" "$SHOW_CURSOR"
                         
+                        # 0. Players
                         [[ ${states[0]} -eq 1 ]] && rm -f "${storage_dir}/players.db" "${storage_dir}/players.db-journal"
-                        [[ ${states[1]} -eq 1 ]] && rm -f "${storage_dir}/vehicles.bin" "${storage_dir}/vehicles.bin-journal"
-                        [[ ${states[2]} -eq 1 && -d "${storage_dir}/data" ]] && rm -rf "${storage_dir}/data"/*
                         
-                        if [[ ${states[3]} -eq 1 && ${states[2]} -eq 0 && -f "$economy_file" ]]; then
-                            local was_running=0
-                            if [[ "$(get_container_status "$SELECTED_CONTAINER")" == "RUNNING" ]]; then
-                                was_running=1
-                                echo "Stopping server for loot wipe..."
-                                $DOCKER stop "$SELECTED_CONTAINER" >/dev/null
-                            fi
-                            
-                            cp "$economy_file" "${economy_file}.bak"
-                            sed -i 's/dynamic init="1" load="1"/dynamic init="1" load="0"/g' "$economy_file"
-                            
-                            echo "Starting server to clear loot (Wait 60s)..."
-                            $DOCKER start "$SELECTED_CONTAINER" >/dev/null
-                            sleep 60
-                            
-                            echo "Stopping server..."
-                            $DOCKER stop "$SELECTED_CONTAINER" >/dev/null
-                            
-                            sed -i 's/dynamic init="1" load="0"/dynamic init="1" load="1"/g' "$economy_file"
-                            
-                            [[ $was_running -eq 1 ]] && { echo "Restarting server..."; $DOCKER start "$SELECTED_CONTAINER" >/dev/null; }
+                        # 1. Vehicles
+                        [[ ${states[1]} -eq 1 ]] && rm -f "${storage_dir}/vehicles.bin" "${storage_dir}/vehicles.bin-journal"
+                        
+                        # 2. Bases / Persistence (World structures)
+                        if [[ ${states[2]} -eq 1 ]]; then
+                            echo "Wiping Bases/Persistence..."
+                            # Delete everything in data except loot bins if loot is NOT being wiped? 
+                            # Most users want a clean 'data' folder for a base wipe.
+                            rm -rf "${storage_dir}/data"/*
                         fi
                         
-                        show_message "Wipe Complete." "Success"
+                        # 3. Loot / CLE Reset (Types & Dynamics)
+                        if [[ ${states[3]} -eq 1 && ${states[2]} -eq 0 ]]; then
+                            # Only delete loot bins if we didn't already wipe the whole data folder
+                            echo "Wiping Loot Economy state..."
+                            rm -f "${storage_dir}/data/types.bin" "${storage_dir}/data/types.bin-journal"
+                            rm -f "${storage_dir}/data/dynamics.bin" "${storage_dir}/data/dynamics.bin-journal"
+                            # Also delete backups
+                            rm -f "${storage_dir}/data/types."*
+                            rm -f "${storage_dir}/data/dynamics."*
+                        fi
+                        
+                        show_message "Wipe Complete. Files have been reset." "Success"
                         states=(0 0 0 0)
                     fi
                     ;;
