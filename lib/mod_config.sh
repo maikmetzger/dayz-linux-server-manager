@@ -156,6 +156,7 @@ register_modular_loot() {
     local source_xml="$2"
     local mod_name="$3"
     local silent="${4:-0}"
+    local force_type="${5:-}"
     
     local mission_path
     if ! mission_path=$(get_mission_path "$instance_dir"); then
@@ -165,14 +166,22 @@ register_modular_loot() {
     
     setup_modular_loot "$mission_path"
     
-    # Auto-detect CE file type (types, spawnabletypes, events, eventspawns)
-    local ce_type
-    ce_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$source_xml" 2>/dev/null)
-    
-    # Fallback to 'types' if detection fails or unknown format
+    # Auto-detect or use forced CE file type
+    local ce_type="$force_type"
     if [[ -z "$ce_type" ]]; then
-        [[ "$silent" == "0" ]] && show_message "Could not detect CE type for '$source_xml'. Assuming 'types'." "Warning"
-        ce_type="types"
+        ce_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$source_xml" 2>/dev/null)
+        
+        # Fallback to 'types' if detection fails or unknown format
+        if [[ -z "$ce_type" ]]; then
+            # Only warn if not silent and it doesn't look like a standard types file
+            if [[ "$silent" == "0" ]]; then
+                local b=$(basename "$source_xml")
+                if [[ "$b" != *"types"* ]]; then
+                    show_message "Could not detect CE type for '$b'. Assuming 'types'." "Warning"
+                fi
+            fi
+            ce_type="types"
+        fi
     fi
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
@@ -506,9 +515,9 @@ except: pass
             if [[ ${states[$midx]} -eq 1 ]]; then
                 # LINKED -> Unlink
                 local target_to_unlink="${smod_ids[$midx]}_${fn}"
-                if [[ "$mn" == "LOCAL" ]]; then target_to_unlink="$fn"; fi
+                [[ "${smod_ids[$midx]}" == "LOCAL" ]] && target_to_unlink="$fn"
                 
-                # Use ACTUAL linked filename if detected (handles legacy names like ModName_File.xml)
+                # Use ACTUAL linked filename if detected
                 if [[ -n "${slinked_names[$midx]}" ]]; then
                     target_to_unlink="${slinked_names[$midx]}"
                 fi
@@ -520,7 +529,7 @@ except: pass
             else
                 # UNLINKED -> Link
                 if confirm "Link '$fn' (${smod_names[$midx]}) to your economy?" "y"; then
-                     register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1
+                     register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                      show_message "Linked $fn ($ct)" "Success"
                 fi
             fi
@@ -549,12 +558,17 @@ except: pass
                 if [[ ! -f "$target_edit_path" && -f "$(get_mission_path "$inst_dir")/CustomCE/types/${tn}" ]]; then
                     target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/types/${tn}"
                 fi
+                
+                # FINAL FALLBACK: If it's linked but we can't find the copy, edit the source!
+                if [[ ! -f "$target_edit_path" ]]; then
+                    target_edit_path="${src_paths[$midx]}"
+                fi
             fi
             
             if [[ -f "$target_edit_path" ]]; then
                 xml_edit_file "$target_edit_path" "Edit ${fn}"
             else
-                show_message "File not found for editing: $(basename "$target_edit_path")" "Error"
+                show_message "File not found for editing: $(basename "$target_edit_path") (Src: $fn)" "Error"
             fi
         fi
     done
@@ -787,12 +801,14 @@ for mod_id in sorted(mod_ids):
     # Find XML files in mod
     for root, dirs, files in os.walk(mod_folder):
         for fname in files:
-            if not fname.lower().endswith('.xml'):
-                continue
+            lfn = fname.lower()
+            # 1. Skip core files and non-CE XMLs
+            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin', 'meta.cpp.xml']: continue
+            if not lfn.endswith('.xml'): continue
             
             fpath = os.path.join(root, fname)
             
-            # Detect CE type with expert fallback
+            # 2. Detect CE type with expert fallback
             ce_type = ""
             if xml_parser:
                 try:
@@ -801,29 +817,39 @@ for mod_id in sorted(mod_ids):
                 except: pass
             
             if not ce_type:
-                lfn = fname.lower()
                 if 'spawnable' in lfn: ce_type = 'spawnabletypes'
                 elif 'eventspawns' in lfn or 'eventpos' in lfn: ce_type = 'eventspawns'
                 elif 'events' in lfn: ce_type = 'events'
                 elif 'types' in lfn: ce_type = 'types'
-                else: ce_type = 'types' # Default to types for mod files
+                else:
+                    # Skip common non-loot files found in mods (e.g. info, setup, core folders)
+                    rel_p = root.lower()
+                    if 'setup' in rel_p or 'info' in rel_p or 'core' in rel_p: continue
+                    ce_type = 'types' # Default fallback
             
-            # Check status
+            # 3. Check status (Case-insensitive fuzzy matching)
             status = "new"
             linked_name = ""
             is_linked = False
+            
+            search_name = fname.lower().strip()
+            # Cleaned version of workshop filename
+            search_name_cfn = "".join(x for x in search_name if x.isalnum() or x in "._-")
+            
             for ln in linked:
-                # Strong match: ModID prefix
-                if ln.startswith(f"{mod_id}_") and ln.endswith(f"_{fname}"):
-                    is_linked = True
-                    linked_name = ln
-                    break
-                # fuzzy match: just matching filename (cleaned or raw)
-                cfn = "".join(x for x in fname if x.isalnum() or x in "._-")
-                if ln.endswith(f"_{fname}") or ln.endswith(f"_{cfn}"):
-                    is_linked = True
-                    linked_name = ln
-                    break
+                ln_orig = ln
+                ln = ln.lower().strip()
+                # A: Exact match (mod linked it with the same name)
+                if ln == search_name or ln == search_name_cfn:
+                    is_linked = True; linked_name = ln_orig; break
+                # B: Standard prefix match (ID_file.xml or Name_file.xml)
+                if ln.endswith("_" + search_name) or ln.endswith("_" + search_name_cfn):
+                    is_linked = True; linked_name = ln_orig; break
+                # C: Fuzzy substring (for mods that link legacy names)
+                if search_name_cfn in ln or ln in search_name_cfn:
+                    # Only accept if it's a significant match (at least 50% length)
+                    if len(set(ln) & set(search_name_cfn)) > (max(len(ln), len(search_name_cfn)) / 2):
+                        is_linked = True; linked_name = ln_orig; break
             
             if is_linked:
                 status = "linked"
@@ -838,7 +864,7 @@ for mod_id in sorted(mod_ids):
                 "linked_filename": linked_name
             })
             
-            # Track for orphan detection (cleaned to match registrations)
+            # Track for orphan detection
             scanned_files.add(fname)
             if linked_name: scanned_files.add(linked_name)
 
@@ -849,8 +875,10 @@ for folder in ce_folders:
     if not os.path.isdir(dir_path): continue
     for root, dirs, files in os.walk(dir_path):
         for fname in files:
-            if not fname.lower().endswith('.xml'): continue
+            lfn = fname.lower()
+            if not lfn.endswith('.xml'): continue
             if ".originals" in root or ".backups" in root: continue
+            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin']: continue
             
             # If we already saw this file in mod scan, skip
             if fname in scanned_files: continue
