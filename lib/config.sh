@@ -245,23 +245,22 @@ config_flat_editor() {
 # =============================================================================
 
 config_table_editor() {
-    # Disable exit on error for this function scope
-    set +e
-    
-    echo "--- config_table_editor start ---" >> /tmp/dayz_debug.log
     local container="$1"
     local config_path="$2"
     local title="$3"
     local keys_csv="$4"
     
-    echo "Container: $container" >> /tmp/dayz_debug.log
-    echo "Config: $config_path" >> /tmp/dayz_debug.log
-    
     local container_path="/dayz/config/$(basename "$config_path")"
     
     # Parse keys
     IFS=',' read -ra keys <<< "$keys_csv"
-    echo "Keys count: ${#keys[@]}" >> /tmp/dayz_debug.log
+    
+    # Calculate max key length for padding (min 20, max 40)
+    local max_len=20
+    for key in "${keys[@]}"; do
+        (( ${#key} > max_len )) && max_len=${#key}
+    done
+    [[ $max_len -gt 40 ]] && max_len=40
     
     local selection=0
     
@@ -272,20 +271,8 @@ config_table_editor() {
         local result
         result=$(config_parser_exec "$container" getall cfg "$container_path")
         
-        echo "Parser Result: $result" >> /tmp/dayz_debug.log
-        
-        # DEBUG: Show what we got
-        if [[ -z "$result" ]]; then
-            echo "ERROR: Empty result" >> /tmp/dayz_debug.log
-            show_message "DEBUG: Empty result from parser\nContainer: $container\nPath: $container_path" "Debug"
-            return
-        fi
-        
-        local status
-        status=$(json_get_status "$result")
-        
-        if [[ "$status" != "ok" ]]; then
-            show_message "Failed to read config.\nStatus: $status\nResult: ${result:0:200}" "Error"
+        if [[ "$(json_get_status "$result")" != "ok" ]]; then
+            show_message "Failed to read config" "Error"
             return
         fi
         
@@ -293,30 +280,29 @@ config_table_editor() {
         local -a items=()
         for key in "${keys[@]}"; do
             local value
-            value=$(echo "$result" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | \
-                    sed 's/.*: *"\([^"]*\)".*/\1/' | head -1)
+            value=$(json_get "$result" "$key")
             
-            # Handle unquoted values (numbers, booleans)
-            if [[ -z "$value" ]]; then
-                value=$(echo "$result" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[^,}]*" | \
-                        sed 's/.*: *\([^,}]*\).*/\1/' | tr -d ' ' | head -1)
+            # Truncate long values for display (adjust based on assumed terminal width)
+            local avail_width=$((TERM_COLS - max_len - 15)) # approximate
+            [[ $avail_width -lt 20 ]] && avail_width=20
+            
+            if [[ ${#value} -gt $avail_width ]]; then
+                value="${value:0:$((avail_width-3))}..."
             fi
             
-            # Truncate long values for display
-            if [[ ${#value} -gt 30 ]]; then
-                value="${value:0:27}..."
-            fi
-            
-            # Format: key = value (or key = (empty) if empty)
+            # Format: key │ value
+            local item_str
             if [[ -z "$value" ]]; then
-                items+=("${key} = (empty)")
+                 printf -v item_str "%-${max_len}s │ (empty)" "$key"
             else
-                items+=("${key} = ${value}")
+                 printf -v item_str "%-${max_len}s │ %s" "$key" "$value"
             fi
+            
+            items+=("$item_str")
         done
         items+=("← Back")
         
-        if ! run_menu items "$title - Press Enter to Edit" $selection; then
+        if ! run_menu items "$title" $selection; then
             return
         fi
         
@@ -331,8 +317,7 @@ config_table_editor() {
         
         # Get current value
         local current_value
-        current_value=$(config_parser_exec "$container" get cfg "$container_path" "$selected_key")
-        current_value=$(json_get "$current_value" "value")
+        current_value=$(json_get "$result" "$selected_key")
         
         # Show input dialog
         local new_value
