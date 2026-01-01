@@ -313,10 +313,6 @@ EOF
 modular_loot_dashboard() {
     local inst_dir="$1"
     
-    # Path Auto-correction: Ensure we point to the data directory
-    if [[ ! -d "$inst_dir/config" && -d "$inst_dir/data/config" ]]; then
-        inst_dir="${inst_dir}/data"
-    fi
     
     local selection=0
     local offset=0
@@ -355,7 +351,10 @@ except: pass
     while true; do
         # 1. Scan everything (calls the Python implementation)
         local ce_result
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null | tail -n 1)
+        local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+        if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
+        
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
         
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
 
