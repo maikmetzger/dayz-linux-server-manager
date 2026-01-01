@@ -245,7 +245,13 @@ _draw_workshop_details_screen() {
             local l_idx=$((scroll_offset + i))
             if [[ $l_idx -lt $total_lines ]]; then
                 move_to $((5 + i)) $((desc_col + 2))
-                printf "%s" "${lines[$l_idx]}"
+                local line="${lines[$l_idx]}"
+                # HEADER DETECTION: If line starts with ">>", make it Yellow/Bold
+                if [[ "$line" == ">> "* ]]; then
+                     printf "%s%s%s" "$YEL$BOLD" "${line//>>/}" "$RESET" # Strip markers, colorize
+                else
+                     printf "%s" "$line"
+                fi
             fi
         done
         
@@ -363,7 +369,7 @@ except Exception as e:
                 local url="${mimages[$img_sel]}"
                 if command -v open &>/dev/null; then open "$url"
                 elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
-                else show_message "URL: $url" "Image Link"; fi
+                fi
             fi
         elif [[ "$k" == "" ]]; then
              set -eu; return 10 # Signal to install

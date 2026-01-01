@@ -93,9 +93,18 @@ def parse_bbcode(text):
     clean = re.sub(r'\[img\].*?\[/img\]', '', clean, flags=re.IGNORECASE) # Remove images from text
     clean = re.sub(r'\[url=.*?\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
     clean = re.sub(r'\[url\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
-    clean = re.sub(r'\[/*(h1|h2|h3|b|i|list|olist|\*|hr|code|quote|box)\]', '', clean, flags=re.IGNORECASE)
+    
+    # Visual markers for Headers
+    def header_rep(m): return f"\n\n>> {m.group(1).upper()} <<\n"
+    clean = re.sub(r'\[h[123]\](.*?)\[/h[123]\]', header_rep, clean, flags=re.IGNORECASE)
+    
+    # Other Formatting
+    clean = re.sub(r'\[b\](.*?)\[/b\]', r'*\1*', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\[i\](.*?)\[/i\]', r'_\1_', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\[/*(list|olist|\*|hr|code|quote|box)\]', '', clean, flags=re.IGNORECASE)
+    
     clean = re.sub(r'\r\n', '\n', clean)
-    clean = re.sub(r'\n\n+', '\n', clean)  # Reduce multiple newlines
+    clean = re.sub(r'\n\n+', '\n\n', clean)  # Keep paragraphs distinct
     
     return clean.strip(), images
 
