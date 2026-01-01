@@ -365,13 +365,16 @@ mod_config_browser() {
         folders+=("$folder")
     done < <(find "$profile_dir" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
     
-    if [[ ${#folders[@]} -eq 0 ]]; then
-        show_message "No mod config folders found in profile directory" "Info"
-        return 0
-    fi
+    # Add ".." entry at the top
+    local -a items=("..")
+    local -a item_paths=("")
+    for f in "${folders[@]}"; do
+        items+=("$(basename "$f")")
+        item_paths+=("$f")
+    done
     
     local selected=0
-    local count=${#folders[@]}
+    local count=${#items[@]}
     
     while true; do
         get_term_size
@@ -385,14 +388,22 @@ mod_config_browser() {
         # Draw folder list
         local row=4
         for ((i=0; i<count && row<TERM_ROWS-2; i++)); do
-            local name=$(basename "${folders[$i]}")
-            local file_count=$(find "${folders[$i]}" -maxdepth 1 -type f 2>/dev/null | wc -l)
-            
+            local name="${items[$i]}"
             move_to $row 2
             if [[ $i -eq $selected ]]; then
-                printf "%s%s▶ 📁 %-40s (%d files)%s" "$BG_RED" "$WHITE$BOLD" "$name" "$file_count" "$RESET"
+                if [[ "$name" == ".." ]]; then
+                    printf "%s%s▶ 📁 %-35s%s" "$BG_RED" "$WHITE$BOLD" ".." "$RESET"
+                else
+                    local file_count=$(find "${item_paths[$i]}" -maxdepth 1 -type f 2>/dev/null | wc -l)
+                    printf "%s%s▶ 📁 %-35s (%d files)%s" "$BG_RED" "$WHITE$BOLD" "$name" "$file_count" "$RESET"
+                fi
             else
-                printf "  📁 %-40s (%d files)" "$name" "$file_count"
+                if [[ "$name" == ".." ]]; then
+                    printf "  📁 %-35s" ".."
+                else
+                    local file_count=$(find "${item_paths[$i]}" -maxdepth 1 -type f 2>/dev/null | wc -l)
+                    printf "  📁 %-35s (%d files)" "$name" "$file_count"
+                fi
             fi
             ((row++))
         done
@@ -412,7 +423,10 @@ mod_config_browser() {
                 esac
                 ;;
             '')  # Enter - open folder
-                mod_folder_browser "${folders[$selected]}"
+                if [[ "${items[$selected]}" == ".." ]]; then
+                    return 0
+                fi
+                mod_folder_browser "${item_paths[$selected]}"
                 ;;
             'q'|'Q')
                 return 0
@@ -432,13 +446,16 @@ mod_folder_browser() {
         files+=("$file")
     done < <(find "$folder" -maxdepth 1 -type f -print0 | sort -z)
     
-    if [[ ${#files[@]} -eq 0 ]]; then
-        show_message "No config files found in $folder_name" "Info"
-        return 0
-    fi
+    # Add ".." entry at the top
+    local -a items=("..")
+    local -a item_paths=("")
+    for f in "${files[@]}"; do
+        items+=("$(basename "$f")")
+        item_paths+=("$f")
+    done
     
     local selected=0
-    local count=${#files[@]}
+    local count=${#items[@]}
     
     while true; do
         get_term_size
@@ -452,29 +469,37 @@ mod_folder_browser() {
         # Draw file list
         local row=4
         for ((i=0; i<count && row<TERM_ROWS-2; i++)); do
-            local name=$(basename "${files[$i]}")
-            local icon=$(get_file_icon "${files[$i]}")
-            local size=$(stat -c%s "${files[$i]}" 2>/dev/null || stat -f%z "${files[$i]}" 2>/dev/null || echo "?")
-            
-            # Human readable size
-            local size_str
-            if [[ "$size" =~ ^[0-9]+$ ]]; then
-                if [[ $size -gt 1048576 ]]; then
-                    size_str="$(echo "scale=1; $size/1048576" | bc)M"
-                elif [[ $size -gt 1024 ]]; then
-                    size_str="$(echo "scale=1; $size/1024" | bc)K"
+            local name="${items[$i]}"
+            move_to $row 2
+            if [[ "$name" == ".." ]]; then
+                if [[ $i -eq $selected ]]; then
+                    printf "%s%s▶ 📁 %-40s%s" "$BG_RED" "$WHITE$BOLD" ".." "$RESET"
                 else
-                    size_str="${size}B"
+                    printf "  📁 %-40s" ".."
                 fi
             else
-                size_str="?"
-            fi
-            
-            move_to $row 2
-            if [[ $i -eq $selected ]]; then
-                printf "%s%s▶ %s %-40s %6s%s" "$BG_RED" "$WHITE$BOLD" "$icon" "$name" "$size_str" "$RESET"
-            else
-                printf "  %s %-40s %6s" "$icon" "$name" "$size_str"
+                local icon=$(get_file_icon "${item_paths[$i]}")
+                local size=$(stat -c%s "${item_paths[$i]}" 2>/dev/null || stat -f%z "${item_paths[$i]}" 2>/dev/null || echo "?")
+                
+                # Human readable size
+                local size_str
+                if [[ "$size" =~ ^[0-9]+$ ]]; then
+                    if [[ $size -gt 1048576 ]]; then
+                        size_str="$(echo "scale=1; $size/1048576" | bc)M"
+                    elif [[ $size -gt 1024 ]]; then
+                        size_str="$(echo "scale=1; $size/1024" | bc)K"
+                    else
+                        size_str="${size}B"
+                    fi
+                else
+                    size_str="?"
+                fi
+                
+                if [[ $i -eq $selected ]]; then
+                    printf "%s%s▶ %s %-40s %6s%s" "$BG_RED" "$WHITE$BOLD" "$icon" "$name" "$size_str" "$RESET"
+                else
+                    printf "  %s %-40s %6s" "$icon" "$name" "$size_str"
+                fi
             fi
             ((row++))
         done
@@ -494,7 +519,10 @@ mod_folder_browser() {
                 esac
                 ;;
             '')  # Enter - edit file
-                local file="${files[$selected]}"
+                if [[ "${items[$selected]}" == ".." ]]; then
+                    return 0
+                fi
+                local file="${item_paths[$selected]}"
                 local handler=$(get_file_handler "$file")
                 local name=$(basename "$file")
                 
