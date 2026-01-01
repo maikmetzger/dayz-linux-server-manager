@@ -154,13 +154,17 @@ fb_browse_dir() {
         done < <(find "${find_args[@]}" -print 2>/dev/null | sort)
         
         local count=${#items[@]}
-        fb_log "Items found: $count"
+        fb_log "Items found: $count. selected=$selected"
         [[ $selected -ge $count ]] && selected=$((count - 1))
         [[ $selected -lt 0 ]] && selected=0
 
         # 2. Draw UI
+        fb_log "Fetching term size"
         get_term_size
+        fb_log "Term size: ${TERM_ROWS}x${TERM_COLS}"
+        
         printf "%s" "$CLEAR_SCREEN"
+        fb_log "Drawing header"
         draw_header "$title"
         
         # Breadcrumbs
@@ -173,10 +177,12 @@ fb_browse_dir() {
         if [[ "$mode" == "folders" ]]; then
             name_w=$((TERM_COLS - 45))
             [[ $name_w -lt 20 ]] && name_w=20
+            fb_log "Mode folders. name_w=$name_w"
             printf "%s%s%-*s %-10s %-19s%s" "$BOLD$CYAN" "" "$name_w" "Folder Name" "Files" "Last Modified" "$RESET"
         else
             name_w=$((TERM_COLS - 65))
             [[ $name_w -lt 20 ]] && name_w=20
+            fb_log "Mode all. name_w=$name_w"
             printf "%s%s%-*s %-8s %-19s %-19s%s" "$BOLD$CYAN" "" "$name_w" "File Name" "Size" "Created" "Modified" "$RESET"
         fi
 
@@ -184,11 +190,13 @@ fb_browse_dir() {
         local row=4
         local max_rows=$((TERM_ROWS - 6))
         local start_row=0
-        [[ $selected -ge $max_rows ]] && start_row=$((selected - max_rows + 1))
+        [[ $selected -ge $max_rows ]] && start_row=$selected # Simplification for debug
+        fb_log "Drawing loop start. row=$row, max_rows=$max_rows, start_row=$start_row"
 
         for ((i=start_row; i<count && i<start_row+max_rows; i++)); do
             local name="${items[$i]}"
             local path="${item_paths[$i]}"
+            fb_log "Drawing item $i: $name"
             move_to $row 2
             
             if [[ "$name" == ".." ]]; then
@@ -200,15 +208,17 @@ fb_browse_dir() {
             elif [[ -d "$path" ]]; then
                 # Folder Row - Get latest modification in folder
                 local mod_time="-"
+                fb_log "Statting folder: $path"
                 # Portable way to get latest modified file's time
-                # Using stat on the directory itself as a fallback if find fails
                 if [[ "$OSTYPE" == "darwin"* ]]; then
                     mod_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$path" 2>/dev/null || echo "-")
                 else
                     mod_time=$(stat -c "%y" "$path" 2>/dev/null | cut -d'.' -f1 || echo "-")
                 fi
+                fb_log "Folder mod_time: $mod_time"
                 
                 local file_count=$(find "$path" -maxdepth 1 -type f 2>/dev/null | wc -l)
+                fb_log "Folder file_count: $file_count"
                 
                 if [[ $i -eq $selected ]]; then
                     printf "%s%s▶ 📁 %-*s %-10s %-19s%s" "$BG_RED" "$WHITE$BOLD" "$((name_w-3))" "${name:0:$((name_w-4))}" "$file_count" "$mod_time" "$RESET"
@@ -217,11 +227,13 @@ fb_browse_dir() {
                 fi
             else
                 # File Row
+                fb_log "Statting file: $path"
                 local icon=$(fb_get_icon "$path")
                 local size_raw=$(stat -c%s "$path" 2>/dev/null || echo "0")
                 local mtime=$(stat -c%y "$path" 2>/dev/null | cut -d'.' -f1)
                 local btime=$(stat -c%w "$path" 2>/dev/null | cut -d'.' -f1)
                 [[ "$btime" == "-" ]] && btime="-"
+                fb_log "File stats: size=$size_raw, mtime=$mtime"
                 
                 # Human readable size
                 local size_str
