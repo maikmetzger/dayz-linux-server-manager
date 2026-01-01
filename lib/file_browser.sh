@@ -10,6 +10,13 @@
 [[ -n "${_DAYZ_FILE_BROWSER_LOADED:-}" ]] && return 0
 _DAYZ_FILE_BROWSER_LOADED=1
 
+# Debug Logging
+FB_DEBUG_LOG="/tmp/dayz_debug.log"
+fb_log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] FILE_BROWSER: $*" >> "$FB_DEBUG_LOG"
+}
+fb_log "Library loaded"
+
 # =============================================================================
 # Configuration & Constants
 # =============================================================================
@@ -109,15 +116,20 @@ fb_browse_dir() {
     local mode="${5:-all}"
     local ignore_pattern="${6:-}"
     
+    fb_log "fb_browse_dir started: dir='$dir', title='$title', mode='$mode'"
+    
     if [[ ! -d "$dir" ]]; then
+        fb_log "ERROR: Directory not found: $dir"
         show_message "Directory not found: $dir" "Error"
         return 1
     fi
     
     local selected=0
     local dir_name=$(basename "$dir")
+    fb_log "dir_name: $dir_name"
     
     while true; do
+        fb_log "Loop iteration start. selected=$selected"
         # 1. Refresh list
         local -a items=("..")
         local -a item_paths=("")
@@ -126,13 +138,14 @@ fb_browse_dir() {
         local -a find_args=("$dir" -mindepth 1 -maxdepth 1)
         [[ "$mode" == "folders" ]] && find_args+=(-type d)
         
+        fb_log "Running find: ${find_args[@]}"
         # Use find -print and handle spaces, avoiding sort -z for BusyBox compatibility
         while IFS= read -r p; do
             [[ -z "$p" ]] && continue
             local name=$(basename "$p")
             # Filter hidden and ignored patterns
             [[ "$name" == .* ]] && continue
-            if [[ -n "$ignore_pattern" ]] && [[ "$name" =~ $ignore_pattern ]]; then
+            if [[ -n "$ignore_pattern" ]] && [[ "$name" =~ "$ignore_pattern" ]]; then
                 continue
             fi
             
@@ -141,6 +154,7 @@ fb_browse_dir() {
         done < <(find "${find_args[@]}" -print 2>/dev/null | sort)
         
         local count=${#items[@]}
+        fb_log "Items found: $count"
         [[ $selected -ge $count ]] && selected=$((count - 1))
         [[ $selected -lt 0 ]] && selected=0
 
