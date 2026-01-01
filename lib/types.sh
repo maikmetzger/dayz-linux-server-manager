@@ -311,53 +311,85 @@ _draw_xml_filter_dialog() {
 }
 
 _edit_xml_item() {
-    local xml_file="$1" item_name="$2"
-    local bg_count="$3" bg_sel="$4" bg_off="$5"
-    local bg_fn="$6" bg_fc="$7" bg_fu="$8" bg_ft="$9"
-    local -a bg_items=("${!10}")
+    local xml_file="$1"
+    local item_name="$2"
+    local bg_count="$3"
+    local bg_sel="$4"
+    local bg_off="$5"
+    local bg_fn="$6"
+    local bg_fc="$7"
+    local bg_fu="$8"
+    local bg_ft="$9"
+    local -a bg_items=("${10}")
 
     # Initial Fetch
     local item_json
     item_json=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" query "$xml_file" --name "$item_name")
     local nom min life rs
-    nom=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['nominal'] if data else '')")
-    min=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['min'] if data else '')")
-    life=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['lifetime'] if data else '')")
-    rs=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['restock'] if data else '')")
+    nom=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['nominal'] if data else '0')")
+    min=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['min'] if data else '0')")
+    life=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['lifetime'] if data else '0')")
+    rs=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['restock'] if data else '0')")
+
+    local d_width=50
+    local d_height=12
+    local d_row=$(( (TERM_ROWS - d_height) / 2 ))
+    local d_col=$(( (TERM_COLS - d_width) / 2 ))
+    local d_sel=0
 
     while true; do
-        # REDRAW BACKGROUND before showing menu
+        # REDRAW BACKGROUND
         _draw_xml_editor_screen "$xml_file" "$bg_count" "$bg_sel" "$bg_off" "$bg_fn" "$bg_fc" "$bg_fu" "$bg_ft" bg_items[@]
         
-        local -a fields=(
-            "Nominal:  $nom"
-            "Min:      $min"
-            "Lifetime: $life"
-            "Restock:  $rs"
-        )
-        if ! run_menu fields "Edit Item: $item_name"; then break; fi
+        draw_box $d_row $d_col $d_height $d_width "Edit: $item_name"
         
-        local field current_val
-        case $MENU_RESULT in
-            0) field="nominal"; current_val="$nom" ;;
-            1) field="min";     current_val="$min" ;;
-            2) field="lifetime"; current_val="$life" ;;
-            3) field="restock";  current_val="$rs" ;;
-        esac
+        local fields=("Nominal" "Min" "Lifetime" "Restock")
+        local values=("$nom" "$min" "$life" "$rs")
         
-        local new_val
-        new_val=$(input_dialog "Edit $field" "$current_val")
+        for i in "${!fields[@]}"; do
+            move_to $((d_row + 2 + i)) $((d_col + 2))
+            local style="$WHITE"
+            [[ $d_sel -eq $i ]] && style="$RED$BOLD"
+            printf "%s%-10s: %s%s%s" "$style" "${fields[$i]}" "$WHITE" "${values[$i]}" "$RESET"
+        done
         
-        if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
-            if python3 "${SCRIPT_DIR}/lib/xml_parser.py" update "$xml_file" --item "$item_name" --key "$field" --val "$new_val"; then
-                case $field in
-                    nominal)  nom="$new_val" ;;
-                    min)      min="$new_val" ;;
-                    lifetime) life="$new_val" ;;
-                    restock)  rs="$new_val" ;;
-                esac
-            else
-                show_message "Failed to update XML" "Error"
+        move_to $((d_row + d_height - 3)) $((d_col + 2))
+        printf "%s─" "$(printf '%.0s─' $(seq 1 $((d_width - 4))))"
+        move_to $((d_row + d_height - 2)) $((d_col + 2))
+        printf "[ Enter ] Edit     [ Esc ] Close/Save"
+        
+        IFS= read -rsn1 k
+        if [[ "$k" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 s || true
+            case "$s" in
+                "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
+                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
+                "") return ;; # Escape/Close
+            esac
+        elif [[ "$k" == "" ]]; then
+            # Enter - Edit selected
+            local field="" current_val=""
+            case $d_sel in
+                0) field="nominal"; current_val="$nom" ;;
+                1) field="min";     current_val="$min" ;;
+                2) field="lifetime"; current_val="$life" ;;
+                3) field="restock";  current_val="$rs" ;;
+            esac
+            
+            local new_val
+            new_val=$(input_dialog "Edit $field" "$current_val")
+            
+            if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
+                if python3 "${SCRIPT_DIR}/lib/xml_parser.py" update "$xml_file" --item "$item_name" --key "$field" --val "$new_val"; then
+                    case $field in
+                        nominal)  nom="$new_val" ;;
+                        min)      min="$new_val" ;;
+                        lifetime) life="$new_val" ;;
+                        restock)  rs="$new_val" ;;
+                    esac
+                else
+                    show_message "Failed to update XML" "Error"
+                fi
             fi
         fi
     done
