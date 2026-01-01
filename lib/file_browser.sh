@@ -202,9 +202,20 @@ fb_browse_dir() {
                 local file_count=$(find "$path" -maxdepth 1 -type f 2>/dev/null | wc -l)
                 
                 if [[ $i -eq $selected ]]; then
-                    printf "%s%s▶ 📁 %-*s %-10s %-19s%s" "$BG_RED" "$WHITE$BOLD" "$((name_w-3))" "${name:0:$((name_w-4))}" "$file_count" "$mod_time" "$RESET"
+                    printf "%s%s▶ 📁 %-*s " "$BG_RED" "$WHITE$BOLD" "$((name_w-3))" "${name:0:$((name_w-4))}"
+                    if [[ "$mode" == "folders" ]]; then
+                        printf "%-10s %-19s" "$file_count" "$mod_time"
+                    else
+                        printf "%-8s %-19s %-19s" "$file_count" "-" "$mod_time"
+                    fi
+                    printf "%s" "$RESET"
                 else
-                    printf "  📁 %-*s %-10s %-19s" "$((name_w-3))" "${name:0:$((name_w-4))}" "$file_count" "$mod_time"
+                    printf "  📁 %-*s " "$((name_w-3))" "${name:0:$((name_w-4))}"
+                    if [[ "$mode" == "folders" ]]; then
+                        printf "%-10s %-19s" "$file_count" "$mod_time"
+                    else
+                        printf "%-8s %-19s %-19s" "$file_count" "-" "$mod_time"
+                    fi
                 fi
             else
                 # File Row

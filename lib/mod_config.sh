@@ -43,16 +43,21 @@ get_file_handler() {
 # Handler called when a file is selected in mod_folder_browser
 mod_config_on_select() {
     local path="$1"
-    [[ -d "$path" ]] && return # folder recursion handled by default in fb_browse_dir
-    
-    local handler=$(get_file_handler "$path")
     local name=$(basename "$path")
     local dir=$(dirname "$path")
-    local folder_name=$(basename "$dir")
+    local parent_name=$(basename "$dir")
+    
+    if [[ -d "$path" ]]; then
+        # Recursive navigation into sub-folders
+        fb_browse_dir "$path" "Mod Config Editor" "ROOT > Mod Configs > $parent_name" "mod_config_on_select" "all"
+        return
+    fi
+    
+    local handler=$(get_file_handler "$path")
     
     case "$handler" in
-        xml)  xml_edit_file "$path" "$folder_name / $name" ;;
-        *)    fb_edit_file_nano "$path" "$folder_name / $name" ;;
+        xml)  xml_edit_file "$path" "$parent_name / $name" ;;
+        *)    fb_edit_file_nano "$path" "$parent_name / $name" ;;
     esac
 }
 
