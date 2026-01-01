@@ -273,7 +273,7 @@ mod_manager() {
         
         # Action bar
         local action_row=$row
-        local actions=("[A] Add" "[W] Workshop" "[S] Sync" "[F] FixMods" "[Q] Back")
+        local actions=("[A] Add" "[R] Remove" "[W] Workshop" "[S] Sync" "[F] FixMods" "[Q] Back")
         
         move_to $action_row 2
         for a in "${!actions[@]}"; do
@@ -300,7 +300,7 @@ mod_manager() {
         fi
 
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select   U/D Move   Enter Toggle   A Add   S Sync   F FixMods   Q Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 75))" "" "$RESET"
+        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 90))" "" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
@@ -354,8 +354,12 @@ mod_manager() {
                     local mname=$(get_mod_name "$mid")
                     
                     if confirm "Remove mod '$mname' from list?" "n"; then
+                        # Paths for key cleanup
+                        local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
+                        local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+                        
                         local removed_keys
-                        removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file")
+                        removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
                         show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
                         dirty=1; needs_rebuild=1
                         [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
