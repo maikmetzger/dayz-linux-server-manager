@@ -17,6 +17,7 @@ declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
     ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
     ["types"]="xml||📦|Loot Economy (types.xml)"
+    ["modConfigs"]="mod||📁|Mod Configs"
 )
 
 # Helper to find types.xml within mpmissions
@@ -424,7 +425,8 @@ config_editor_menu() {
             local display_name="${icon}|${label}"
             
             # Check if file exists (via host path since it's mounted)
-            if [[ -f "${full_path}" ]]; then
+            # Skip check for 'mod' format which uses directory browsing
+            if [[ "$fmt" == "mod" || -f "${full_path}" ]]; then
                 items+=("${display_name}")
             else
                 items+=("${icon}|${label} (not found)")
@@ -464,6 +466,11 @@ config_editor_menu() {
         # Route to appropriate editor based on format/ID
         case "$fmt" in
             "xml") config_xml_editor "$container" "$full_path" "$selected_id" ;;
+            "mod")
+                # Mod configs browser - uses profile directory
+                local profile_dir="${inst_dir}/data/profile"
+                mod_config_browser "$profile_dir"
+                ;;
             *)
                 case "$selected_id" in
                     "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
