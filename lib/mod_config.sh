@@ -12,7 +12,8 @@
 _DAYZ_MOD_CONFIG_LOADED=1
 
 # lib/mod_config.sh
-source "${SCRIPT_DIR}/lib/file_browser.sh"
+MOD_CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${MOD_CONFIG_LIB_DIR}/file_browser.sh"
 
 # =============================================================================
 # File Type Handler Registry (Specialized for Mod Configs)
@@ -31,7 +32,7 @@ declare -A FILE_TYPE_HANDLERS=(
 get_file_handler() {
     local file="$1"
     local ext="${file##*.}"
-    ext="${ext,,}"  # lowercase
+    ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
     echo "${FILE_TYPE_HANDLERS[$ext]:-raw}"
 }
 

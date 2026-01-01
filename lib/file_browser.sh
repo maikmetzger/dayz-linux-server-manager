@@ -37,7 +37,7 @@ fb_get_icon() {
         echo "${FB_TYPE_ICONS[folder]}"
     else
         local ext="${path##*.}"
-        ext="${ext,,}"
+        ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
         echo "${FB_TYPE_ICONS[$ext]:-${FB_TYPE_ICONS[file]}}"
     fi
 }
@@ -122,10 +122,13 @@ fb_browse_dir() {
         local -a items=("..")
         local -a item_paths=("")
         
-        local find_cmd="find \"$dir\" -mindepth 1 -maxdepth 1"
-        [[ "$mode" == "folders" ]] && find_cmd="$find_cmd -type d"
+        # Build find arguments
+        local -a find_args=("$dir" -mindepth 1 -maxdepth 1)
+        [[ "$mode" == "folders" ]] && find_args+=(-type d)
         
-        while IFS= read -r -d '' p; do
+        # Use find -print and handle spaces, avoiding sort -z for BusyBox compatibility
+        while IFS= read -r p; do
+            [[ -z "$p" ]] && continue
             local name=$(basename "$p")
             # Filter hidden and ignored patterns
             [[ "$name" == .* ]] && continue
@@ -135,7 +138,7 @@ fb_browse_dir() {
             
             items+=("$name")
             item_paths+=("$p")
-        done < <(eval "$find_cmd -print0 | sort -z")
+        done < <(find "${find_args[@]}" -print 2>/dev/null | sort)
         
         local count=${#items[@]}
         [[ $selected -ge $count ]] && selected=$((count - 1))
@@ -181,9 +184,16 @@ fb_browse_dir() {
                     printf "  📁 %-*s" "$((name_w-3))" ".."
                 fi
             elif [[ -d "$path" ]]; then
-                # Folder Row
-                local mod_time=$(find "$path" -maxdepth 1 -printf '%T+ ' 2>/dev/null | sort -r | head -1 | cut -d'.' -f1 | sed 's/T/ /')
-                [[ -z "$mod_time" ]] && mod_time="-"
+                # Folder Row - Get latest modification in folder
+                local mod_time="-"
+                # Portable way to get latest modified file's time
+                # Using stat on the directory itself as a fallback if find fails
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    mod_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$path" 2>/dev/null || echo "-")
+                else
+                    mod_time=$(stat -c "%y" "$path" 2>/dev/null | cut -d'.' -f1 || echo "-")
+                fi
+                
                 local file_count=$(find "$path" -maxdepth 1 -type f 2>/dev/null | wc -l)
                 
                 if [[ $i -eq $selected ]]; then
