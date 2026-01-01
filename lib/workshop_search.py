@@ -146,9 +146,13 @@ def scrape_dependencies(mod_id):
         # Robust Author Regex: Look for friendBlockContent, then capture text inside (or inside anchor)
         # Matches: <div class="friendBlockContent">Username</div> OR <div ...><a ...>Username</a>...
         try:
-            m = re.search(r'class="friendBlockContent"[^>]*>[\s\r\n]*?(?:<a[^>]*>)?([^<]+)(?:</a>)?', html)
-            if m:
-                author = m.group(1).strip()
+            # Find all authors (Creators)
+            found_authors = re.findall(r'class="friendBlockContent"[^>]*>[\s\r\n]*?(?:<a[^>]*>)?([^<]+)(?:</a>)?', html)
+            if found_authors:
+                # Clean up whitespace and join
+                clean_authors = [a.strip() for a in found_authors if a.strip()]
+                if clean_authors:
+                    author = ", ".join(clean_authors)
         except: pass
         
         return reqs, author
