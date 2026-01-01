@@ -24,6 +24,24 @@ _fetch_xml_items() {
     "${cmd[@]}"
 }
 
+# Helper to sync items array and count
+_sync_xml_items() {
+    local xml_file="$1" fn="$2" fc="$3" fu="$4" ft="$5" van="$6"
+    local -n _items_out=$7
+    local -n _count_out=$8
+
+    local json
+    json=$(_fetch_xml_items "$xml_file" "$fn" "$fc" "$fu" "$ft" "$van")
+    _items_out=()
+    while IFS= read -r line; do _items_out+=("$line"); done < <(echo "$json" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for x in data:
+    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{json.dumps(x['flags'])}|{x['nominal_v']}|{x['min_v']}|{x['lifetime_v']}|{x['restock_v']}\")
+")
+    _count_out=${#_items_out[@]}
+}
+
 # Unified Drawing Logic for the Table View
 _draw_xml_editor_screen() {
     local xml_file="$1"
@@ -199,16 +217,7 @@ config_xml_editor() {
     
     while true; do
         if [[ $f_changed -eq 1 ]]; then
-            local items_json
-            items_json=$(_fetch_xml_items "$xml_file" "$f_name" "$f_cat" "$f_use" "$f_tier" "$vanilla_file")
-            items=()
-            while IFS= read -r line; do items+=("$line"); done < <(echo "$items_json" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for x in data:
-    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{json.dumps(x['flags'])}|{x['nominal_v']}|{x['min_v']}|{x['lifetime_v']}|{x['restock_v']}\")
-")
-            count=${#items[@]}
+            _sync_xml_items "$xml_file" "$f_name" "$f_cat" "$f_use" "$f_tier" "$vanilla_file" items count
             [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
             f_changed=0
         fi
@@ -236,9 +245,8 @@ for x in data:
             selection=0
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
             _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@] \
-                "$xml_file" "$count" "$selection" "$offset" items
-            f_changed=1
-            selection=0
+                "$xml_file" count selection "$offset" items "$vanilla_file"
+            f_changed=0 # No need to re-fetch, dialog does it
         elif [[ "$key" == "" ]]; then
             if [[ $count -gt 0 ]]; then
                 _edit_xml_item "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items
@@ -251,8 +259,13 @@ for x in data:
 _draw_xml_filter_dialog() {
     local -n _fn=$1 _fc=$2 _fu=$3 _ft=$4
     local -a _cats=("${!5}") _uses=("${!6}") _tiers=("${!7}")
-    local bg_xml="$8" bg_count="$9" bg_sel="${10}" bg_off="${11}"
+    # Background Redraw Info
+    local bg_xml="$8"
+    local -n _bg_count_ref=$9
+    local -n _bg_sel_ref=${10}
+    local bg_off="${11}"
     local -n _bg_items_ref=${12}
+    local bg_vanilla="${13}"
     
     local d_width=60 d_height=16
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
@@ -260,7 +273,8 @@ _draw_xml_filter_dialog() {
     local d_sel=0
 
     while true; do
-        _draw_xml_editor_screen "$bg_xml" "$bg_count" "$bg_sel" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" _bg_items_ref
+        # REDRAW BACKGROUND
+        _draw_xml_editor_screen "$bg_xml" "$_bg_count_ref" "$_bg_sel_ref" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" _bg_items_ref
         draw_box $d_row $d_col $d_height $d_width "Filter types.xml"
         
         move_to $((d_row + 2)) $((d_col + 2))
@@ -304,16 +318,21 @@ _draw_xml_filter_dialog() {
                 "") return ;;
             esac
         elif [[ "$k" == "" ]]; then
+            local changed=0
             case $d_sel in
-                0) _fn=$(read_input "Filter by Classname" "$_fn" "Filter") ;;
+                0) local old="$_fn"; _fn=$(read_input "Filter by Classname" "$_fn" "Filter"); [[ "$old" != "$_fn" ]] && changed=1 ;;
                 1) local -a m=("all" "${_cats[@]}"); if run_menu m "Select Category"; then
-                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _fc="" || _fc="${m[$MENU_RESULT]}"; fi ;;
+                   local old="$_fc"; [[ "${m[$MENU_RESULT]}" == "all" ]] && _fc="" || _fc="${m[$MENU_RESULT]}"; [[ "$old" != "$_fc" ]] && changed=1; fi ;;
                 2) local -a m=("all" "${_uses[@]}"); if run_menu m "Select Usage"; then
-                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _fu="" || _fu="${m[$MENU_RESULT]}"; fi ;;
+                   local old="$_fu"; [[ "${m[$MENU_RESULT]}" == "all" ]] && _fu="" || _fu="${m[$MENU_RESULT]}"; [[ "$old" != "$_fu" ]] && changed=1; fi ;;
                 3) local -a m=("all" "${_tiers[@]}"); if run_menu m "Select Tier"; then
-                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _ft="" || _ft="${m[$MENU_RESULT]}"; fi ;;
-                4) _fn="" _fc="" _fu="" _ft="" ;;
+                   local old="$_ft"; [[ "${m[$MENU_RESULT]}" == "all" ]] && _ft="" || _ft="${m[$MENU_RESULT]}"; [[ "$old" != "$_ft" ]] && changed=1; fi ;;
+                4) _fn="" _fc="" _fu="" _ft=""; changed=1 ;;
             esac
+            if [[ $changed -eq 1 ]]; then
+                _sync_xml_items "$bg_xml" "$_fn" "$_fc" "$_fu" "$_ft" "$bg_vanilla" _bg_items_ref _bg_count_ref
+                _bg_sel_ref=0
+            fi
         fi
     done
 }
@@ -385,6 +404,8 @@ _edit_xml_item() {
                         lifetime) life="$new_val" ;;
                         restock)  rs="$new_val" ;;
                     esac
+                    # Sync back to background array for immediate redraw
+                    _bg_items_ref[$bg_sel]="$item_name|$nom|$min|$life|$rs|$cat|$usages|$tiers|$flags|$nom_v|$min_v|$life_v|$rs_v"
                 else
                     show_message "Failed to update XML" "Error"
                 fi
