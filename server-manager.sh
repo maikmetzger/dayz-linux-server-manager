@@ -58,8 +58,8 @@ select_instance() {
             items+=("--------------------")
         fi
         
-        items+=("✨ Install/Manage Instances")
-        items+=("❌ Quit")
+        items+=("✨  Install/Manage Instances")
+        items+=("❌  Quit")
         
         if run_menu items "DayZ Server Manager - Select Instance" $selection; then
             selection=$MENU_RESULT
@@ -443,8 +443,8 @@ wipe_menu() {
         if [[ ${states[3]} -eq 1 ]]; then items+=(" [x] 🎒 Wipe Loot (economy reset)"); else items+=(" [ ] 🎒 Wipe Loot (economy reset)"); fi
         
         items+=("--------------------")
-        items+=("💀 EXECUTE SELECTED WIPE(S)")
-        items+=("❌ Cancel / Back")
+        items+=("💀  EXECUTE SELECTED WIPE(S)")
+        items+=("❌  Cancel / Back")
         
         if run_menu items "Select Data to Wipe (Enter to Toggle)" $selection; then
             selection=$MENU_RESULT

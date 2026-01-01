@@ -14,8 +14,8 @@
 # =============================================================================
 # Format: "parser|relative_path|display_name"
 declare -A CONFIG_REGISTRY=(
-    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧 Server Settings"
-    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐 RCON Settings"
+    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧  Server Settings"
+    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐  RCON Settings"
 )
 
 # =============================================================================
@@ -37,16 +37,16 @@ declare -A SERVERDZ_CATEGORIES=(
 
 # Display names with emojis (for menu display only)
 declare -A SERVERDZ_CATEGORY_DISPLAY=(
-    ["General"]="🏠 General"
-    ["Security"]="🔒 Security"
-    ["Gameplay"]="🎮 Gameplay"
-    ["Time"]="⏱️  Time & Weather"
-    ["Network"]="🌐 Network"
-    ["Persistence"]="💾 Persistence"
-    ["Voice"]="🎤 Voice Chat"
-    ["Logging"]="📝 Logging"
-    ["NetworkRange"]="📡 Network Range"
-    ["NetworkBatch"]="📦 Network Batch"
+    ["General"]="🏠  General"
+    ["Security"]="🔒  Security"
+    ["Gameplay"]="🎮  Gameplay"
+    ["Time"]="⏱️   Time & Weather"
+    ["Network"]="🌐  Network"
+    ["Persistence"]="💾  Persistence"
+    ["Voice"]="🎤  Voice Chat"
+    ["Logging"]="📝  Logging"
+    ["NetworkRange"]="📡  Network Range"
+    ["NetworkBatch"]="📦  Network Batch"
 )
 
 # Order for category display (simple keys)
@@ -276,7 +276,7 @@ declare -A BESERVER_CATEGORIES=(
     ["RCON"]="RConPassword,RConPort,RestrictRCon"
 )
 declare -A BESERVER_CATEGORY_DISPLAY=(
-    ["RCON"]="🔐 RCON Settings"
+    ["RCON"]="🔐  RCON Settings"
 )
 BESERVER_CATEGORY_ORDER=("RCON")
 
