@@ -8,9 +8,22 @@ A toolset to run and manage DayZ servers on Linux using Docker. It handles the t
 
 ### Mod Management & Validation
 The mod manager does more than just download files; it helps keep your server stable.
+- **Refined Selection**: Use the Workshop Browser [W] to search and install mods directly from Steam, or add them manually by ID.
 - **Load Order Checks**: The script warns you [⚠️] if dependencies are missing or in the wrong order.
 - **Client/Server Sorting**: Mark mods as "Client", "Server", or "Both" to keep your load list optimized.
 - **Automation**: Fixes mod casing (lowercase) and handles your `.bikey` and `.bisign` keys automatically.
+
+### Steam Workshop Browser
+A fully integrated TUI browser for the Steam Workshop.
+- **Search**: Find mods by name, author, or relevance directly in the terminal.
+- **Install**: Automatically resolves and installs dependencies.
+- **Details**: View mod descriptions, subscriber counts, and last update dates.
+
+### Configuration Editor
+Edit server settings without touching raw files.
+- **Server Config**: A form-based editor for `serverDZ.cfg` with validation for every field.
+- **RCON Settings**: Manage your BattlEye settings securely.
+- **Globals**: Tweak `globals.xml` values easily.
 
 ### Central Economy Tools
 Take control of your loot without manually editing giant XML files.
@@ -27,6 +40,11 @@ Take control of your loot without manually editing giant XML files.
 ### Logs & Console
 - **Log Browser**: View RPT and ADM logs directly in the terminal with live tailing (`tail -f`).
 - **RCON Console**: A built-in BattlEye RCON client that connects to your server automatically for interactive commands.
+
+### Multi-Instance Support
+Run multiple isolated servers on the same machine.
+- **Isolation**: Each server has its own storage, configuration, and port mappings.
+- **Management**: Switch between instances instantly from the main menu.
 
 ---
 
@@ -54,6 +72,7 @@ Launch the TUI to manage your servers:
 - **[Enter]**: Confirm / Select / Toggle
 - **[/]**: Search / Filter lists
 - **[L]**: Live Tail (when viewing logs)
+- **[W]**: Open Workshop Browser
 - **[M]**: Register as Modular Loot (in the editor)
 - **[S]**: Sync All Mods (Download -> Casing -> Keys)
 - **[F]**: Fast Fix (Fixes casing/keys without a slow Steam update)
