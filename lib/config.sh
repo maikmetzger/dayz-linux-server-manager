@@ -21,21 +21,31 @@ declare -A CONFIG_REGISTRY=(
 # =============================================================================
 # Category Definitions for serverDZ.cfg
 # =============================================================================
+# Use simple keys (no emojis) for reliable associative array lookup
 declare -A SERVERDZ_CATEGORIES=(
-    ["🏠 General"]="hostname,motd,motdInterval,maxPlayers,instanceId"
-    ["🔒 Security"]="password,passwordAdmin,verifySignatures,BattlEye,allowFilePatching,forceSameBuild"
-    ["⏱️  Time & Weather"]="serverTime,serverTimeAcceleration,serverTimePersistent,serverNightTimeAcceleration"
-    ["🌐 Network"]="steamQueryPort,respawnTime,storeHouseStateDisabled,disableVoN,vonCodecQuality"
-    ["🎮 Gameplay"]="disable3rdPerson,disableCrosshair,enableCfgGameplayFile,lootHistory"
+    ["General"]="hostname,motd,motdInterval,maxPlayers,instanceId"
+    ["Security"]="password,passwordAdmin,verifySignatures,BattlEye,allowFilePatching,forceSameBuild"
+    ["Time"]="serverTime,serverTimeAcceleration,serverTimePersistent,serverNightTimeAcceleration"
+    ["Network"]="steamQueryPort,respawnTime,storeHouseStateDisabled,disableVoN,vonCodecQuality"
+    ["Gameplay"]="disable3rdPerson,disableCrosshair,enableCfgGameplayFile,lootHistory"
 )
 
-# Order for category display
+# Display names with emojis (for menu display only)
+declare -A SERVERDZ_CATEGORY_DISPLAY=(
+    ["General"]="🏠 General"
+    ["Security"]="🔒 Security"
+    ["Time"]="⏱️  Time & Weather"
+    ["Network"]="🌐 Network"
+    ["Gameplay"]="🎮 Gameplay"
+)
+
+# Order for category display (simple keys)
 SERVERDZ_CATEGORY_ORDER=(
-    "🏠 General"
-    "🔒 Security"
-    "⏱️  Time & Weather"
-    "🌐 Network"
-    "🎮 Gameplay"
+    "General"
+    "Security"
+    "Time"
+    "Network"
+    "Gameplay"
 )
 
 # =============================================================================
@@ -165,9 +175,10 @@ config_category_editor() {
     while true; do
         draw_header "Server Settings"
         
+        # Build menu with display names (emojis)
         local -a items=()
         for cat in "${SERVERDZ_CATEGORY_ORDER[@]}"; do
-            items+=("$cat")
+            items+=("${SERVERDZ_CATEGORY_DISPLAY[$cat]}")
         done
         items+=("← Back")
         
@@ -179,16 +190,12 @@ config_category_editor() {
             return
         fi
         
+        # Use simple key for lookup
         local selected_cat="${SERVERDZ_CATEGORY_ORDER[$MENU_RESULT]}"
         local keys_csv="${SERVERDZ_CATEGORIES[$selected_cat]}"
+        local display_name="${SERVERDZ_CATEGORY_DISPLAY[$selected_cat]}"
         
-        # DEBUG: Check if keys_csv is empty (emoji key lookup issue?)
-        if [[ -z "$keys_csv" ]]; then
-            show_message "DEBUG: keys_csv is empty!\nCategory: '$selected_cat'\nMENU_RESULT: $MENU_RESULT" "Debug"
-            continue
-        fi
-        
-        config_table_editor "$container" "$config_path" "$selected_cat" "$keys_csv"
+        config_table_editor "$container" "$config_path" "$display_name" "$keys_csv"
     done
 }
 
