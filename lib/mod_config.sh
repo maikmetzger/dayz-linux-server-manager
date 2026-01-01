@@ -491,9 +491,8 @@ mod_folder_browser() {
                 local name=$(basename "$file")
                 
                 case "$handler" in
-                    json) json_edit_file "$file" "$folder_name / $name" ;;
                     xml)  xml_edit_file "$file" "$folder_name / $name" ;;
-                    cfg)  cfg_edit_file "$file" "$folder_name / $name" ;;
+                    # JSON/CFG use nano - complex parsers don't work well for mod configs
                     *)    raw_edit_file "$file" "$folder_name / $name" ;;
                 esac
                 ;;
