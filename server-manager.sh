@@ -520,8 +520,9 @@ main_menu() {
             "🔄 Restart Server"
             "--------------------"
             "⚒️  Mod Manager"
-            "🎮 RCON Console"
             "🧹 Wipe Server Data"
+            "--------------------"
+            "🎮 RCON Console"
             "📜 View Logs"
             "💻 Enter Shell"
             "--------------------"
@@ -542,7 +543,9 @@ main_menu() {
             2) run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
             3) ;;
             4) mod_manager ;;
-            5)
+            5) wipe_menu ;;
+            6) ;;
+            7)
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  set +e
                  "${SCRIPT_DIR}/rcon.sh" "$SELECTED_DIR"
@@ -554,13 +557,12 @@ main_menu() {
                      read -rsn1
                  fi
                  ;;
-            6) wipe_menu ;;
-            7)
+            8)
                 trap : INT
                 run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
                 trap - INT
                 ;;
-            8)
+            9)
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running."
                 else
@@ -570,8 +572,8 @@ main_menu() {
                     printf "%s" "$HIDE_CURSOR"
                 fi
                 ;;
-            9) ;;
-            10)
+            10) ;;
+            11)
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
@@ -580,8 +582,8 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            11) ;;
-            12) return ;;
+            12) ;;
+            13) return ;;
         esac
     done
 }
