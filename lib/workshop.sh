@@ -301,6 +301,7 @@ _view_mod_details() {
     
     local tmp_source="/tmp/workshop_source_${mid}.sh"
     
+    echo "PARSING START..." >> /tmp/workshop_crash.log
     # Python writes direct shell assignments to file
     cat "$tmp_json" | python3 -c "
 import sys, json, datetime, shlex
@@ -332,6 +333,7 @@ except Exception as e:
 "
     rm -f "$tmp_json"
     
+    echo "PARSING DONE. SOURCING..." >> /tmp/workshop_crash.log
     # Source the generated file (Safe loading of variables)
     if [[ -f "$tmp_source" ]]; then
         source "$tmp_source"
@@ -346,6 +348,7 @@ except Exception as e:
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
+    echo "ENTERING UI LOOP..." >> /tmp/workshop_crash.log
     while true; do
         # Recalculate view_height for paging logic inside the loop (depends on resize)
         local desc_height=$((TERM_ROWS - 6))
