@@ -288,7 +288,7 @@ config_table_editor() {
         
         # Calculate Layout
         get_term_size
-        local table_start=3
+        local table_start=4
         local col_key=2
         local col_val=$((col_key + max_key_len + 5))
         local max_rows=$((TERM_ROWS - table_start - 3)) # leave space for footer
