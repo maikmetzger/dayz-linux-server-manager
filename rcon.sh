@@ -140,6 +140,7 @@ main_menu() {
             items+=("🖥️|${n} ($d)")
             paths+=("$d")
         done
+        items+=("--------------------")
         items+=("❌|Exit")
         
         if run_menu items "Select Instance to Connect"; then

@@ -92,6 +92,35 @@ draw_menu() {
 # Menu Runner
 # -----------------------------------------------------------------------------
 
+# Check if menu item is a separator (starts with dashes)
+_is_separator() {
+    [[ "$1" == ----* ]]
+}
+
+# Find next valid (non-separator) index in direction
+# Usage: _find_valid_index "array_name" current_index direction(1 or -1)
+_find_next_valid() {
+    local _arr_name=$1
+    local current=$2
+    local direction=$3
+    
+    eval "local count=\${#${_arr_name}[@]}"
+    local next=$((current + direction))
+    
+    while [[ $next -ge 0 && $next -lt $count ]]; do
+        local item
+        eval "item=\"\${${_arr_name}[\$next]}\""
+        if ! _is_separator "$item"; then
+            echo "$next"
+            return 0
+        fi
+        next=$((next + direction))
+    done
+    
+    # No valid item found, return current
+    echo "$current"
+}
+
 # Run an interactive menu and get selection
 # Usage: run_menu "array_name" "Title" [initial_selection]
 # Returns: 0 on selection (result in MENU_RESULT), 1 on quit
@@ -106,6 +135,13 @@ run_menu() {
     
     [[ $selected -ge $count ]] && selected=$((count - 1))
     [[ $selected -lt 0 ]] && selected=0
+    
+    # Ensure initial selection is not a separator
+    local init_item
+    eval "init_item=\"\${${_menu_arr_name}[\$selected]}\""
+    if _is_separator "$init_item"; then
+        selected=$(_find_next_valid "$_menu_arr_name" "$selected" 1)
+    fi
     
     printf "%s" "$HIDE_CURSOR"
     
@@ -129,8 +165,12 @@ run_menu() {
             $'\x1b')  # Escape sequence
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;  # Up
-                    '[B') if ((selected < count-1)); then selected=$((selected+1)); fi ;;  # Down
+                    '[A') # Up
+                        selected=$(_find_next_valid "$_menu_arr_name" "$selected" -1)
+                        ;;
+                    '[B') # Down
+                        selected=$(_find_next_valid "$_menu_arr_name" "$selected" 1)
+                        ;;
                 esac
                 ;;
             '') # Enter

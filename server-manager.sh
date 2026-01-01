@@ -59,6 +59,7 @@ select_instance() {
         fi
         
         items+=("✨|Install/Manage Instances")
+        items+=("--------------------")
         items+=("❌|Quit")
         
         if run_menu items "DayZ Server Manager - Select Instance" $selection; then

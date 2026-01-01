@@ -400,6 +400,7 @@ config_editor_menu() {
             config_ids+=("$id")
         done
         
+        items+=("--------------------")
         items+=("←|Back")
         
         if ! run_menu items "Select Config File"; then
@@ -470,6 +471,7 @@ config_category_editor() {
             eval "display_name=\"\${${cat_display_var}[\$cat]}\""
             items+=("${display_name}")
         done
+        items+=("--------------------")
         items+=("←|Back")
         
         if ! run_menu items "Select Category"; then

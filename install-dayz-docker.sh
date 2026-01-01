@@ -743,6 +743,7 @@ main_tui() {
         menu_items+=("🗑️|Delete Instance/Container")
         menu_items+=("--------------------")
         menu_items+=("✨|Run Server Manager")
+        menu_items+=("--------------------")
         menu_items+=("❌|Exit")
         
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
@@ -855,6 +856,7 @@ tui_update_instance() {
         items+=("📁|${n:-?} (${d})")
         paths+=("$d")
     done
+    items+=("--------------------")
     items+=("←|Cancel")
     
     if run_menu items "Update run.sh - Select Instance"; then
@@ -890,6 +892,7 @@ tui_delete_menu() {
                 items+=("🗑️|${n} ($d)")
                     paths+=("$d")
                 done
+                items+=("--------------------")
                 items+=("←|Back")
                 
                 if run_menu items "Select Instance to DELETE"; then
@@ -911,6 +914,7 @@ tui_delete_menu() {
                 fi
                 local -a c_items=()
                 for c in "${containers[@]}"; do c_items+=("🗑️|$c"); done
+                c_items+=("--------------------")
                 c_items+=("←|Back")
                 if run_menu c_items "Select Container to DELETE"; then
                     [[ $MENU_RESULT -eq ${#containers[@]} ]] && continue
