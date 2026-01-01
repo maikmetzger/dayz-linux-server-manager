@@ -107,8 +107,10 @@ run_rcon() {
         
         # User requested TUI dialog
         if confirm "${msg} Retry?" "y"; then
+            printf "%s" "$CLEAR_SCREEN"
             continue
         else
+            printf "%s" "$CLEAR_SCREEN"
             break
         fi
     done
