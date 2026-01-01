@@ -635,9 +635,9 @@ except Exception as e:
                     local install_summary="${to_install_names[*]}"
                     [[ ${#to_install_names[@]} -gt 3 ]] && install_summary="${to_install_names[0]}, ${to_install_names[1]} and $(( ${#to_install_names[@]} - 2 )) more"
                     echo "INSTALL: About to show_confirm" >> /tmp/workshop_crash.log
-                    if show_confirm "Install ${#to_install_ids[@]} item(s)?\nChain: $install_summary" "Confirm Installation"; then
+                    if confirm "Install ${#to_install_ids[@]} item(s)?\nChain: $install_summary" "y"; then
                         local auto_top=0
-                        if [[ ${#frameworks_found[@]} -gt 0 ]] && show_confirm "Frameworks detected (${frameworks_found[*]}).\nMove to top of load order automatically?" "Intelligent Load Order"; then auto_top=1; fi
+                        if [[ ${#frameworks_found[@]} -gt 0 ]] && confirm "Frameworks detected (${frameworks_found[*]}).\nMove to top of load order automatically?" "y"; then auto_top=1; fi
                         for ((i=0; i<${#to_install_ids[@]}; i++)); do
                             local cid="${to_install_ids[$i]}"
                             if [[ $auto_top -eq 1 ]]; then sed -i "1i$cid" "$mods_txt"; else echo "$cid" >> "$mods_txt"; fi
