@@ -266,6 +266,9 @@ _draw_workshop_details_screen() {
 _view_mod_details() {
     local mid="$1" instance_dir="$2" mods_txt="$3" rules_json="$4"
     
+    # Run ENTIRE fetch/parse block in permissive mode
+    set +e
+    
     # Fetch FRESH details (recursive=0, just this mod, but get FULL info)
     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
     printf "%s%s Fetching Full Details... %s" "$BG_BLUE" "$WHITE$BOLD" "$RESET"
@@ -277,8 +280,6 @@ _view_mod_details() {
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
     local -a mimages=()
     
-    # Run fetch/parse in a way that doesn't kill the script on error (set -e issues)
-    set +e
     local parse_out
     parse_out=$(echo "$json_str" | python3 -c "
 import sys, json, datetime, shlex
