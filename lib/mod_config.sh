@@ -196,6 +196,8 @@ unregister_modular_loot() {
     local mission_path=$(get_mission_path "$instance_dir")
     [[ -z "$mission_path" ]] && return 1
     
+    echo "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename" >> "${SCRIPT_DIR}/loot_manager.log"
+    
     local core_xml="${mission_path}/cfgeconomycore.xml"
     local target_path="${mission_path}/CustomCE/types/${target_filename}"
     
@@ -457,9 +459,12 @@ modular_loot_manager() {
             
             if [[ ${states[$midx]} -eq 1 ]]; then
                 # LINKED -> Unlink (Non-destructive)
-                if confirm "Unlink '$fn' from economy? (Keeps physical file)" "y"; then
-                    unregister_modular_loot "$inst_dir" "$fn"
-                    show_message "Unlinked $fn" "Success"
+                local target_to_unlink="$fn"
+                [[ "$src" != "LOCAL" ]] && target_to_unlink="$tn"
+                
+                if confirm "Unlink '$target_to_unlink' from economy? (Keeps physical file)" "y"; then
+                    unregister_modular_loot "$inst_dir" "$target_to_unlink"
+                    show_message "Unlinked $target_to_unlink" "Success"
                 fi
             else
                 # UNLINKED -> Link it!
