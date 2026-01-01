@@ -30,19 +30,46 @@ draw_menu() {
     
     eval "local -a _items=(\"\${${_arr_name}[@]}\")"
     
+    # Fixed column for text (after emoji + spacing)
+    # Emoji typically 2 chars + 2 spaces = 4 chars from start
+    local text_offset=6
+    
     local i=0
     for item in "${_items[@]}"; do
         move_to $((start_row + i)) $start_col
         
+        # Check if item starts with emoji (high unicode range)
+        local emoji=""
+        local text="$item"
+        
+        # Extract emoji prefix if present (handles multi-byte emoji)
+        # Regex: starts with emoji characters (non-ASCII)
+        if [[ "$item" =~ ^([^[:ascii:]]+)[[:space:]]*(.*) ]]; then
+            emoji="${BASH_REMATCH[1]}"
+            text="${BASH_REMATCH[2]}"
+        fi
+        
         if [[ $i -eq $selected ]]; then
-            # Strip ANSI color codes from selected item so BG_RED covers entire line
-            local clean_item
-            clean_item="${item//\\033\[*([0-9;])m/}"
-            # Fallback: use sed if parameter expansion doesn't strip all codes
-            clean_item=$(printf '%s' "$item" | sed $'s/\033\\[[0-9;]*m//g')
-            printf "%s%s ▶ %-$((width-4))s %s" "$BG_RED" "$WHITE$BOLD" "$clean_item" "$RESET"
+            # Selected row with red background
+            printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$width" ""
+            move_to $((start_row + i)) $start_col
+            if [[ -n "$emoji" ]]; then
+                printf "%s%s ▶ %s" "$BG_RED" "$WHITE$BOLD" "$emoji"
+                move_to $((start_row + i)) $((start_col + text_offset))
+                printf "%s" "$text"
+            else
+                printf "%s%s ▶ %s" "$BG_RED" "$WHITE$BOLD" "$text"
+            fi
+            printf "%s" "$RESET"
         else
-            printf "%s   %-$((width-4))s %s" "$WHITE" "$item" "$RESET"
+            if [[ -n "$emoji" ]]; then
+                printf "%s   %s" "$WHITE" "$emoji"
+                move_to $((start_row + i)) $((start_col + text_offset))
+                printf "%s%s" "$WHITE" "$text"
+            else
+                printf "%s   %s" "$WHITE" "$text"
+            fi
+            printf "%s" "$RESET"
         fi
         ((i+=1))
     done
