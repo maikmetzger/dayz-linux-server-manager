@@ -356,7 +356,8 @@ _view_mod_details() {
     printf "%s%s Fetching Full Details... %s" "$BG_BLUE" "$WHITE$BOLD" "$RESET"
     
     # Use temp file to avoid subshell exit issues
-    local tmp_json="/tmp/workshop_details_${mid}.json"
+    # Force unique name with timestamp to avoid collision
+    local tmp_json="/tmp/workshop_details_${mid}_$(date +%s).json"
     echo "FETCHING PYTHON..." >> /tmp/workshop_crash.log
     echo "XYZZY_SYNC_CHECK_2026" >> /tmp/workshop_crash.log
     

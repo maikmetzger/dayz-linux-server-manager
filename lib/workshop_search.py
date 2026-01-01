@@ -222,10 +222,18 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
         cache_key = f"details_{mid}"
         if cache_key in cache:
             entry = cache[cache_key]
-            # If we need author/images and it's missing (legacy cache) or Unknown, re-fetch
-            if 'author' not in entry['data'] or 'images' not in entry['data'] or entry['data']['author'] == "Unknown": to_fetch.append(mid)
-            elif time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
-                results.append(entry['data'])
+            # If we need author/images/rating_count and it's missing (legacy cache) or Unknown, re-fetch
+            # Also re-fetch if rating_count is missing or 0 (likely legacy cache), unless it's genuinely 0 (rare for top mods)
+            # We can use a heuristic: if we have rating_stars > 0 but rating_count is 0, RE-FETCH.
+            data = entry['data']
+            needs_refetch = False
+            
+            if 'author' not in data or 'images' not in data or data['author'] == "Unknown": needs_refetch = True
+            elif 'rating_count' not in data: needs_refetch = True
+            elif data.get('rating_stars', 0) in [3, 4, 5] and data.get('rating_count', 0) == 0: needs_refetch = True
+            
+            if not needs_refetch and time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
+                results.append(data)
                 continue
             else: to_fetch.append(mid)
         else: to_fetch.append(mid)
