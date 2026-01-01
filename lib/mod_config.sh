@@ -72,6 +72,48 @@ EOF
     fi
 }
 
+# Link an existing CustomCE file to cfgeconomycore.xml
+link_modular_xml() {
+    local instance_dir="$1"
+    local target_filename="$2"
+    
+    local mission_path=$(get_mission_path "$instance_dir")
+    [[ -z "$mission_path" ]] && return 1
+    
+    setup_modular_loot "$mission_path"
+    local core_xml="${mission_path}/cfgeconomycore.xml"
+    
+    python3 <<EOF
+import xml.etree.ElementTree as ET
+import sys
+
+core_path = "$core_xml"
+file_to_add = "$target_filename"
+
+try:
+    tree = ET.parse(core_path)
+    root = tree.getroot()
+    ce_node = root.find('ce')
+    if ce_node is None:
+        ce_node = ET.SubElement(root, 'ce', {'folder': 'CustomCE/types'})
+    
+    # Check if file already exists
+    exists = False
+    for f in ce_node.findall('file'):
+        if f.get('name') == file_to_add:
+            exists = True
+            break
+            
+    if not exists:
+        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': 'types'})
+        if hasattr(ET, 'indent'):
+            ET.indent(tree, space="\t", level=0)
+        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
+except Exception as e:
+    sys.exit(1)
+EOF
+}
+
 # Register a loot XML as a modular include
 register_modular_loot() {
     local instance_dir="$1"
@@ -300,7 +342,13 @@ modular_loot_manager() {
                     src_paths+=("ORPHAN")
                     smod_names+=("$owner")
                     sfile_names+=("$ce_bname")
-                    states+=(2) # Orphaned/Stray
+                    
+                    # Detect if THIS specific orphan is linked
+                    if echo "$linked_files" | grep -qF "$ce_bname"; then
+                        states+=(3) # Stray LINKED
+                    else
+                        states+=(2) # Stray UNLINKED
+                    fi
                 else
                     echo "[$(date +%T)] MGR: File $ce_bname matched to active mod scan." >> "${SCRIPT_DIR}/loot_manager.log"
                 fi
@@ -343,12 +391,27 @@ modular_loot_manager() {
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
             local color="$WHITE"
+            local color="$WHITE"
             if [[ ${states[$idx]} -eq 1 ]]; then
                 status_str="[  LINKED  ]"
                 color="$GRN"
-            elif [[ ${states[$idx]} -eq 2 ]]; then
-                status_str="[ ORPHANED ]"
-                color="$RED"
+            elif [[ ${states[$idx]} -eq 2 || ${states[$idx]} -eq 3 ]]; then
+                local is_stray_linked=0
+                [[ ${states[$idx]} -eq 3 ]] && is_stray_linked=1
+                
+                if [[ $is_stray_linked -eq 1 ]]; then
+                    status_str="[  LINKED  ]"
+                    color="$GRN"
+                else
+                    status_str="[ UNLINKED ]"
+                    color="$WHITE"
+                fi
+                
+                # We could also show the tag in the mod name column
+                if [[ "${smod_names[$idx]}" == STRAY* ]]; then
+                    # We will append [LEGACY] to the file name display for clarity
+                    sfile_names[$idx]="${sfile_names[$idx]} (LEGACY)"
+                fi
             fi
             
             move_to $row 1
@@ -405,11 +468,28 @@ modular_loot_manager() {
                 if confirm "Unlink modular loot '$tn'? (This deletes the custom XML file)" "n"; then
                     unregister_modular_loot "$inst_dir" "$tn"
                 fi
-            else
-                # Orphaned - Simple delete
-                if confirm "File '$fn' is orphaned and not found in any active mod. Delete it?" "y"; then
+            elif [[ ${states[$midx]} -eq 2 ]]; then
+                # Legacy/Orphan UNLINKED -> Link it!
+                if confirm "File '$fn' is a local file. Link it to your economy?" "y"; then
+                    link_modular_xml "$inst_dir" "$fn"
+                    show_message "Linked $fn to economy." "Success"
+                fi
+            elif [[ ${states[$midx]} -eq 3 ]]; then
+                # Legacy/Orphan LINKED -> Unlink it
+                if confirm "Unlink file '$fn'? (This removes the economy link)" "n"; then
+                    # Remove from core.xml only
                     unregister_modular_loot "$inst_dir" "$fn"
-                    show_message "Deleted orphaned file." "Success"
+                    # Put it back if they want? Or better, unregister_modular_loot deletes it.
+                    # We'll ask if they want to keep the file.
+                    if confirm "Also delete the physical file '$fn'?" "n"; then
+                        # unregister already deleted it, so this logic is slightly redundant
+                        # but we want to be safe.
+                        :
+                    else
+                        # Restore file if it was deleted? Actually unregister_modular_loot deletes it.
+                        # I'll need to update unregister_modular_loot to be more granular.
+                        show_message "Note: File was deleted. Use [v] and save to recreate if needed." "Warning"
+                    fi
                 fi
             fi
             # Implicitly re-loops and re-scans

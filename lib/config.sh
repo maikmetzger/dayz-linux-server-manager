@@ -442,11 +442,25 @@ types_selection_menu() {
             paths+=("")
             
             # Find all XMLs in CustomCE/types
+            local linked_files=""
+            if [[ -f "${mission_path}/cfgeconomycore.xml" ]]; then
+                linked_files=$(grep -o '<file name="[^"]*"' "${mission_path}/cfgeconomycore.xml" | cut -d'"' -f2)
+            fi
+
             while IFS= read -r p; do
                 [[ -z "$p" ]] && continue
                 local bn=$(basename "$p")
-                echo "[$(date +%T)] HUB: Found file: $bn" >> "${SCRIPT_DIR}/loot_manager.log"
-                items+=("🧩|$bn")
+                
+                # Check link status for icon
+                local icon="🧩"
+                if echo "$linked_files" | grep -qF "$bn"; then
+                    icon="✅"
+                else
+                    icon="❌"
+                fi
+
+                echo "[$(date +%T)] HUB: Found file: $bn (Linked: $icon)" >> "${SCRIPT_DIR}/loot_manager.log"
+                items+=("$icon|$bn")
                 paths+=("$p")
             done < <(find "$custom_ce" -name "*.xml" -type f | sort)
         fi
