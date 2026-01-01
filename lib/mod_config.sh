@@ -244,11 +244,21 @@ modular_loot_manager() {
                     
                     echo "[$(date +%T)] MGR: Found XML: $bname -> Standard: $target_name" >> "${SCRIPT_DIR}/loot_manager.log"
                     
+                    # Detect if ANY version of this mod's loot is linked
+                    local is_linked=0
+                    # 1. Check exact standard name
                     if echo "$linked_files" | grep -qF "$target_name"; then
-                        states+=(1) # Linked
+                        is_linked=1
                     else
-                        states+=(0) # Unlinked
+                        # 2. Check "fuzzy" legacy name (spaces included)
+                        local legacy_name="${mname}_${bname}"
+                        if echo "$linked_files" | grep -qF "$legacy_name"; then
+                            is_linked=1
+                            echo "[$(date +%T)] MGR: Detected linked file with LEGACY naming: $legacy_name" >> "${SCRIPT_DIR}/loot_manager.log"
+                        fi
                     fi
+                    
+                    states+=($is_linked)
                 fi
             done < <(find "$mod_path" -maxdepth 6 -name "*.xml" -type f 2>/dev/null)
         done
@@ -259,18 +269,16 @@ modular_loot_manager() {
                 [[ -z "$ce_file" ]] && continue
                 local ce_bname=$(basename "$ce_file")
                 
-                # Check if this filename was already handled in the scan
+                # Check if this filename matches our CURRENT standard name
                 local matched=0
-                # Normalize CE filename for fuzzy matching (remove non-alnum)
-                local ce_norm=$(echo "$ce_bname" | tr -cd '[:alnum:]_.-')
-                
                 for ((j=0; j<${#src_paths[@]}; j++)); do
                     local mn="${smod_names[$j]}"
                     local fn="${sfile_names[$j]}"
                     local expected="${mn}_${fn}"
+                    # STRICT matching to the current standard
                     expected=$(echo "$expected" | tr -cd '[:alnum:]_.-')
                     
-                    if [[ "$ce_norm" == "$expected" ]]; then
+                    if [[ "$ce_bname" == "$expected" ]]; then
                         matched=1; break
                     fi
                 done
