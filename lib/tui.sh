@@ -74,31 +74,31 @@ draw_header() {
 }
 
 # Draw a bordered box
-# Usage: draw_box row col height width [title]
+# Usage: draw_box row col height width [title] [color]
 draw_box() {
-    local row=$1 col=$2 height=$3 width=$4 title="${5:-}"
+    local row=$1 col=$2 height=$3 width=$4 title="${5:-}" color="${6:-$RED}"
     
     # Top border
     move_to $row $col
-    printf "%s%s┌" "$RED" "$BOLD"
+    printf "%s%s┌" "$color" "$BOLD"
     printf "─%.0s" $(seq 1 $((width-2)))
     printf "┐%s" "$RESET"
     
     # Title (optional)
     if [[ -n "$title" ]]; then
         move_to $row $((col + 2))
-        printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET"
+        printf "%s%s %s %s" "$color" "$BOLD" "$title" "$RESET"
     fi
     
     # Sides and background fill
     for ((i=1; i<height-1; i++)); do
         move_to $((row+i)) $col
-        printf "%s│%s%*s%s│%s" "$RED" "$BOLD" $((width-2)) "" "$RED" "$BOLD"
+        printf "%s│%s%*s%s│%s" "$color" "$BOLD" $((width-2)) "" "$color" "$BOLD"
     done
     
     # Bottom border
     move_to $((row+height-1)) $col
-    printf "%s└" "$RED"
+    printf "%s└" "$color"
     printf "─%.0s" $(seq 1 $((width-2)))
     printf "┘%s" "$RESET"
 }

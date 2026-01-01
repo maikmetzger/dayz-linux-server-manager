@@ -165,6 +165,7 @@ _draw_workshop_details_screen() {
     local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" scroll_offset="$9"
     local -n _images_ref=${10}
     local img_sel=${11}
+    local focus=${12:-0} # 0=Desc, 1=Images
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -191,7 +192,9 @@ _draw_workshop_details_screen() {
     # 3. Images Box (Left, below Metadata)
     local img_height=$((TERM_ROWS - meta_height - 6))
     if [[ $img_height -gt 4 ]]; then
-        draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})"
+        local img_color="$RED"
+        [[ $focus -eq 1 ]] && img_color="$CYN$BOLD"
+        draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
         
         local start_img_row=$((5 + meta_height))
         local max_imgs=$((img_height - 2))
@@ -221,7 +224,9 @@ _draw_workshop_details_screen() {
     local desc_height=$((TERM_ROWS - 6))
     
     if [[ $desc_width -gt 20 ]]; then
-        draw_box 3 $desc_col $desc_height $desc_width "Description"
+        local desc_color="$RED"
+        [[ $focus -eq 0 ]] && desc_color="$WHITE$BOLD"
+        draw_box 3 $desc_col $desc_height $desc_width "Description" "$desc_color"
         
         # Use fold to wrap lines nicely respecting paragraphs
         local -a lines=()
@@ -324,7 +329,7 @@ except Exception as e:
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
     while true; do
-        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel $focus
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
