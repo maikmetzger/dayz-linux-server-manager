@@ -446,7 +446,7 @@ _draw_workshop_filter_dialog() {
                 1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 0; fi ;;
                 2) if run_menu _lim_opts "Select Items Per Page"; then _fl="${_lim_opts[$MENU_RESULT]}"; return 0; fi ;;
                 3) if run_menu _mode_opts "Select Search Mode"; then _fm="${_mode_opts[$MENU_RESULT]}"; return 0; fi ;;
-                4) _fn="DayZ"; _fs="trend"; _fl="Fill"; _fm="Title"; return 0 ;;
+                4) _fn="DayZ"; _fs="mostsubscribed"; _fl="Fill"; _fm="Title"; return 0 ;;
             esac
         fi
     done
@@ -458,7 +458,7 @@ workshop_browser() {
     local mods_txt="${instance_dir}/data/config/mods.txt"
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
-    local f_text="DayZ" f_sort="relevance" f_limit="Fill" f_mode="Title" current_page=1
+    local f_text="DayZ" f_sort="mostsubscribed" f_limit="Fill" f_mode="Title" current_page=1
     local selection=0 offset=0 f_changed=1 count=0
     local -a items=()
     declare -A installed_mods workshop_rules
@@ -544,7 +544,7 @@ except Exception as e:
                 current_page=1; selection=0; f_changed=1; continue
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_sort="relevance"; f_limit="Fill"; f_mode="Title"; current_page=1; selection=0; f_changed=1; continue
+            f_text="DayZ"; f_sort="mostsubscribed"; f_limit="Fill"; f_mode="Title"; current_page=1; selection=0; f_changed=1; continue
         elif [[ "$key" == "o" || "$key" == "O" || "$key" == " " ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
