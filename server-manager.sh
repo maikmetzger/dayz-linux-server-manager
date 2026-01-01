@@ -485,7 +485,42 @@ mod_manager() {
                     new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>/dev/null || echo "0")
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
-                        show_message "Found ${new_ce_count} new CE file(s) from mods. Use Modular Loot Manager to link them." "CE Detection"
+                        # Ask user if they want to link new CE files
+                        if confirm "Found ${new_ce_count} new CE file(s) from mods. Link them now?" "y"; then
+                            # Process each new CE file
+                            local mission_path
+                            mission_path=$(get_mission_path "$SELECTED_DIR" 2>/dev/null)
+                            
+                            echo "$ce_result" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for item in data:
+    if item.get('status') == 'new':
+        print(f\"{item['mod_id']}|{item['file_path']}|{item['filename']}|{item['ce_type']}\")
+" | while IFS='|' read -r mod_id file_path filename ce_type; do
+                                [[ -z "$mod_id" ]] && continue
+                                
+                                # Ask for each file
+                                printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+                                move_to 1 1
+                                printf "%s%s New CE File Found %s\n" "$BG_RED" "$WHITE$BOLD" "$RESET"
+                                echo ""
+                                echo "  Mod ID:   $mod_id"
+                                echo "  File:     $filename"
+                                echo "  Type:     $ce_type"
+                                echo "  Path:     $file_path"
+                                echo ""
+                                
+                                if confirm "Link this file to cfgeconomycore.xml?" "y"; then
+                                    register_modular_loot "$SELECTED_DIR" "$file_path" "$mod_id" 0
+                                else
+                                    echo "Skipped."
+                                    sleep 1
+                                fi
+                            done
+                            
+                            show_message "CE file linking complete!" "CE Detection"
+                        fi
                     fi
                 fi
                 ;;
