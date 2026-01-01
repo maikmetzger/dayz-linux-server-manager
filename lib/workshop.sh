@@ -517,16 +517,13 @@ except Exception as e:
 ")
             items=("${read_items[@]}")
             
-            # Custom sorting for asc/desc (if needed)
+            # Custom sorting ONLY for ASC (Steam doesn't support ascending)
             if [[ "$f_sort" == "mostsubscribed_asc" ]]; then
                 local -a sorted=()
                 while IFS= read -r line; do sorted+=("$line"); done < <(printf "%s\n" "${items[@]}" | sort -t'|' -k8,8n)
                 items=("${sorted[@]}")
-            elif [[ "$f_sort" == "mostsubscribed" ]]; then
-                local -a sorted=()
-                while IFS= read -r line; do sorted+=("$line"); done < <(printf "%s\n" "${items[@]}" | sort -t'|' -k8,8nr)
-                items=("${sorted[@]}")
             fi
+            # Note: mostsubscribed DESC relies on Steam's server-side sort - do NOT re-sort locally
             
             count=${#items[@]}
             [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
