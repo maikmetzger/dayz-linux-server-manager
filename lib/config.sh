@@ -580,6 +580,9 @@ config_table_editor() {
         local col_def=$((col_val + w_val))
         local w_def=20
         
+        local col_memo=$((col_def + w_def))
+        # Memo gets remaining width
+        
         local max_rows=$((TERM_ROWS - table_start - 5)) 
 
         # Input Loop
@@ -610,6 +613,8 @@ config_table_editor() {
             printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_val" "VALUE" "$RESET"
             move_to $((table_start + 1)) $col_def
             printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_def" "DEFAULT" "$RESET"
+            move_to $((table_start + 1)) $col_memo
+            printf "%s%sMEMO%s" "$DIM" "$WHITE" "$RESET"
             
             move_to $((table_start + 2)) 1
             printf "%s%s" "$DIM" "$RED"
@@ -648,6 +653,11 @@ config_table_editor() {
                 local d_def="$default"
                 [[ ${#d_def} -ge $((w_def-2)) ]] && d_def="${d_def:0:$((w_def-4))}.."
                 
+                # Memo (remaining width)
+                local w_memo=$((TERM_COLS - col_memo - 1))
+                local d_memo="$memo"
+                [[ ${#d_memo} -ge $w_memo ]] && d_memo="${d_memo:0:$((w_memo-2))}.."
+                
                 # Capture current selection memo for footer
                 [[ $i -eq $selection ]] && current_memo="$memo"
                 
@@ -661,6 +671,8 @@ config_table_editor() {
                     printf "%s" "$d_val"
                     move_to $row $col_def
                     printf "%s" "$d_def"
+                    move_to $row $col_memo
+                    printf "%s" "$d_memo"
                     printf "%s" "$RESET"
                 else
                     # Normal Row
@@ -677,6 +689,8 @@ config_table_editor() {
                     fi
                     move_to $row $col_def
                     printf "%s%s" "$DIM" "$d_def"
+                    move_to $row $col_memo
+                    printf "%s%s" "$DIM" "$d_memo"
                     printf "%s" "$RESET"
                 fi
                 ((row++))
