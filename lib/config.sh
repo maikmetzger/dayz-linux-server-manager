@@ -16,7 +16,7 @@
 declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
     ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
-    ["types"]="xml||📦|Loot Economy (types.xml)"
+    ["types"]="xml||📦|Loot Economy"
     ["modConfigs"]="mod||📁|Mod Configs"
 )
 
@@ -519,8 +519,18 @@ config_editor_menu() {
             local display_name="${icon}|${label}"
             
             # Check if file exists (via host path since it's mounted)
-            # Skip check for 'mod' format which uses directory browsing
-            if [[ "$fmt" == "mod" || -f "${full_path}" ]]; then
+            local exists=0
+            if [[ "$fmt" == "mod" ]]; then
+                exists=1
+            elif [[ -n "$rel_path" ]]; then
+                [[ -f "$full_path" ]] && exists=1
+            else
+                # Dynamic path (e.g. types.xml)
+                local dyn_path=$(find_types_xml "$inst_dir")
+                [[ -n "$dyn_path" && -f "$dyn_path" ]] && exists=1
+            fi
+
+            if [[ $exists -eq 1 ]]; then
                 items+=("${display_name}")
             else
                 items+=("${icon}|${label} (not found)")
