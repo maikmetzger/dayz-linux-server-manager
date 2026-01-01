@@ -284,17 +284,22 @@ try:
     if data:
         x = data[0]
         ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
+        
+        # Sanitize helpers - Force ASCII to prevent TUI misalignment/crashes
+        def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
+        
         # Use description_clean if available, else standard clean
         desc = x.get('description_clean', x.get('description', ''))
         # Strip newlines for single-line Bash variable
         desc = desc.replace('\n', ' ').replace('\r', ' ')
         
-        print(f'mname={shlex.quote(x.get(\"name\",\"\"))}')
-        print(f'mauthor={shlex.quote(x.get(\"author\",\"Unknown\"))}')
+        # Use shlex for specific shell escaping, also clean high unicode
+        print(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}')
+        print(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}')
         print(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}')
         print(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}')
         print(f'mupdated={shlex.quote(ud)}')
-        print(f'mdesc={shlex.quote(desc)}')
+        print(f'mdesc={shlex.quote(clean(desc))}')
         print(f'mdeps={len(x.get(\"dependencies\",[]))}')
         
         # Images array logic
@@ -302,7 +307,10 @@ try:
         # Construct bash array safely
         img_str = ' '.join([shlex.quote(i) for i in imgs])
         print(f'mimages=({img_str})')
-except: pass
+except Exception:
+    print('mname=\"Error Parsing Data\"')
+    print('mauthor=\"Unknown\"')
+    print('mdesc=\"Failed to load mod details.\"')
 ")
 
     local scroll=0
