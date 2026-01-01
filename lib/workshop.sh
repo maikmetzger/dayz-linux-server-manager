@@ -186,9 +186,9 @@ _draw_workshop_screen() {
 
 # Mod Details View Screen
 _draw_workshop_details_screen() {
-    local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" scroll_offset="$9"
-    local -n _images_ref=${10}
-    local img_sel=${11}
+    local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" mrating_stars="$9" mrating_count="${10}" scroll_offset="${11}"
+    local -n _images_ref=${12}
+    local img_sel=${13}
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -200,23 +200,59 @@ _draw_workshop_details_screen() {
          move_to 1 14; printf "%s%s" "$BG_BLUE" "${mname:0:$((TERM_COLS-15))}..."
     fi
 
-    # 2. Metadata Box (Left)
     local meta_width=40
-    local meta_height=10
+    # Clean split author string by comma (assuming comma separated from python)
+    local -a authors_list=()
+    IFS=',' read -ra ADDR <<< "$mauthor"
+    for i in "${ADDR[@]}"; do authors_list+=("$(echo "$i" | sed 's/^ *//')"); done
+    if [[ ${#authors_list[@]} -eq 0 ]]; then authors_list=("Unknown"); fi
+
+    # Flexible Metadata Height
+    # Start: 3
+    # ID, Size, Subs, Updated, Deps, Rating (6 lines) + Authors (N lines)
+    local meta_base_lines=6
+    local meta_height=$((meta_base_lines + ${#authors_list[@]} + 2)) # +2 for padding
+    
+    # Cap height reasonably
+    [[ $meta_height -gt 15 ]] && meta_height=15
+    
     draw_box 3 2 $meta_height $meta_width "Metadata"
     
     move_to 5 4; printf "%sID       :%s %s" "$DIM" "$RESET" "$mid"
-    move_to 6 4; printf "%sAuthor   :%s %s" "$DIM" "$RESET" "${mauthor:-Unknown}"
-    move_to 7 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
-    move_to 8 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
-    move_to 9 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
-    move_to 10 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "${mdeps:-None}"
     
+    # Authors
+    move_to 6 4; printf "%sAuthor(s):%s" "$DIM" "$RESET"
+    local a_row=6
+    for ((i=0; i<${#authors_list[@]}; i++)); do
+        if [[ $((a_row)) -lt $((3 + meta_height - 1)) ]]; then
+             move_to $a_row 15; printf "%s" "${authors_list[$i]}"
+             ((a_row++))
+        fi
+    done
+    
+    # Continue after authors
+    move_to $a_row 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
+    ((a_row++))
+    move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
+    ((a_row++))
+    move_to $a_row 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
+    ((a_row++))
+    move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "${mdeps:-None}"
+    ((a_row++))
+    
+    # Rating Display
+    local r_disp="-"
+    if [[ "$mrating_stars" =~ ^[0-5]$ ]]; then
+         r_disp="$mrating_stars/5 ($mrating_count)"
+    else
+         r_disp="? ($mrating_count)"
+    fi
+    move_to $a_row 4; printf "%sRating   :%s %s" "$DIM" "$RESET" "$r_disp"
+
     # 3. Images Box (Left, below Metadata)
     local img_height=$((TERM_ROWS - meta_height - 6))
     if [[ $img_height -gt 4 ]]; then
         local img_color="$RED"
-        # Removed dynamic focus color - always RED border to match theme
         draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
         
         local start_img_row=$((5 + meta_height))
@@ -224,7 +260,10 @@ _draw_workshop_details_screen() {
         local display_offset=0
         
         # Simple scroll for images if selected index is deep
-        if [[ $img_sel -ge $max_imgs ]]; then display_offset=$((img_sel - max_imgs + 1)); fi
+        # FIX: Ensure it handles scrolling UP as well by clamping display_offset
+        if [[ $img_sel -ge $max_imgs ]]; then 
+             display_offset=$((img_sel - max_imgs + 1))
+        fi
         
         for ((i=0; i<max_imgs; i++)); do
             local idx=$((display_offset + i))
@@ -335,7 +374,7 @@ _view_mod_details() {
     echo "PARSING JSON..." >> /tmp/workshop_crash.log
     
     # Parse Python output
-    local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
+    local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0" mrating_stars="-" mrating_count="0"
     local -a mimages=()
     
     local tmp_source="/tmp/workshop_source_${mid}.sh"
@@ -362,6 +401,8 @@ try:
             f.write(f'mupdated={shlex.quote(ud)}\\n')
             f.write(f'mdesc={shlex.quote(clean(desc))}\\n')
             f.write(f'mdeps={len(x.get(\"dependencies\",[]))}\\n')
+            f.write(f'mrating_stars={shlex.quote(str(x.get(\"rating_stars\",\"-\")))}\\n')
+            f.write(f'mrating_count={shlex.quote(str(x.get(\"rating_count\",\"0\")))}\\n')
             
             imgs = x.get('images', [])
             img_str = ' '.join([shlex.quote(i) for i in imgs])
@@ -394,7 +435,7 @@ except Exception as e:
         local desc_height=$((TERM_ROWS - 6))
         local view_height=$((desc_height - 3))
         
-        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$mrating_stars" "$mrating_count" "$scroll" mimages $img_sel
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then

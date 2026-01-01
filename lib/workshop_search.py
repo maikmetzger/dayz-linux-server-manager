@@ -171,8 +171,17 @@ def scrape_dependencies(mod_id):
                 if clean_authors:
                     author = ", ".join(clean_authors)
         except: pass
+
+        # Scrape Rating Count
+        ratings_count = 0
+        try:
+            rc_m = re.search(r'(\d{1,3}(?:,\d{3})*) ratings', html)
+            if rc_m:
+                ratings_count = int(rc_m.group(1).replace(',', ''))
+        except: pass
         
-        return reqs, author
+        return reqs, author, ratings_count
+    except Exception: return [], "Unknown", 0
     except Exception: return [], "Unknown"
 
 def parse_bbcode(text):
@@ -250,7 +259,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                     size_str = f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 1024**3 else f"{size_bytes / (1024**2):.1f} MB"
                     
                     req_items = [r.get('publishedfileid') for r in d.get('required_items', [])]
-                    scraped_reqs, author = scrape_dependencies(mid)
+                    scraped_reqs, author, rating_count = scrape_dependencies(mid)
                     if not req_items: req_items = scraped_reqs
                     
                     raw_desc = d.get('description', "")
@@ -265,7 +274,8 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                         "description_clean": clean_desc,
                         "images": imgs,
                         "dependencies": req_items,
-                        "author": author
+                        "author": author,
+                        "rating_count": rating_count
                     }
                     
                     # Preserve scraped rating if exists in cache
