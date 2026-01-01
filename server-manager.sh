@@ -544,8 +544,12 @@ main_menu() {
             4) mod_manager ;;
             5)
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
+                 set +e
                  "${SCRIPT_DIR}/rcon.sh" "$SELECTED_DIR"
-                 if [[ $? -ne 130 ]]; then
+                 local ret=$?
+                 set -e
+                 
+                 if [[ $ret -ne 130 ]]; then
                      printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
                      read -rsn1
                  fi
