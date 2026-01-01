@@ -274,10 +274,13 @@ _view_mod_details() {
     json_str=$(python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid")
     
     # Parse Python output
-    local mname mauthor msize msubs mupdated mdesc mdeps
+    local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
     local -a mimages=()
     
-    eval $(echo "$json_str" | python3 -c "
+    # Run fetch/parse in a way that doesn't kill the script on error (set -e issues)
+    set +e
+    local parse_out
+    parse_out=$(echo "$json_str" | python3 -c "
 import sys, json, datetime, shlex
 try:
     data = json.load(sys.stdin)
@@ -312,7 +315,9 @@ except Exception:
     print('mauthor=\"Unknown\"')
     print('mdesc=\"Failed to load mod details.\"')
 ")
-
+    eval "$parse_out"
+    set -e
+    
     local scroll=0
     local focus=0 # 0=Desc, 1=Images
     local img_sel=-1
