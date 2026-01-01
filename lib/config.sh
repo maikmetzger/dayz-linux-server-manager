@@ -637,7 +637,12 @@ config_table_editor() {
                 [[ ${#d_key} -ge $((w_key-2)) ]] && d_key="${d_key:0:$((w_key-4))}.."
                 
                 local d_val="$val"
-                [[ -z "$d_val" ]] && d_val="(empty)"
+                if [[ -z "$d_val" ]]; then
+                    # Check if key actually exists in file or is just missing
+                    # If parsed value is empty string, it could be either
+                    # For now, use "(not set)" to indicate it's not in the file
+                    d_val="(not set)"
+                fi
                 [[ ${#d_val} -ge $((w_val-2)) ]] && d_val="${d_val:0:$((w_val-4))}.."
                 
                 local d_def="$default"
