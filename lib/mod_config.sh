@@ -199,10 +199,7 @@ unregister_modular_loot() {
     local core_xml="${mission_path}/cfgeconomycore.xml"
     local target_path="${mission_path}/CustomCE/types/${target_filename}"
     
-    # 1. Remove file
-    rm -f "$target_path"
-    
-    # 2. Remove from cfgeconomycore.xml
+    # 1. Remove from cfgeconomycore.xml
     python3 <<EOF
 import xml.etree.ElementTree as ET
 import sys
@@ -328,26 +325,26 @@ modular_loot_manager() {
                 
                 if [[ $matched -eq 0 ]]; then
                     # Final check: Does it start with ANY active mod name?
-                    local owner="UNKNOWN/OLD"
+                    local owner="LOCAL/VAR"
                     for ((j=0; j<${#mod_ids[@]}; j++)); do
                         local mn=$(get_mod_name "${mod_ids[$j]}")
                         local mn_clean=$(echo "$mn" | tr -cd '[:alnum:]_.-')
                         if [[ "$ce_norm" == "${mn_clean}"* ]]; then
-                            owner="STRAY ($mn)"
+                            owner="$mn"
                             break
                         fi
                     done
                     
-                    echo "[$(date +%T)] MGR: Flagged as Orphan: $ce_bname (Probable Owner: $owner)" >> "${SCRIPT_DIR}/loot_manager.log"
-                    src_paths+=("ORPHAN")
+                    echo "[$(date +%T)] MGR: Found local file: $ce_bname (Group: $owner)" >> "${SCRIPT_DIR}/loot_manager.log"
+                    src_paths+=("LOCAL")
                     smod_names+=("$owner")
                     sfile_names+=("$ce_bname")
                     
-                    # Detect if THIS specific orphan is linked
+                    # Detect if THIS specific file is linked
                     if echo "$linked_files" | grep -qF "$ce_bname"; then
-                        states+=(3) # Stray LINKED
+                        states+=(1) # Linked
                     else
-                        states+=(2) # Stray UNLINKED
+                        states+=(0) # Unlinked
                     fi
                 else
                     echo "[$(date +%T)] MGR: File $ce_bname matched to active mod scan." >> "${SCRIPT_DIR}/loot_manager.log"
@@ -373,7 +370,7 @@ modular_loot_manager() {
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) 1
-        printf "  %-12s %-30s %-30s" "STATUS" "MOD NAME" "FILE NAME"
+        printf "  %-12s %-30s %-30s" "STATUS" "SOURCE / GROUP" "FILE NAME"
         
         move_to $((table_start + 2)) 1
         printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
@@ -392,26 +389,11 @@ modular_loot_manager() {
             local status_str="[ UNLINKED ]"
             local color="$WHITE"
             local color="$WHITE"
+            local status_str="[ UNLINKED ]"
+            local color="$WHITE"
             if [[ ${states[$idx]} -eq 1 ]]; then
                 status_str="[  LINKED  ]"
                 color="$GRN"
-            elif [[ ${states[$idx]} -eq 2 || ${states[$idx]} -eq 3 ]]; then
-                local is_stray_linked=0
-                [[ ${states[$idx]} -eq 3 ]] && is_stray_linked=1
-                
-                if [[ $is_stray_linked -eq 1 ]]; then
-                    status_str="[  LINKED  ]"
-                    color="$GRN"
-                else
-                    status_str="[ UNLINKED ]"
-                    color="$WHITE"
-                fi
-                
-                # We could also show the tag in the mod name column
-                if [[ "${smod_names[$idx]}" == STRAY* ]]; then
-                    # We will append [LEGACY] to the file name display for clarity
-                    sfile_names[$idx]="${sfile_names[$idx]} (LEGACY)"
-                fi
             fi
             
             move_to $row 1
@@ -428,7 +410,7 @@ modular_loot_manager() {
         
         # Footer
         move_to $((TERM_ROWS - 1)) 1
-        local footer=" [↑↓] Navigate   [Enter] Toggle Link   [v] View XML   [q] Back"
+        local footer=" [↑↓] Navigate   [Enter] Toggle   [v] View   [d] Delete   [q] Back"
         printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
         
         # 3. Handle Input
@@ -446,11 +428,24 @@ modular_loot_manager() {
             local src="${src_paths[$midx]}"
             local fn="${sfile_names[$midx]}"
             
-            if [[ "$src" == "ORPHAN" ]]; then
+            if [[ "$src" == "LOCAL" ]]; then
                 local p="${mission_path}/CustomCE/types/${fn}"
                 [[ -f "$p" ]] && config_xml_editor "$inst_dir" "$p" "types" "$container"
             else
                 [[ -f "$src" ]] && config_xml_editor "$inst_dir" "$src" "types" "N/A"
+            fi
+        elif [[ "$key" == "d" || "$key" == "D" ]]; then
+            local midx=$selection
+            local fn="${sfile_names[$midx]}"
+            local p="${mission_path}/CustomCE/types/${fn}"
+            if [[ -f "$p" ]]; then
+                if confirm "Delete physical file '$fn'?" "n"; then
+                    unregister_modular_loot "$inst_dir" "$fn" # Unlink it first
+                    rm -f "$p"
+                    show_message "Deleted $fn" "Success"
+                fi
+            else
+                show_message "This is a workshop source file, cannot delete." "Warning"
             fi
         elif [[ "$key" == "" ]]; then
             local midx=$selection
@@ -460,36 +455,21 @@ modular_loot_manager() {
             local tn="${mn}_${fn}"
             tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
             
-            if [[ ${states[$midx]} -eq 0 ]]; then
-                # Use silent mode (1) for instant toggle in manager
-                register_modular_loot "$inst_dir" "$src" "$mn" 1
-            elif [[ ${states[$midx]} -eq 1 ]]; then
-                # We still confirm unlinking as it's destructive (removes your edits)
-                if confirm "Unlink modular loot '$tn'? (This deletes the custom XML file)" "n"; then
-                    unregister_modular_loot "$inst_dir" "$tn"
-                fi
-            elif [[ ${states[$midx]} -eq 2 ]]; then
-                # Legacy/Orphan UNLINKED -> Link it!
-                if confirm "File '$fn' is a local file. Link it to your economy?" "y"; then
-                    link_modular_xml "$inst_dir" "$fn"
-                    show_message "Linked $fn to economy." "Success"
-                fi
-            elif [[ ${states[$midx]} -eq 3 ]]; then
-                # Legacy/Orphan LINKED -> Unlink it
-                if confirm "Unlink file '$fn'? (This removes the economy link)" "n"; then
-                    # Remove from core.xml only
+            if [[ ${states[$midx]} -eq 1 ]]; then
+                # LINKED -> Unlink (Non-destructive)
+                if confirm "Unlink '$fn' from economy? (Keeps physical file)" "y"; then
                     unregister_modular_loot "$inst_dir" "$fn"
-                    # Put it back if they want? Or better, unregister_modular_loot deletes it.
-                    # We'll ask if they want to keep the file.
-                    if confirm "Also delete the physical file '$fn'?" "n"; then
-                        # unregister already deleted it, so this logic is slightly redundant
-                        # but we want to be safe.
-                        :
+                    show_message "Unlinked $fn" "Success"
+                fi
+            else
+                # UNLINKED -> Link it!
+                if confirm "Link modular loot '$fn' to your economy?" "y"; then
+                    if [[ "$src" == "LOCAL" ]]; then
+                        link_modular_xml "$inst_dir" "$fn"
                     else
-                        # Restore file if it was deleted? Actually unregister_modular_loot deletes it.
-                        # I'll need to update unregister_modular_loot to be more granular.
-                        show_message "Note: File was deleted. Use [v] and save to recreate if needed." "Warning"
+                        register_modular_loot "$inst_dir" "$src" "$mn" 1 # Silent
                     fi
+                    show_message "Linked $fn" "Success"
                 fi
             fi
             # Implicitly re-loops and re-scans
