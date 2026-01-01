@@ -209,10 +209,11 @@ _draw_workshop_details_screen() {
                 local style="$DIM"
                 [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_RED$WHITE$BOLD"
                 local img_url="${_images_ref[$idx]}"
-                # Display more of the URL so it's clickable in terminals
-                # Remove protocol for display to save space, but keep domain/path
-                local disp_url="${img_url#*://}" # Remove https://
-                printf "%s%-36s%s" "$style" "${disp_url:0:36}" "$RESET"
+                # Use OSC 8 Hyperlink with truncation for best TUI experience
+                # \033]8;;URL\033\\TEXT\033]8;;\033\\
+                local disp_url="${img_url#*://}"
+                local link_text="${disp_url:0:36}"
+                printf "%s\033]8;;%s\033\\%-36s\033]8;;\033\\%s" "$style" "$img_url" "$link_text" "$RESET"
             fi
         done
     fi
@@ -223,7 +224,7 @@ _draw_workshop_details_screen() {
     local desc_height=$((TERM_ROWS - 6))
     
     if [[ $desc_width -gt 20 ]]; then
-        draw_box 3 $desc_col $desc_height $desc_width "Description" "$WHITE"
+        draw_box 3 $desc_col $desc_height $desc_width "Description" "$RED"
         
         # Use fold to wrap lines nicely respecting paragraphs
         local -a lines=()
@@ -235,9 +236,12 @@ _draw_workshop_details_screen() {
         # FIX: Reduce height by 1 to avoid touching bottom border
         local view_height=$((desc_height - 3))
         local total_lines=${#lines[@]}
-        local max_scroll=$((total_lines - view_height))
+        # Allow scrolling past the "full page" limit to show partial last pages
+        local max_scroll=$((total_lines - 1))
         [[ $max_scroll -lt 0 ]] && max_scroll=0
         [[ $scroll_offset -gt $max_scroll ]] && scroll_offset=$max_scroll
+        # Align scroll to closest page (floor) to prevent "drifting" if logic changes
+        # scroll_offset=$(( (scroll_offset / view_height) * view_height ))
         
         for ((i=0; i<view_height; i++)); do
             local l_idx=$((scroll_offset + i))
@@ -377,6 +381,8 @@ except Exception as e:
         elif [[ "$k" == "i" || "$k" == "I" ]]; then
             if [[ $img_sel -ge 0 ]]; then
                 local url="${mimages[$img_sel]}"
+                move_to $((TERM_ROWS)) 1
+                printf "%sOpening %s...%s" "$BG_GREEN$WHITE" "$url" "$RESET"
                 if command -v open &>/dev/null; then open "$url"
                 elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
                 fi
