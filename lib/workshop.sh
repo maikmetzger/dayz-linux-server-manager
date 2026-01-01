@@ -156,10 +156,192 @@ _draw_workshop_screen() {
     
     # 6. Keyboard Hints
     move_to $((TERM_ROWS - 1)) 1
-    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Filter  [o] Open  [c] Clear  [q] Back"
+    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Filter  [o] Details  [c] Clear  [q] Back"
     local pad_len=$((TERM_COLS - ${#footer_text}))
     [[ $pad_len -lt 0 ]] && pad_len=0
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
+}
+
+# Mod Details View Screen
+_draw_workshop_details_screen() {
+    local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" scroll_offset="$9"
+    local -n _images_ref=${10}
+    local img_sel=${11}
+    
+    get_term_size
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    
+    # 1. Header with Mod Name
+    move_to 1 1
+    printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_BLUE" "$WHITE$BOLD" "Mod Details: $mname" "$RESET"
+    if [[ ${#mname} -gt $((TERM_COLS-14)) ]]; then
+         move_to 1 14; printf "%s%s" "$BG_BLUE" "${mname:0:$((TERM_COLS-15))}..."
+    fi
+
+    # 2. Metadata Box (Left)
+    local meta_width=40
+    local meta_height=10
+    draw_box 3 2 $meta_height $meta_width "Metadata"
+    
+    move_to 5 4; printf "%sID       :%s %s" "$DIM" "$RESET" "$mid"
+    move_to 6 4; printf "%sAuthor   :%s %s" "$DIM" "$RESET" "${mauthor:-Unknown}"
+    move_to 7 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
+    move_to 8 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
+    move_to 9 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
+    move_to 10 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "${mdeps:-None}"
+    
+    # 3. Images Box (Left, below Metadata)
+    local img_height=$((TERM_ROWS - meta_height - 6))
+    if [[ $img_height -gt 4 ]]; then
+        draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})"
+        
+        local start_img_row=$((5 + meta_height))
+        local max_imgs=$((img_height - 2))
+        local display_offset=0
+        
+        # Simple scroll for images if selected index is deep
+        if [[ $img_sel -ge $max_imgs ]]; then display_offset=$((img_sel - max_imgs + 1)); fi
+        
+        for ((i=0; i<max_imgs; i++)); do
+            local idx=$((display_offset + i))
+            if [[ $idx -lt ${#_images_ref[@]} ]]; then
+                move_to $((start_img_row + i)) 4
+                local style="$DIM"
+                [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_CYN$WHITE$BOLD"
+                local img_url="${_images_ref[$idx]}"
+                local short_url="${img_url:8:30}..." # Trim https://
+                printf "%s%-34s%s" "$style" "$short_url" "$RESET"
+            fi
+        done
+    fi
+
+    # 4. Description Box (Right)
+    local desc_col=$((meta_width + 4))
+    local desc_width=$((TERM_COLS - desc_col - 2))
+    local desc_height=$((TERM_ROWS - 6))
+    
+    if [[ $desc_width -gt 20 ]]; then
+        draw_box 3 $desc_col $desc_height $desc_width "Description"
+        
+        # Simple word wrapping and scrolling
+        local -a lines=()
+        local current_line=""
+        for word in $mdesc; do
+            if [[ $((${#current_line} + ${#word} + 1)) -lt $((desc_width - 2)) ]]; then
+                current_line+="$word "
+            else
+                lines+=("$current_line")
+                current_line="$word "
+            fi
+        done
+        lines+=("$current_line")
+        
+        local view_height=$((desc_height - 2))
+        local total_lines=${#lines[@]}
+        local max_scroll=$((total_lines - view_height))
+        [[ $max_scroll -lt 0 ]] && max_scroll=0
+        [[ $scroll_offset -gt $max_scroll ]] && scroll_offset=$max_scroll
+        
+        for ((i=0; i<view_height; i++)); do
+            local l_idx=$((scroll_offset + i))
+            if [[ $l_idx -lt $total_lines ]]; then
+                move_to $((5 + i)) $((desc_col + 2))
+                printf "%s" "${lines[$l_idx]}"
+            fi
+        done
+        
+        # Scroll Indicator
+        if [[ $max_scroll -gt 0 ]]; then
+            local pct=$(( (scroll_offset * 100) / max_scroll ))
+            move_to $((3 + desc_height - 1)) $((desc_col + desc_width - 8))
+            printf "%s%3d%%%s" "$DIM" "$pct" "$RESET"
+        fi
+    fi
+
+    # 5. Footer Actions
+    move_to $((TERM_ROWS)) 1
+    local footer=" [Enter] Install  [b] Open Steam Page  [i] Open Image  [Tab] Switch Focus  [Esc/q] Back "
+    printf "%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
+}
+
+# Handler for Details View
+_view_mod_details() {
+    local mid="$1" instance_dir="$2" mods_txt="$3" rules_json="$4"
+    
+    # Fetch FRESH details (recursive=0, just this mod, but get FULL info)
+    move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
+    printf "%s%s Fetching Full Details... %s" "$BG_BLUE" "$WHITE$BOLD" "$RESET"
+    
+    local json_str
+    json_str=$(python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid")
+    
+    # Parse Python output
+    local mname mauthor msize msubs mupdated mdesc mdeps
+    local -a mimages=()
+    
+    eval $(echo "$json_str" | python3 -c "
+import sys, json, datetime
+try:
+    data = json.load(sys.stdin)
+    if data:
+        x = data[0]
+        ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
+        # Use description_clean if available, else standard clean
+        desc = x.get('description_clean', x.get('description', ''))
+        desc = desc.replace('\"', '\\\"').replace('\'', '\'\\\'\'').replace('\n', ' ').replace('\r', ' ')
+        print(f'mname=\"{x.get(\"name\",\"\")}\"')
+        print(f'mauthor=\"{x.get(\"author\",\"Unknown\")}\"')
+        print(f'msize=\"{x.get(\"size\",\"0B\")}\"')
+        print(f'msubs=\"{x.get(\"subscribers_f\",\"0\")}\"')
+        print(f'mupdated=\"{ud}\"')
+        print(f'mdesc=\"{desc}\"')
+        print(f'mdeps=\"{len(x.get(\"dependencies\",[]))}\"')
+        # Images array logic
+        imgs = x.get('images', [])
+        print('mimages=(' + ' '.join([f'\"{i}\"' for i in imgs]) + ')')
+except: pass
+")
+
+    local scroll=0
+    local focus=0 # 0=Desc, 1=Images
+    local img_sel=-1
+    [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
+    
+    while true; do
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
+        IFS= read -rsn1 k
+        if [[ "$k" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 s || { return; } # ESC
+            case "$s" in
+                "[A") 
+                    if [[ $focus -eq 0 ]]; then [[ $scroll -gt 0 ]] && ((scroll--)); 
+                    else [[ $img_sel -gt 0 ]] && ((img_sel--)); fi ;;
+                "[B") 
+                    if [[ $focus -eq 0 ]]; then ((scroll++)); 
+                    else [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); fi ;;
+            esac
+        elif [[ "$k" == "q" || "$k" == "Q" ]]; then return
+        elif [[ "$k" == $'\t' ]]; then 
+             # Toggle focus if we have images
+             if [[ ${#mimages[@]} -gt 0 ]]; then focus=$((1 - focus)); fi
+             # Visual feedback implicitly handled by _draw (highlight active section if we added that, currently just input routing)
+             if [[ $focus -eq 1 ]]; then img_sel=0; else img_sel=-1; fi
+        elif [[ "$k" == "b" || "$k" == "B" ]]; then
+            local url="https://steamcommunity.com/sharedfiles/filedetails/?id=${mid}"
+            if command -v open &>/dev/null; then open "$url"
+            elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
+            else show_message "URL: $url" "Link"; fi
+        elif [[ "$k" == "i" || "$k" == "I" ]]; then
+            if [[ $focus -eq 1 && $img_sel -ge 0 ]]; then
+                local url="${mimages[$img_sel]}"
+                if command -v open &>/dev/null; then open "$url"
+                elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
+                else show_message "URL: $url" "Image Link"; fi
+            fi
+        elif [[ "$k" == "" ]]; then
+             return 10 # Signal to install
+        fi
+    done
 }
 
 # Unified Filter Dialog (Similar to types.sh)
@@ -263,7 +445,7 @@ try:
     for x in data:
         updated_dt = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
         # id|name|subs_f|size|updated_f|desc|children|subs_raw
-        desc = x.get('description','')[:500].replace('|',' ').replace('\n', ' ').replace('\r', ' ')
+        desc = x.get('description_clean', x.get('description',''))[:500].replace('|',' ').replace('\n', ' ').replace('\r', ' ')
         print(f\"{x['id']}|{x['name']}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
 except Exception as e:
     pass
@@ -312,10 +494,9 @@ except Exception as e:
         elif [[ "$key" == "o" || "$key" == "O" ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
-                local url="https://steamcommunity.com/sharedfiles/filedetails/?id=${mid}"
-                if command -v open &>/dev/null; then open "$url"
-                elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
-                else show_message "URL: $url" "Link (No Browser Found)"; fi
+                _view_mod_details "$mid" "$instance_dir" "$mods_txt" "$rules_json"
+                local ret=$?
+                if [[ $ret -eq 10 ]]; then key=""; fi # Fallthrough to install if user pressed Enter in details
             fi
         elif [[ "$key" == "" ]]; then
             if [[ $count -gt 0 ]]; then

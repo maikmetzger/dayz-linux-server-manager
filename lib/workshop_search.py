@@ -72,9 +72,32 @@ def scrape_dependencies(mod_id):
         
         if "Required items" in html:
             section = html.split("Required items")[1].split("</div>")[0]
-            return re.findall(r'id=([0-9]+)', section)
-        return []
-    except Exception: return []
+            reqs = re.findall(r'id=([0-9]+)', section)
+        
+        author = "Unknown"
+        if 'class="friendBlockContent"' in html:
+             try: author = html.split('class="friendBlockContent"')[1].split('>')[1].split('<')[0].strip()
+             except: pass
+        return reqs, author
+    except Exception: return [], "Unknown"
+
+def parse_bbcode(text):
+    if not text: return "", []
+    images = []
+    # Extract images
+    img_tags = re.findall(r'\[img\](.*?)\[/img\]', text, re.IGNORECASE)
+    images.extend(img_tags)
+    
+    # Clean text
+    clean = text
+    clean = re.sub(r'\[img\].*?\[/img\]', '', clean, flags=re.IGNORECASE) # Remove images from text
+    clean = re.sub(r'\[url=.*?\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\[url\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\[/*(h1|h2|h3|b|i|list|olist|\*|hr|code|quote|box)\]', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\r\n', '\n', clean)
+    clean = re.sub(r'\n\n+', '\n', clean)  # Reduce multiple newlines
+    
+    return clean.strip(), images
 
 def get_mod_details(mod_ids, recursive=False, update_rules=None):
     if not mod_ids: return []
@@ -87,10 +110,13 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
         cache_key = f"details_{mid}"
         if cache_key in cache:
             entry = cache[cache_key]
-            if time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
+            # If we need author/images and it's missing (legacy cache), re-fetch
+            if 'author' not in entry['data'] or 'images' not in entry['data']: to_fetch.append(mid)
+            elif time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
                 results.append(entry['data'])
                 continue
-        to_fetch.append(mid)
+            else: to_fetch.append(mid)
+        else: to_fetch.append(mid)
 
     if to_fetch:
         api_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
@@ -121,14 +147,22 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                     size_str = f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 1024**3 else f"{size_bytes / (1024**2):.1f} MB"
                     
                     req_items = [r.get('publishedfileid') for r in d.get('required_items', [])]
-                    if not req_items: req_items = scrape_dependencies(mid)
+                    scraped_reqs, author = scrape_dependencies(mid)
+                    if not req_items: req_items = scraped_reqs
+                    
+                    raw_desc = d.get('description', "")
+                    clean_desc, imgs = parse_bbcode(raw_desc)
                     
                     details_obj = {
                         "id": mid, "name": d.get('title', f"Mod {mid}"),
                         "subscribers": subs, "subscribers_f": formatted_subs,
                         "size": size_str, "size_bytes": size_bytes,
-                        "updated": d.get('time_updated', 0), "description": d.get('description', ""),
-                        "dependencies": req_items
+                        "updated": d.get('time_updated', 0), 
+                        "description": raw_desc,
+                        "description_clean": clean_desc,
+                        "images": imgs,
+                        "dependencies": req_items,
+                        "author": author
                     }
                     fetched_details[mid] = details_obj
                     cache[f"details_{mid}"] = {'timestamp': time.time(), 'data': details_obj}
