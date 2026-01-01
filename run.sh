@@ -224,9 +224,21 @@ sync_mod_list() {
   run_steamcmd_workshop_multi "${args[@]}"
   log "Workshop download finished."
 
-  # Create stable symlinks @<id> and build -mod args from those
-  mkdir -p "${KEYS_DIR}"
+  mod_list_apply_fixes "$list_file" "$out_args_file"
+}
 
+mod_list_apply_fixes() {
+  local list_file="$1"
+  local out_args_file="$2"
+
+  local ids
+  ids="$(read_ids "${list_file}" || true)"
+  if [[ -z "${ids}" ]]; then
+    echo -n "" > "${out_args_file}"
+    return 0
+  fi
+
+  mkdir -p "${KEYS_DIR}"
   local mod_args=""
   while IFS= read -r id; do
     [[ -n "${id}" ]] || continue
@@ -247,7 +259,7 @@ sync_mod_list() {
       mod_args+="${mod_args:+;}"
       mod_args+="@${id}"
 
-      # Copy .bikey files (non-destructive; does not delete old keys automatically)
+      # Copy .bikey files
       if [[ -d "${DZ_SERVERFILES}/@${id}" ]]; then
         local key_count
         key_count=$(find -L "${DZ_SERVERFILES}/@${id}" -maxdepth 3 -type f -iname "*.bikey" -printf '.' | wc -c)
@@ -268,6 +280,8 @@ sync_mod_list() {
 
 sync_mods()       { sync_mod_list "${MODS_FILE}" "${MODS_ARGS_FILE}"; }
 sync_servermods() { sync_mod_list "${SERVERMODS_FILE}" "${SERVERMODS_ARGS_FILE}"; }
+fix_mods()        { mod_list_apply_fixes "${MODS_FILE}" "${MODS_ARGS_FILE}"; }
+fix_servermods()  { mod_list_apply_fixes "${SERVERMODS_FILE}" "${SERVERMODS_ARGS_FILE}"; }
 
 print_mod_args() {
   echo "mods:       $(cat "${MODS_ARGS_FILE}" 2>/dev/null || true)"
@@ -468,6 +482,8 @@ Server files:
 Mods:
   sync-mods                  Download enabled mods in config/mods.txt and build args
   sync-servermods            Download enabled servermods in config/servermods.txt and build args
+  fix-mods                   Fix casing and sync keys for mods.txt (fast)
+  fix-servermods             Fix casing and sync keys for servermods.txt (fast)
   args                       Print computed -mod / -serverMod args
   purge-mod <id>             Delete workshop content for a mod ID (does not edit lists)
 
@@ -502,6 +518,8 @@ case "${cmd}" in
 
   sync-mods)       sync_mods ;;
   sync-servermods) sync_servermods ;;
+  fix-mods)        fix_mods ;;
+  fix-servermods)  fix_servermods ;;
   args)            print_mod_args ;;
   purge-mod)       [[ $# -ge 1 ]] || die "Usage: purge-mod <id>"; purge_mod "$1" ;;
 

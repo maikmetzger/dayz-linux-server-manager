@@ -452,9 +452,8 @@ mod_manager() {
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running to fix mods"
                 else
-                    run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                    run_with_output "Fixing Mod Casing & Keys" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh fix-mods && /dayz/run.sh fix-servermods"
                 fi
-                ;;
         esac
     done
 }

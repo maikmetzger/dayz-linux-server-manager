@@ -1,85 +1,81 @@
 # DayZ Docker Hub
 
-A simple but powerful toolkit for running DayZ servers on Linux. It handles everything from the initial install to daily maintenance and mod management, all through a clean terminal interface.
+A toolset to run and manage DayZ servers on Linux using Docker. It handles the tedious parts like SteamCMD updates, mod syncing, and config editing so you can focus on your community.
 
-## Core Features
+---
 
-### 🏢 Instance Management
-- **Multi-Instance Support**: Run multiple isolated servers on a single machine.
-- **Instance Selector**: Switch between your different servers easily from the main menu.
-- **Auto-Installation**: Handles Docker, firewall rules (UFW), and directory structures automatically.
+## Key Features
 
-### 🎮 Mod & Workshop Ecosystem
-- **Workshop Browser**: Search for mods directly on the Steam Workshop without leaving your terminal.
-- **Dependency Resolver**: Automatically detects and shows required mods when installing.
-- **Sync System**: One-click download and update for all your mods.
-- **Automated Keys**: The script handles copying `.bisign`, `.bikey`  keys for you.
+### Mod Management & Validation
+The mod manager does more than just download files; it helps keep your server stable.
+- **Load Order Checks**: The script warns you [⚠️] if dependencies are missing or in the wrong order.
+- **Client/Server Sorting**: Mark mods as "Client", "Server", or "Both" to keep your load list optimized.
+- **Automation**: Fixes mod casing (lowercase) and handles your `.bikey` and `.bisign` keys automatically.
 
-### 📦 Loot & Central Economy
-- **Loot Editor**: A high-performance table view to filter and edit `types.xml` values (nominal, lifetime, etc.) instantly.
-- **Modular Loot Manager**: Use the `cfgeconomycore.xml` include system. Add mod loot as separate files to keep your mission folder clean.
-- **Link Toggling**: Easily enable or disable specific modular loot files with a single keypress.
+### Central Economy Tools
+Take control of your loot without manually editing giant XML files.
+- **Loot Editor**: Search for items in a table view and edit spawn rates (nominal, lifetime, etc.) instantly.
+- **Modular Loot**: Register workshop loot as modular includes. This keeps your main `types.xml` clean and makes it easy to add or remove mods.
+- **Link Toggle**: Enable or disable specific loot files with a single keypress.
 
-### 🧹 Maintenance & Monitoring
-- **Precision Wipe**: Choose exactly what to reset. You can wipe just the loot (CLE), or target bases, vehicles, or player data separately.
-- **RCON Console**: Built-in interactive BattlEye RCON client for server commands.
-- **Log Suite**: Browse RPT and ADM logs with a built-in viewer that supports live tailing (`tail -f`).
+### Maintenance & Reliability
+- **Selective Wipe**: Choose exactly what to reset. You can refresh the loot on the ground (CLE) without destroying player bases, or wipe vehicles and players individually.
+- **Backups**: Quickly tar your mission and profile data for safe keeping.
+- **Crash Guard**: Includes a dummy crash reporter to prevent the server from hanging on error dialogs.
+- **Health Checks**: Containers monitor the server process and report its status back to the manager.
+
+### Logs & Console
+- **Log Browser**: View RPT and ADM logs directly in the terminal with live tailing (`tail -f`).
+- **RCON Console**: A built-in BattlEye RCON client that connects to your server automatically for interactive commands.
 
 ---
 
 ## Getting Started
 
 ### 1. Installation
-Clone the scripts and run the installer. It will walk you through the setup.
+Clone the scripts and run the installer. It will walk you through setting up your first instance.
 ```bash
 git clone https://github.com/maikmetzger/dayz-linux-server-scripts.git
 cd dayz-linux-server-scripts
 ./install-dayz-docker.sh
 ```
 
-### 2. Daily Usage
-Launch the management TUI:
+### 2. Management
+Launch the TUI to manage your servers:
 ```bash
 ./server-manager.sh
 ```
 
 ---
 
-## Feature Deep Dive
+## Navigation & Keys
 
-### The Workshop Browser
-When managing mods, press **[W]** to open the Workshop Browser. You can search for mods, read their descriptions, and check for dependencies before hitting install. It simplifies the process of hunting down IDs manually.
-
-### The Table-based Loot Editor
-Located in the **Config Editor** for `types.xml`. Instead of scrolling through thousands of lines of XML, you get a clean table where you can search for "Sledgehammer" and change its spawn rate in seconds.
-
-### Modular Loot Workflow
-1. Browse a mod's config files.
-2. If you see a `types.xml`, press **[m]**.
-3. The script copies it, normalizes the filename, and registers it in your economy.
-4. You can manage these links later in the **Loot Economy** menu.
-
-### Surgical Wiping
-DayZ servers often need a clean start.
-- **Soft Wipe (Loot)**: Deletes `types.bin` and `dynamics.bin`. This refreshes the loot on the ground without destroying anyone's base.
-- **Hard Wipe**: Deletes persistence data or player databases for a fresh start.
+- **[↑/↓]**: Move selection
+- **[Enter]**: Confirm / Select / Toggle
+- **[/]**: Search / Filter lists
+- **[L]**: Live Tail (when viewing logs)
+- **[M]**: Register as Modular Loot (in the editor)
+- **[S]**: Sync All Mods (Download -> Casing -> Keys)
+- **[F]**: Fast Fix (Fixes casing/keys without a slow Steam update)
 
 ---
 
-## TUI Keybinds Guide
+## Technical Details
 
-- **[↑/↓]**: Move selection
-- **[Enter]**: Action / Select / Toggle checkbox
-- **[/]**: Open search filter
-- **[L]**: Live Tail (in the log browser)
-- **[V]**: View or edit file
-- **[N]**: Create new file/folder
-- **[D]**: Delete file/folder
+### Sync vs Fix
+- **Sync [S]** is for when you need to download mod updates from Steam.
+- **Fix [F]** is for when you just need to refresh keys or fix casing after manually moving files. It skips the Steam check and finishes almost instantly.
+
+### Networking
+The installer sets up UFW firewall rules automatically:
+- `2302 UDP` range (Game traffic)
+- `27016 UDP` (Steam query)
+- `RCON Port` (GamePort + 3)
 
 ## Requirements
-- **OS**: Ubuntu or Debian (amd64)
-- **Space**: ~30GB for base server + mods
-- **Permissions**: Docker group access or sudo for the initial setup
+- Ubuntu or Debian Linux
+- About 30GB of space for the server and mods
+- Docker installed (the script can handle this for you)
 
 ## License
-MIT. Built to make server hosting less of a chore.
+MIT. Built to make hosting DayZ less of a chore.
