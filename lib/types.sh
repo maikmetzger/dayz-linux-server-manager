@@ -98,7 +98,7 @@ _draw_xml_editor_screen() {
             # Fields: name|nom|min|life|rs|cat|usages|tiers|flags|nom_v|min_v|life_v|rs_v
             IFS='|' read -r name nom min life rs cat usages tiers flags nom_v min_v life_v rs_v <<< "${_items_ref[$idx]:-}"
             local style="$WHITE"
-            local dim_style="$DIM"
+            local dim_style="$DARKGRAY"
             if [[ $idx -eq $selection ]]; then
                 style="$BG_RED$WHITE$BOLD"
                 dim_style="$BG_RED$WHITE$DIM"
@@ -138,7 +138,7 @@ _draw_xml_editor_screen() {
         move_to $((footer_row + 1)) 2
         printf "%sCategory: %s%-15s %sUsage: %s%s" "$YLW" "$WHITE" "$cat" "$YLW" "$WHITE" "$usages"
         move_to $((footer_row + 2)) 2
-        printf "%sVanilla : %sNom: %-6s Min: %-6s Life: %-8s RS: %-6s" "$YLW" "$DIM" "$nom_v" "$min_v" "$life_v" "$rs_v"
+        printf "%sVanilla : %sNom: %-6s Min: %-6s Life: %-8s RS: %-6s" "$YLW" "$DARKGRAY" "$nom_v" "$min_v" "$life_v" "$rs_v"
         
         # Flags
         if [[ -n "$flags" ]]; then
@@ -349,7 +349,7 @@ _edit_xml_item() {
             move_to $((d_row + 2 + i)) $((d_col + 2))
             local style="$WHITE"
             [[ $d_sel -eq $i ]] && style="$RED$BOLD"
-            printf "%s%-10s: %-8s %s(Vanilla: %s)%s" "$style" "${fields[$i]}" "${values[$i]}" "$DIM" "${vanillas[$i]}" "$RESET"
+            printf "%s%-10s: %-8s %s(Vanilla: %s)%s" "$style" "${fields[$i]}" "${values[$i]}" "$DARKGRAY" "${vanillas[$i]}" "$RESET"
         done
         
         move_to $((d_row + d_height - 3)) $((d_col + 2))

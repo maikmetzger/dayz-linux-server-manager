@@ -27,6 +27,7 @@ GREEN="${ESC}[32m"
 YELLOW="${ESC}[33m"
 WHITE="${ESC}[37m"
 GRAY="${ESC}[90m"
+DARKGRAY="${ESC}[38;2;100;100;100m"
 
 # Legacy color aliases (used by installer)
 CYN="${ESC}[36m"
