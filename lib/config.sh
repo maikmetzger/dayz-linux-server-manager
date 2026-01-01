@@ -359,7 +359,9 @@ config_table_editor() {
             
             # 4. Footer
             move_to $TERM_ROWS 1
-            printf "%s%s [Enter] Edit   [q] Back %s" "$BG_WHITE" "$BLACK" "$RESET"
+            local footer_text=" [Enter] Edit   [q] Back"
+            local pad_len=$((TERM_COLS - ${#footer_text}))
+            printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
             
             # Input Handling
             IFS= read -rsn1 key
