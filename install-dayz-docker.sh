@@ -746,7 +746,7 @@ main_tui() {
         menu_items+=("--------------------")
         menu_items+=("❌|Exit")
         
-        if ! run_menu menu_items "Main Menu"; then exit 0; fi
+        if ! run_menu menu_items "Main Menu"; then return; fi
         
         local selected_item="${menu_items[$MENU_RESULT]}"
         case "$selected_item" in
@@ -758,10 +758,12 @@ main_tui() {
                 fi
                 tui_update_instance "${markers[@]}"
                 ;;
-            "🗑️|Delete Instance/Container") tui_delete_menu "${scan_root}" ;;
+            "🗑️|Delete Instance/Container") tui_delete_menu "${scan_root}" || true ;;
             "✨|Run Server Manager")
                 if [[ -f "${SCRIPT_DIR}/server-manager.sh" ]]; then
-                    exec "${SCRIPT_DIR}/server-manager.sh"
+                    bash "${SCRIPT_DIR}/server-manager.sh"
+                    # After returning from server-manager, we stay in the installer
+                    # and let the loop continue or return to main_menu.
                 else
                     show_message "server-manager.sh not found."
                 fi
@@ -870,6 +872,7 @@ tui_update_instance() {
             read -rsn1
         fi
     fi
+    return 0
 }
 
 tui_delete_menu() {
@@ -934,7 +937,7 @@ tui_delete_menu() {
                     fi
                 fi
                 ;;
-            "←|Back"|----*) return ;;
+            "←|Back"|----*) return 0 ;;
         esac
     done
 }

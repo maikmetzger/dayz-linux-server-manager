@@ -146,7 +146,7 @@ main_menu() {
         if run_menu items "Select Instance to Connect"; then
             local selected_item="${items[$MENU_RESULT]}"
             if [[ "$selected_item" == "❌|Exit" || "$selected_item" == ----* ]]; then
-                exit 0
+                return
             fi
             
             local chosen="${paths[$MENU_RESULT]}"
@@ -156,7 +156,7 @@ main_menu() {
             # printf "\n%s%sConnection closed. Press Enter...%s" "$DIM" "$BOLD" "$RESET"
             # read -rsn1
         else
-            exit 0
+            return 0
         fi
     done
 }

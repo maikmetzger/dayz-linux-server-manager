@@ -85,12 +85,16 @@ select_instance() {
                     if ! groups | grep -q "\\bdocker\\b"; then
                         if confirm "Installer requires root/docker privileges. Run with sudo?" "y"; then
                             printf "%s" "$SHOW_CURSOR"
-                            exec sudo -E bash "${SCRIPT_DIR}/install-dayz-docker.sh"
+                            sudo -E bash "${SCRIPT_DIR}/install-dayz-docker.sh"
+                            selection=0
+                            continue
                         fi
                     fi
                     
                     printf "%s" "$SHOW_CURSOR"
-                    exec bash "${SCRIPT_DIR}/install-dayz-docker.sh"
+                    bash "${SCRIPT_DIR}/install-dayz-docker.sh"
+                    selection=0
+                    continue
                 else
                     show_message "install-dayz-docker.sh not found."
                 fi
@@ -387,7 +391,7 @@ mod_manager() {
                 fi
                 ;;
             'q'|'Q')
-                return
+                return 0
                 ;;
             's'|'S')
                 local status
@@ -493,10 +497,10 @@ wipe_menu() {
                         states=(0 0 0 0)
                     fi
                     ;;
-                6) return ;;
+                6) return 0 ;;
             esac
         else
-            return
+            return 0
         fi
     done
 }
@@ -544,9 +548,9 @@ main_menu() {
             "▶️|Start Server") run_with_output "Starting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose up -d" ;;
             "⏹️|Stop Server") run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
             "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
-            "⚒️|Mod Manager") mod_manager ;;
-            "📝|Config Editor") config_editor_menu ;;
-            "🧹|Wipe Server Data") wipe_menu ;;
+            "⚒️|Mod Manager") mod_manager || true ;;
+            "📝|Config Editor") config_editor_menu || true ;;
+            "🧹|Wipe Server Data") wipe_menu || true ;;
             "🎮|RCON Console")
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  set +e
