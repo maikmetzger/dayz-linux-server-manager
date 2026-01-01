@@ -537,6 +537,45 @@ wipe_menu() {
 }
 
 # =============================================================================
+# Log Browser
+# =============================================================================
+log_browser_menu() {
+    local selection=0
+    while true; do
+        local -a items=(
+            "🐳|Live Docker Logs (Container)"
+            "📜|Server Logs (RPT, ADM, Scripts)"
+            "--------------------"
+            "←|Back"
+        )
+        
+        if ! run_menu items "Log Browser: $SELECTED_NAME" $selection; then
+            return
+        fi
+        
+        selection=$MENU_RESULT
+        case "$MENU_RESULT" in
+            0)
+                trap : INT
+                run_with_output "Live Docker Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
+                trap - INT
+                ;;
+            1)
+                local profile_dir="${SELECTED_DIR}/data/profile"
+                if [[ ! -d "$profile_dir" ]]; then
+                    show_message "Profile directory not found: $profile_dir" "Error"
+                else
+                    # Use generic browser for logs. No special select cmd needed, 
+                    # use default recursion + tail/edit functionality.
+                    fb_browse_dir "$profile_dir" "Server Log Browser" "ROOT > Logs" "" "all"
+                fi
+                ;;
+            3) return 0 ;;
+        esac
+    done
+}
+
+# =============================================================================
 # Main Menu
 # =============================================================================
 main_menu() {
@@ -591,11 +630,7 @@ main_menu() {
                      read -rsn1
                  fi
                  ;;
-            "📜|View Logs")
-                trap : INT
-                run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
-                trap - INT
-                ;;
+            "📜|View Logs") log_browser_menu || true ;;
             "💻|Enter Shell")
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running."

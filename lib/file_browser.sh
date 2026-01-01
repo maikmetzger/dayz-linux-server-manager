@@ -21,6 +21,8 @@ declare -A FB_TYPE_ICONS=(
     ["txt"]="📝"
     ["md"]="📝"
     ["log"]="📝"
+    ["rpt"]="📜"
+    ["adm"]="🛡️"
     ["bak"]="🔄"
     ["folder"]="📁"
     ["file"]="📄"
@@ -70,13 +72,21 @@ fb_edit_file_nano() {
         return 1
     fi
     
+    # Check file size (safeguard for large logs)
+    local size=$(stat -c%s "$file" 2>/dev/null || echo 0)
+    local size_mb=$((size / 1048576))
+    
     # Display file content preview
     printf "%s%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
     printf "%s%s ═══ %s ═══ %s\n" "$RED$BOLD" "" "$title" "$RESET"
-    printf "%s%s Press 'e' to edit with nano (auto-bak), 'q' to go back %s\n\n" "$DIM" "" "$RESET"
     
-    head -30 "$file" 2>/dev/null
-    printf "\n%s[Press 'e' to edit, 'q' to quit]%s" "$DIM" "$RESET"
+    if [[ $size_mb -ge 1 ]]; then
+        printf "%s%s WARNING: Large file (%d MB). Previewing first 50 lines only.%s\n" "$YELLOW$BOLD" "⚠️" "$size_mb" "$RESET"
+    fi
+    printf "%s%s Press 'e' to edit (auto-bak), 'l' to tail, 'q' to go back %s\n\n" "$DIM" "" "$RESET"
+    
+    head -50 "$file" 2>/dev/null
+    printf "\n%s[e:Edit  l:Tail  q:Back]%s" "$DIM" "$RESET"
     
     while true; do
         IFS= read -rsn1 key
@@ -84,6 +94,10 @@ fb_edit_file_nano() {
             'e'|'E')
                 cp "$file" "${file}.bak"
                 nano "$file"
+                break
+                ;;
+            'l'|'L')
+                fb_tail_file "$file"
                 break
                 ;;
             'q'|'Q')
@@ -116,6 +130,7 @@ fb_browse_dir() {
     
     local selected=0
     local dir_name=$(basename "$dir")
+    local filter=""
     
     while true; do
         # 1. Refresh list
@@ -130,10 +145,20 @@ fb_browse_dir() {
         while IFS= read -r p; do
             [[ -z "$p" ]] && continue
             local name=$(basename "$p")
-            # Filter hidden and ignored patterns
+            
+            # 1. Filter hidden
             [[ "$name" == .* ]] && continue
+            
+            # 2. Filter ignored patterns (system folders)
             if [[ -n "$ignore_pattern" ]] && [[ "$name" =~ $ignore_pattern ]]; then
                 continue
+            fi
+            
+            # 3. Filter by user search pattern
+            if [[ -n "$filter" ]]; then
+                if [[ ! "$name" =~ $filter ]]; then
+                    continue
+                fi
             fi
             
             items+=("$name")
@@ -152,7 +177,9 @@ fb_browse_dir() {
         
         # Breadcrumbs
         move_to 2 2
-        printf "%s%s > %s%s" "$DIM" "$breadcrumb_prefix" "$dir_name" "$RESET"
+        local breadcrumb="%s%s > %s%s"
+        [[ -n "$filter" ]] && breadcrumb="$breadcrumb ${YELLOW}(Filter: $filter)$RESET"
+        printf "$breadcrumb" "$DIM" "$breadcrumb_prefix" "$dir_name" "$RESET"
         
         # Column Headers
         move_to 3 2
@@ -247,7 +274,8 @@ fb_browse_dir() {
 
         # Footer
         move_to $TERM_ROWS 1
-        local hints="↑↓ Nav  Enter Select"
+        local hints="↑↓ Nav  Enter Select  [/] Search"
+        [[ -n "$filter" ]] && hints="${hints}  [C] Clear"
         if [[ "$mode" != "folders" ]]; then
             hints="${hints}  [N] New  [D] Delete  [L] Tail"
             [[ "${items[$selected]}" == *.bak ]] && hints="${hints}  [R] Restore"
@@ -265,7 +293,7 @@ fb_browse_dir() {
                 esac
                 ;;
             '') # Enter
-                if [[ "${items[$selected]}" == ".." ]]; then
+                if [[ "${items[$selected]:-}" == ".." ]]; then
                     return 0
                 fi
                 local path="${item_paths[$selected]}"
@@ -277,11 +305,27 @@ fb_browse_dir() {
                     fb_browse_dir "$path" "$title" "$breadcrumb_prefix > $dir_name" "" "$mode"
                 fi
                 ;;
+            '/')
+                local search
+                search=$(read_input "Search pattern (regex):" "$filter" "Filter List")
+                filter="$search"
+                selected=0
+                ;;
+            'c'|'C')
+                filter=""
+                selected=0
+                ;;
             'n'|'N')
                 [[ "$mode" == "folders" ]] && continue
-                local new_name
-                new_name=$(read_input "New filename:" "" "Create File")
-                [[ -n "$new_name" ]] && touch "${dir}/${new_name}"
+                local type
+                type=$(read_input "Type (f=File, d=Folder):" "f" "New Item")
+                if [[ "$type" == "f" ]]; then
+                    local name=$(read_input "Filename:" "" "Create File")
+                    [[ -n "$name" ]] && touch "${dir}/${name}"
+                elif [[ "$type" == "d" ]]; then
+                    local name=$(read_input "Folder name:" "" "Create Folder")
+                    [[ -n "$name" ]] && mkdir -p "${dir}/${name}"
+                fi
                 ;;
             'd'|'D')
                 [[ "$mode" == "folders" ]] && continue
