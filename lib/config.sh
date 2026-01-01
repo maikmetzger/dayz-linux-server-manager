@@ -291,7 +291,7 @@ config_table_editor() {
         local table_start=3
         local col_key=2
         local col_val=$((col_key + max_key_len + 5))
-        local max_rows=$((TERM_ROWS - table_start - 3)) # leave space for footer
+        local max_rows=$((TERM_ROWS - table_start - 4)) # leave space for footer + 1 empty line
         
         # Input Loop (Inner loop to avoid re-fetching data just for navigation)
         while true; do
@@ -310,7 +310,6 @@ config_table_editor() {
             printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Config Editor - $filename - $title" "$RESET"
             
             # 2. Table Header
-            local table_start=3
             move_to $table_start 1
             printf "%s%s" "$DIM" "$RED"
             printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
@@ -358,10 +357,10 @@ config_table_editor() {
                 ((row++))
             done
             
-            # 4. Footer
-            move_to $TERM_ROWS 1
+            # 4. Footer (moved up one line)
+            move_to $((TERM_ROWS - 1)) 1
             local footer_text=" [Enter] Edit   [q] Back"
-            local pad_len=$((TERM_COLS - ${#footer_text} - 1))
+            local pad_len=$((TERM_COLS - ${#footer_text})) # can use full width now as we are not on last line
             printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
             
             # Input Handling
