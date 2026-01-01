@@ -207,30 +207,54 @@ _draw_workshop_details_screen() {
     for i in "${ADDR[@]}"; do authors_list+=("$(echo "$i" | sed 's/^ *//')"); done
     if [[ ${#authors_list[@]} -eq 0 ]]; then authors_list=("Unknown"); fi
 
-    # Flexible Metadata Height
-    # Start: 3
-    # ID, Size, Subs, Updated, Deps, Rating (6 lines) + Authors (N lines)
-    local meta_base_lines=6
-    local meta_height=$((meta_base_lines + ${#authors_list[@]} + 2)) # +2 for padding
+    # Flexible Metadata Height Calculation
+    # Fixed fields: ID(1) + Size(1) + Subs(1) + Updated(1) + Deps(1) + Rating(1) = 6 lines
+    # Available lines for authors: N
+    # Max Box Height = 15
+    # Max Content Lines = 15 - 2 = 13
+    # Max Author Lines = 13 - 6 = 7
     
-    # Cap height reasonably
-    [[ $meta_height -gt 15 ]] && meta_height=15
+    local num_authors=${#authors_list[@]}
+    local display_authors=$num_authors
+    local meta_height=$((6 + num_authors + 2))
+    
+    # Cap height and authors
+    if [[ $meta_height -gt 15 ]]; then
+        meta_height=15
+        display_authors=7
+    fi
+    # If we have exactly 8 authors, 7+1more is same lines, so just show 8? 
+    # Logic: If num > 7, show 6 and "... and X more" (1 line) = 7 lines.
+    
+    local show_more_msg=""
+    if [[ $num_authors -gt $display_authors ]]; then
+        # We need to truncate
+        # Reserve last line for "... and X more"
+        display_authors=$((display_authors - 1))
+        local diff=$((num_authors - display_authors))
+        show_more_msg="... and $diff more"
+    fi
     
     draw_box 3 2 $meta_height $meta_width "Metadata"
     
+    # Row 1: ID
     move_to 5 4; printf "%sID       :%s %s" "$DIM" "$RESET" "$mid"
     
-    # Authors
+    # Row 2+: Authors
     move_to 6 4; printf "%sAuthor(s):%s" "$DIM" "$RESET"
     local a_row=6
-    for ((i=0; i<${#authors_list[@]}; i++)); do
-        if [[ $((a_row)) -lt $((3 + meta_height - 1)) ]]; then
-             move_to $a_row 15; printf "%s" "${authors_list[$i]}"
-             ((a_row++))
-        fi
+    
+    for ((i=0; i<display_authors; i++)); do
+         move_to $a_row 15; printf "%s" "${authors_list[$i]:0:22}" # Truncate name width too
+         ((a_row++))
     done
     
-    # Continue after authors
+    if [[ -n "$show_more_msg" ]]; then
+         move_to $a_row 15; printf "%s%s%s" "$DIM" "$show_more_msg" "$RESET"
+         ((a_row++))
+    fi
+    
+    # Continue after authors (Fixed fields)
     move_to $a_row 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
     ((a_row++))
     move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
