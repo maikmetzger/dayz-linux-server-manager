@@ -407,7 +407,9 @@ config_editor_menu() {
             return
         fi
         
-        if [[ $MENU_RESULT -eq ${#config_ids[@]} ]]; then
+        # Check if Back was selected (by content, not index)
+        local selected_item="${items[$MENU_RESULT]}"
+        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
             return
         fi
         
@@ -478,7 +480,9 @@ config_category_editor() {
             return
         fi
         
-        if [[ $MENU_RESULT -eq ${#categories[@]} ]]; then
+        # Check if Back was selected (by content, not index)
+        local selected_item="${items[$MENU_RESULT]}"
+        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
             return
         fi
         
