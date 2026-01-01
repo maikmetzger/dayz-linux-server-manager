@@ -459,7 +459,7 @@ workshop_browser() {
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
     local f_text="DayZ" f_sort="mostsubscribed" f_limit="Fill" f_mode="Title" current_page=1
-    local selection=0 offset=0 f_changed=1 count=0
+    local selection=0 offset=0 f_changed=1 count=0 last_fetch_limit=0
     local -a items=()
     declare -A installed_mods workshop_rules
 
@@ -519,6 +519,7 @@ except Exception as e:
             count=${#items[@]}
             [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
             f_changed=0
+            last_fetch_limit=$fetch_count
         fi
 
         # Recalculate v_height for offset logic (redundant but safe for resize)
@@ -528,13 +529,33 @@ except Exception as e:
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
         _draw_workshop_screen "$count" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
+        
+        # Determine current active limit for resize logic
+        local current_active_limit=$fetch_count
 
-        IFS= read -rsn1 key
+        IFS= read -rsn1 -t 0.5 key || { 
+            # Timeout - Check for Resize
+            local new_v_height=$((TERM_ROWS - 14))
+            [[ $new_v_height -lt 5 ]] && new_v_height=5
+            
+            if [[ "$f_limit" == "Fill" && "$new_v_height" -ne "$last_fetch_limit" && "$last_fetch_limit" -gt 0 ]]; then
+                 # Resize Detected in Fill Mode - Recalculate Page to prevent gaps
+                 # Global Index of first item on old page
+                 local global_idx=$(( (current_page - 1) * last_fetch_limit ))
+                 # New Page Target
+                 current_page=$(( (global_idx / new_v_height) + 1 ))
+                 selection=0; offset=0
+                 f_changed=1
+            fi
+            continue
+        }
+        
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || { continue; } # ESC pressed
             case "$seq" in
                 "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
                 "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "") [[ $count -gt 0 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right (Fallback)
                 "[D") [[ $current_page -gt 1 ]] && { ((current_page--)); selection=0; offset=0; f_changed=1; } ;; # Left
                 "[C") [[ $count -gt 0 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right
             esac

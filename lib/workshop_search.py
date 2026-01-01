@@ -15,8 +15,8 @@ CACHE_EXPIRY_DETAILS = 86400 # 24 hours
 
 SORT_MAP = {
     "trend": "trend",
-    "mostsubscribed": "totaluniquesubscribers",
-    "mostsubscribed_asc": "totaluniquesubscribers", # Steam only has DESC, we reverse locally
+    "mostsubscribed": "mostsubscribed",
+    "mostsubscribed_asc": "mostsubscribed", # Steam only has DESC, we reverse locally
     "newestfirst": "mostrecent",
     "lastupdated": "lastupdated",
     "relevance": "relevance"
