@@ -270,6 +270,35 @@ declare -A SERVERDZ_VALIDATION=(
 )
 
 # =============================================================================
+# Category Definitions for BEServer_x64.cfg
+# =============================================================================
+declare -A BESERVER_CATEGORIES=(
+    ["RCON"]="RConPassword,RConPort,RestrictRCon"
+)
+declare -A BESERVER_CATEGORY_DISPLAY=(
+    ["RCON"]="🔐 RCON Settings"
+)
+BESERVER_CATEGORY_ORDER=("RCON")
+
+declare -A BESERVER_DEFAULTS=(
+    ["RConPassword"]=""
+    ["RConPort"]="2302"
+    ["RestrictRCon"]="1"
+)
+
+declare -A BESERVER_MEMOS=(
+    ["RConPassword"]="Password for Remote Admin (RCON)"
+    ["RConPort"]="Port for RCON connections (usually GamePort)"
+    ["RestrictRCon"]="Restrict RCON to whitelisted IPs (1=yes)"
+)
+
+declare -A BESERVER_VALIDATION=(
+    ["RConPassword"]="string:0-32"
+    ["RConPort"]="int:1024-65535"
+    ["RestrictRCon"]="bool"
+)
+
+# =============================================================================
 # Python Parser Wrapper
 # =============================================================================
 # Executes the config_parser.py in the container
@@ -391,8 +420,7 @@ config_editor_menu() {
         
         # Route to appropriate editor based on config ID
         case "$selected_id" in
-            "serverDZ") config_category_editor "$container" "$full_path" "serverDZ" ;;
-            "BEServer") config_flat_editor "$container" "$full_path" "BEServer" ;;
+            "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
             *) config_flat_editor "$container" "$full_path" "$selected_id" ;;
         esac
     done
@@ -407,13 +435,30 @@ config_category_editor() {
     local config_path="$2"
     local config_id="$3"
     
+    # Determine Variable Prefix
+    local prefix="SERVERDZ"
+    [[ "$config_id" == "BEServer" ]] && prefix="BESERVER"
+    
+    local cat_order_var="${prefix}_CATEGORY_ORDER"
+    local cat_display_var="${prefix}_CATEGORY_DISPLAY"
+    # Categories map (Category -> Keys CSV)
+    local cats_var="${prefix}_CATEGORIES"
+    
     while true; do
-        draw_header "Server Settings"
+        draw_header "Config Editor"
         
-        # Build menu with display names (emojis)
+        # Build menu using eval to access arrays
         local -a items=()
-        for cat in "${SERVERDZ_CATEGORY_ORDER[@]}"; do
-            items+=("${SERVERDZ_CATEGORY_DISPLAY[$cat]}")
+        local -a categories=()
+        
+        # Load order array
+        eval "categories=(\"\${${cat_order_var}[@]}\")"
+        
+        for cat in "${categories[@]}"; do
+            local display_name
+            # Load display name
+            eval "display_name=\"\${${cat_display_var}[\$cat]}\""
+            items+=("${display_name}")
         done
         items+=("← Back")
         
@@ -421,16 +466,22 @@ config_category_editor() {
             return
         fi
         
-        if [[ $MENU_RESULT -eq ${#SERVERDZ_CATEGORY_ORDER[@]} ]]; then
+        if [[ $MENU_RESULT -eq ${#categories[@]} ]]; then
             return
         fi
         
-        # Use simple key for lookup
-        local selected_cat="${SERVERDZ_CATEGORY_ORDER[$MENU_RESULT]}"
-        local keys_csv="${SERVERDZ_CATEGORIES[$selected_cat]}"
-        local display_name="${SERVERDZ_CATEGORY_DISPLAY[$selected_cat]}"
+        local selected_cat="${categories[$MENU_RESULT]}"
+        local keys_csv
+        local display_name
         
-        config_table_editor "$container" "$config_path" "$display_name" "$keys_csv"
+        eval "keys_csv=\"\${${cats_var}[\$selected_cat]}\""
+        eval "display_name=\"\${${cat_display_var}[\$selected_cat]}\""
+        
+        # Strip emoji from display name for title
+        local clean_title
+        clean_title=$(echo "$display_name" | sed 's/[^a-zA-Z0-9 ]//g' | xargs)
+        
+        config_table_editor "$container" "$config_path" "Settings ($clean_title)" "$keys_csv" "$prefix"
     done
 }
 
@@ -470,6 +521,7 @@ config_table_editor() {
     local config_path="$2"
     local title="$3"
     local keys_csv="$4"
+    local prefix="${5:-SERVERDZ}" # Default to SERVERDZ if not provided
     
     local container_path="/dayz/config/$(basename "$config_path")"
     local filename
@@ -478,68 +530,46 @@ config_table_editor() {
     # Parse keys
     IFS=',' read -ra keys <<< "$keys_csv"
     
+    # Setup Variable Names for Lookup
+    local defaults_var="${prefix}_DEFAULTS"
+    local memos_var="${prefix}_MEMOS"
+    local validation_var="${prefix}_VALIDATION"
+    
     local selection=0
     local scroll_offset=0
     
     while true; do
-        # Fetch current values every loop (or optimization: only on enter?)
-        # For now, fetch every time to be safe, or cache it?
-        # Fetching every frame is slow for TUI. Fetch once, then update locally?
-        # Better: Fetch at start of loop, but optimize if user just moved cursor?
-        # Let's fetch once per loop for now, optimize if laggy.
-        
+        # Fetch current values
         local result
         result=$(config_parser_exec "$container" getall cfg "$container_path")
         
         if [[ "$(json_get_status "$result")" != "ok" ]]; then
-            show_message "Failed to read config" "Error"
+            show_message "Failed to read config: $(json_get "$result" "message")" "Error"
             return
         fi
         
         # Parse values into array
         local -a values=()
-        local max_key_len=10
         for key in "${keys[@]}"; do
             local val
             val=$(json_get "$result" "$key")
             values+=("$val")
-            (( ${#key} > max_key_len )) && max_key_len=${#key}
         done
-        [[ $max_key_len -gt 40 ]] && max_key_len=40
         
         # Calculate Layout
         get_term_size
         local table_start=3
         
-        # Column Definitions (Fixed widths for alignment)
+        # Column Definitions (3-column layout: KEY | VALUE | DEFAULT)
+        # Memo is shown only in footer now
         local col_key=2
-        local w_key=32
+        local w_key=34
         
         local col_val=$((col_key + w_key))
-        local w_val=15
+        local w_val=25
         
         local col_def=$((col_val + w_val))
-        local w_def=12
-        
-        local col_memo=$((col_def + w_def))
-        # remaining width for memo
-        
-        # Layout calculation
-        # Reserve space for: Header(2) + TableHeader(3) + Rows + Description(1) + Footer(1) + Margin(1)
-        # table_start=3. Rows start at table_start+3 = 6.
-        # Bottom needs: TERM_ROWS(blank), TERM_ROWS-1(footer), TERM_ROWS-2(desc)
-        # Last data row must be at TERM_ROWS-3.
-        # Max rows = (TERM_ROWS - 3) - 6 + 1 = TERM_ROWS - 8.
-        # Let's count explicitly:
-        # 1: Header
-        # 3: Divider
-        # 4: Headers
-        # 5: Divider
-        # 6: First Row
-        # ...
-        # TR-2: Description
-        # TR-1: Footer
-        # TR: Empty
+        local w_def=20
         
         local max_rows=$((TERM_ROWS - table_start - 5)) 
 
@@ -571,8 +601,6 @@ config_table_editor() {
             printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_val" "VALUE" "$RESET"
             move_to $((table_start + 1)) $col_def
             printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_def" "DEFAULT" "$RESET"
-            move_to $((table_start + 1)) $col_memo
-            printf "%s%sMEMO%s" "$DIM" "$WHITE" "$RESET"
             
             move_to $((table_start + 2)) 1
             printf "%s%s" "$DIM" "$RED"
@@ -588,27 +616,23 @@ config_table_editor() {
             for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
                 local key="${keys[$i]}"
                 local val="${values[$i]}"
-                local default="${SERVERDZ_DEFAULTS[$key]:-}"
-                local memo="${SERVERDZ_MEMOS[$key]:-}"
+                local default
+                local memo
+                
+                # Dynamic Lookup via eval
+                eval "default=\"\${${defaults_var}[\$key]:-}\""
+                eval "memo=\"\${${memos_var}[\$key]:-}\""
                 
                 # Truncate visuals
-                # Key
                 local d_key="$key"
                 [[ ${#d_key} -ge $((w_key-2)) ]] && d_key="${d_key:0:$((w_key-4))}.."
                 
-                # Value
                 local d_val="$val"
                 [[ -z "$d_val" ]] && d_val="(empty)"
                 [[ ${#d_val} -ge $((w_val-2)) ]] && d_val="${d_val:0:$((w_val-4))}.."
                 
-                # Default
                 local d_def="$default"
                 [[ ${#d_def} -ge $((w_def-2)) ]] && d_def="${d_def:0:$((w_def-4))}.."
-                
-                # Memo (Fill remaining)
-                local w_memo=$((TERM_COLS - col_memo - 1))
-                local d_memo="$memo"
-                [[ ${#d_memo} -ge $w_memo ]] && d_memo="${d_memo:0:$((w_memo-2))}.."
                 
                 # Capture current selection memo for footer
                 [[ $i -eq $selection ]] && current_memo="$memo"
@@ -623,8 +647,6 @@ config_table_editor() {
                     printf "%s" "$d_val"
                     move_to $row $col_def
                     printf "%s" "$d_def"
-                    move_to $row $col_memo
-                    printf "%s" "$d_memo"
                     printf "%s" "$RESET"
                 else
                     # Normal Row
@@ -634,24 +656,21 @@ config_table_editor() {
                     printf "%s%s" "$DIM" "$d_val"
                     move_to $row $col_def
                     printf "%s" "$d_def"
-                    move_to $row $col_memo
-                    printf "%s" "$d_memo"
                     printf "%s" "$RESET"
                 fi
                 ((row++))
             done
             
-            # 4. Description Bar
+            # 4. Description Bar (Full memo at bottom)
             if [[ -n "$current_memo" ]]; then
                 move_to $((TERM_ROWS - 2)) 1
-                # Format: ℹ️  <memo>
                 printf "%s%sℹ️  %s%s" "$RESET" "$BOLD" "$current_memo" "$RESET"
             fi
             
             # 5. Footer
             move_to $((TERM_ROWS - 1)) 1
             local footer_text=" [Enter] Edit   [q] Back"
-            local pad_len=$((TERM_COLS - ${#footer_text})) # Full width safe since row < TERM_ROWS
+            local pad_len=$((TERM_COLS - ${#footer_text}))
             printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
             
             # Input Handling
@@ -686,8 +705,10 @@ config_table_editor() {
         local current_val="${values[$selection]}"
         [[ "$current_val" == "(empty)" ]] && current_val=""
         
-        # Validation Hint
-        local valid_rule="${SERVERDZ_VALIDATION[$selected_key]:-}"
+        # Validation Hint (Dynamic Lookup)
+        local valid_rule
+        eval "valid_rule=\"\${${validation_var}[\$selected_key]:-}\""
+        
         local hint=""
         local type="string"
         if [[ -n "$valid_rule" ]]; then
@@ -715,7 +736,10 @@ config_table_editor() {
                 local set_result
                 set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_val")
                 if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
-                    show_message "Failed to save: $(json_get "$set_result" "message")" "Error"
+                    local msg
+                    msg=$(json_get "$set_result" "message")
+                    [[ -z "$msg" ]] && msg="Raw: $set_result"
+                    show_message "Failed to save: $msg" "Error"
                 fi
             fi
         fi
