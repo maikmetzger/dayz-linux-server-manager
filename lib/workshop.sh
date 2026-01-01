@@ -610,9 +610,12 @@ except Exception as e:
                 if [[ -z "${installed_mods[$mid]:-}" ]]; then
                     # Non-blocking status banner
                     echo "INSTALL: Starting for $mid" > /tmp/workshop_crash.log
+                    echo "INSTALL_DEBUG: line 613 - creating msg" >> /tmp/workshop_crash.log
                     local msg="Fetching dependency chain for '$mname'..."
-                    move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - ${#msg} / 2))
-                    printf "%s%s%s%s" "$BG_BLUE" "$WHITE$BOLD" " $msg " "$RESET"
+                    echo "INSTALL_DEBUG: line 614 - move_to TERM_ROWS=$TERM_ROWS TERM_COLS=$TERM_COLS" >> /tmp/workshop_crash.log
+                    move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - ${#msg} / 2)) 2>> /tmp/workshop_crash.log || true
+                    echo "INSTALL_DEBUG: line 615 - printf" >> /tmp/workshop_crash.log
+                    printf "%s%s%s%s" "$BG_BLUE" "$WHITE$BOLD" " $msg " "$RESET" 2>> /tmp/workshop_crash.log || true
                     
                     echo "INSTALL: Calling _fetch_workshop_details" >> /tmp/workshop_crash.log
                     local chain_json=""
