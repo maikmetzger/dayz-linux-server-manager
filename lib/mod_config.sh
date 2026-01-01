@@ -348,7 +348,7 @@ modular_loot_manager() {
         
         # Footer
         move_to $((TERM_ROWS - 1)) 1
-        local footer=" [↑↓] Navigate   [Enter] Toggle Link   [q] Back"
+        local footer=" [↑↓] Navigate   [Enter] Toggle Link   [v] View XML   [q] Back"
         printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
         
         # 3. Handle Input
@@ -361,6 +361,17 @@ modular_loot_manager() {
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
+        elif [[ "$key" == "v" || "$key" == "V" ]]; then
+            local midx=$selection
+            local src="${src_paths[$midx]}"
+            local fn="${sfile_names[$midx]}"
+            
+            if [[ "$src" == "ORPHAN" ]]; then
+                local p="${mission_path}/CustomCE/types/${fn}"
+                [[ -f "$p" ]] && config_xml_editor "$inst_dir" "$p" "types" "$container"
+            else
+                [[ -f "$src" ]] && config_xml_editor "$inst_dir" "$src" "types" "N/A"
+            fi
         elif [[ "$key" == "" ]]; then
             local midx=$selection
             local src="${src_paths[$midx]}"
