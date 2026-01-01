@@ -1,0 +1,31 @@
+{
+    "version": "1.0",
+    "core_mods": [
+        "1559212036",
+        "2274405430"
+    ],
+    "frameworks": [
+        "1559212036",
+        "2274405430",
+        "2214333838"
+    ],
+    "incompatibilities": {
+        "2117197322": {
+            "name": "DayZ Expansion",
+            "conflicts_with": [],
+            "note": "Requires CF and DABS Framework."
+        }
+    },
+    "mod_metadata": {
+        "1559212036": {
+            "short_name": "CF",
+            "category": "Framework",
+            "priority": 100
+        },
+        "2274405430": {
+            "short_name": "DABS",
+            "category": "Framework",
+            "priority": 90
+        }
+    }
+}

@@ -13,7 +13,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # =============================================================================
 # Load Libraries
 # =============================================================================
-for lib in colors tui menu dialogs utils docker instance mods config types; do
+for lib in colors tui menu dialogs utils docker instance mods config types workshop; do
     source "${SCRIPT_DIR}/lib/${lib}.sh"
 done
 
@@ -273,7 +273,7 @@ mod_manager() {
         
         # Action bar
         local action_row=$row
-        local actions=("[A] Add" "[S] Sync" "[F] FixMods" "[Q] Back")
+        local actions=("[A] Add" "[W] Workshop" "[S] Sync" "[F] FixMods" "[Q] Back")
         
         move_to $action_row 2
         for a in "${!actions[@]}"; do
@@ -331,6 +331,10 @@ mod_manager() {
                 fi
                 continue
                 ;;
+            'w'|'W')
+                workshop_browser "$SELECTED_DIR"
+                needs_rebuild=1
+                ;;
             'a'|'A')
                 local new_id
                 new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
@@ -356,7 +360,7 @@ mod_manager() {
                     esac
                     dirty=1; needs_rebuild=1
                 elif [[ $selected -eq $mod_count ]]; then
-                    # Add
+                    # Add (This is the [A] Add action)
                     local new_id
                     new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
                     if [[ "$new_id" =~ ^[0-9]+$ ]]; then
@@ -369,6 +373,10 @@ mod_manager() {
                         fi
                     fi
                 elif [[ $selected -eq $((mod_count + 1)) ]]; then
+                    # Workshop
+                    workshop_browser "$SELECTED_DIR"
+                    needs_rebuild=1
+                elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Sync
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -377,7 +385,7 @@ mod_manager() {
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                elif [[ $selected -eq $((mod_count + 2)) ]]; then
+                elif [[ $selected -eq $((mod_count + 3)) ]]; then
                     # FixMods (sync lowercase)
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -386,12 +394,16 @@ mod_manager() {
                     else
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                elif [[ $selected -eq $((mod_count + 3)) ]]; then
+                elif [[ $selected -eq $((mod_count + 4)) ]]; then
                     return
                 fi
                 ;;
             'q'|'Q')
                 return 0
+                ;;
+            'w'|'W')
+                workshop_browser "$SELECTED_DIR"
+                needs_rebuild=1
                 ;;
             's'|'S')
                 local status
@@ -538,8 +550,6 @@ main_menu() {
         if ! run_menu items "DayZ: $SELECTED_NAME [$status_text" $selection; then
             return
         fi
-        
-        selection=$MENU_RESULT
         
         selection=$MENU_RESULT
         local selected_item="${items[$MENU_RESULT]}"

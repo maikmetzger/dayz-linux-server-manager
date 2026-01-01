@@ -301,8 +301,57 @@ check_mod_dependencies() {
             fi
         fi
     done
+
+    # 2. Advanced Data-Driven Rule Check (Knowledge Layer)
+    check_mod_load_order "$mod_id" "${all_ids[@]}"
     return 0
 }
 
 # Initialize cache on load
 load_mod_cache
+
+# Check if a mod has its dependencies loaded before it
+# Usage: warn=$(check_mod_load_order "$mod_id" "${all_ids[@]}")
+check_mod_load_order() {
+    local mod_id="$1"
+    shift
+    local -a current_ids=("$@")
+    
+    local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
+    [[ -f "$rules_json" ]] || return 0
+    
+    # Get dependencies from rules
+    local deps
+    deps=$(python3 -c "import json, sys; r=json.load(open('$rules_json')); print(' '.join(r.get('dependencies', {}).get('$mod_id', [])))" 2>/dev/null || true)
+    
+    [[ -z "$deps" ]] && return 0
+    
+    # Check each dependency
+    for dep in $deps; do
+        local mod_found=0
+        local dep_found=0
+        local dep_index=-1
+        local mod_index=-1
+        
+        for i in "${!current_ids[@]}"; do
+            if [[ "${current_ids[$i]}" == "$dep" ]]; then
+                dep_found=1
+                dep_index=$i
+            fi
+            if [[ "${current_ids[$i]}" == "$mod_id" ]]; then
+                mod_found=1
+                mod_index=$i
+            fi
+        done
+        
+        if [[ $dep_found -eq 0 ]]; then
+            echo "Missing: $(get_mod_name "$dep") ($dep)"
+            return 0
+        fi
+        
+        if [[ $mod_index -lt $dep_index ]]; then
+            echo "Load Order: $(get_mod_name "$dep") MUST be above this mod"
+            return 0
+        fi
+    done
+}
