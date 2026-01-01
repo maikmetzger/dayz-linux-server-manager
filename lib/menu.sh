@@ -30,46 +30,54 @@ draw_menu() {
     
     eval "local -a _items=(\"\${${_arr_name}[@]}\")"
     
-    # Fixed column for text (after emoji + spacing)
-    # Emoji typically 2 chars + 2 spaces = 4 chars from start
-    local text_offset=6
+    # Fixed column offsets for alignment
+    local selector_col=$start_col       # " ▶ " or "   "
+    local emoji_col=$((start_col + 4))  # Emoji at column 4
+    local text_col=$((start_col + 8))   # Text always starts at column 8
     
     local i=0
     for item in "${_items[@]}"; do
-        move_to $((start_row + i)) $start_col
-        
-        # Check if item starts with emoji (high unicode range)
+        # Check if item starts with emoji (non-ASCII followed by space)
         local emoji=""
         local text="$item"
         
-        # Extract emoji prefix if present (handles multi-byte emoji)
-        # Regex: starts with emoji characters (non-ASCII)
+        # Match emoji: any non-ASCII chars at start, followed by optional spaces
         if [[ "$item" =~ ^([^[:ascii:]]+)[[:space:]]*(.*) ]]; then
             emoji="${BASH_REMATCH[1]}"
             text="${BASH_REMATCH[2]}"
         fi
         
         if [[ $i -eq $selected ]]; then
-            # Selected row with red background
-            printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$width" ""
+            # Fill row with red background first
             move_to $((start_row + i)) $start_col
+            printf "%s%s%*s%s" "$BG_RED" "$WHITE$BOLD" "$width" "" "$RESET"
+            
+            # Now draw elements at fixed positions
+            move_to $((start_row + i)) $selector_col
+            printf "%s%s ▶ " "$BG_RED" "$WHITE$BOLD"
+            
             if [[ -n "$emoji" ]]; then
-                printf "%s%s ▶ %s" "$BG_RED" "$WHITE$BOLD" "$emoji"
-                move_to $((start_row + i)) $((start_col + text_offset))
-                printf "%s" "$text"
+                move_to $((start_row + i)) $emoji_col
+                printf "%s" "$emoji"
+                move_to $((start_row + i)) $text_col
+                printf "%s%s" "$text" "$RESET"
             else
-                printf "%s%s ▶ %s" "$BG_RED" "$WHITE$BOLD" "$text"
+                # No emoji - just print text
+                printf "%s%s" "$text" "$RESET"
             fi
-            printf "%s" "$RESET"
         else
+            # Non-selected row
+            move_to $((start_row + i)) $selector_col
+            printf "%s   " "$WHITE"
+            
             if [[ -n "$emoji" ]]; then
-                printf "%s   %s" "$WHITE" "$emoji"
-                move_to $((start_row + i)) $((start_col + text_offset))
-                printf "%s%s" "$WHITE" "$text"
+                move_to $((start_row + i)) $emoji_col
+                printf "%s" "$emoji"
+                move_to $((start_row + i)) $text_col
+                printf "%s%s" "$text" "$RESET"
             else
-                printf "%s   %s" "$WHITE" "$text"
+                printf "%s%s" "$text" "$RESET"
             fi
-            printf "%s" "$RESET"
         fi
         ((i+=1))
     done
