@@ -66,10 +66,11 @@ _draw_workshop_screen() {
     printf "%s" "$RESET"
     
     local col_stat=2 w_stat=2
-    local col_name=$((col_stat + w_stat + 1)) w_name=40
+    local col_name=$((col_stat + w_stat + 1)) w_name=38
     local col_id=$((col_name + w_name)) w_id=12
-    local col_size=$((col_id + w_id)) w_size=10
-    local col_subs=$((col_size + w_size)) w_subs=15
+    local col_size=$((col_id + w_id)) w_size=9
+    local col_stars=$((col_size + w_size)) w_stars=7
+    local col_subs=$((col_stars + w_stars)) w_subs=14
     local col_date=$((col_subs + w_subs)) w_date=12
     
     move_to $((table_start + 1)) $col_name
@@ -78,6 +79,8 @@ _draw_workshop_screen() {
     printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_id "ID" "$RESET"
     move_to $((table_start + 1)) $col_size
     printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_size "SIZE" "$RESET"
+    move_to $((table_start + 1)) $col_stars
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_stars "RATING" "$RESET"
     move_to $((table_start + 1)) $col_subs
     printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_subs "SUBSCRIBERS" "$RESET"
     move_to $((table_start + 1)) $col_date
@@ -89,6 +92,7 @@ _draw_workshop_screen() {
     
     # 4. Rows
     local start_row=$((table_start + 3))
+    # ... (height logic unchanged) ...
     local v_height=$((TERM_ROWS - 14))
     [[ $v_height -lt 5 ]] && v_height=5
     
@@ -101,8 +105,8 @@ _draw_workshop_screen() {
         move_to $((start_row + i)) 1
         
         if [[ $idx -lt $count ]]; then
-            # Fields: id|name|subs_f|size|updated_f|desc|children|subs_raw
-            IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$idx]:-}"
+            # Fields: id|name|rating|subs_f|size|updated_f|desc|children|subs_raw
+            IFS='|' read -r mid mname mrating msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$idx]:-}"
             
             local style="$WHITE"
             local status_mark=" "
@@ -120,6 +124,16 @@ _draw_workshop_screen() {
             local d_name="$mname"
             [[ ${#d_name} -ge $((w_name-4)) ]] && d_name="${d_name:0:$((w_name-6))}.."
             
+            # Format Rating Stars
+            local d_stars=""
+            if [[ "$mrating" =~ ^[0-5]$ ]]; then
+                d_stars="$mrating/5"
+                [[ "$mrating" == "0" ]] && d_stars=" - "
+                [[ "$mrating" == "5" ]] && d_stars="5/5"
+            else
+                d_stars=" ? "
+            fi
+            
             move_to $((start_row + i)) $col_stat
             printf "%s%-*s" "$style" $w_stat "$status_mark"
             move_to $((start_row + i)) $col_name
@@ -128,6 +142,8 @@ _draw_workshop_screen() {
             printf "%s%-*s" "$style" $w_id "$mid"
             move_to $((start_row + i)) $col_size
             printf "%s%-*s" "$style" $w_size "$msize"
+            move_to $((start_row + i)) $col_stars
+            printf "%s%-*s" "$style" $w_stars "$d_stars"
             move_to $((start_row + i)) $col_subs
             printf "%s%-*s" "$style" $w_subs "$msubs"
             move_to $((start_row + i)) $col_date
@@ -521,9 +537,9 @@ try:
     if not isinstance(data, list): data = []
     for x in data:
         updated_dt = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
-        # id|name|subs_f|size|updated_f|desc|children|subs_raw
+        # id|name|rating|subs_f|size|updated_f|desc|children|subs_raw
         desc = x.get('description_clean', x.get('description',''))[:500].replace('|',' ').replace('\n', ' ').replace('\r', ' ')
-        print(f\"{x['id']}|{x['name']}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
+        print(f\"{x['id']}|{x['name']}|{x.get('rating_stars','?')}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
 except Exception as e:
     pass
 ")

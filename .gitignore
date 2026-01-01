@@ -1,5 +1,6 @@
 # Workshop Cache
 data/workshop_cache.json
+data/workshop_cache_*.json
 debug_crash.json
 debug_crash_*.json
 

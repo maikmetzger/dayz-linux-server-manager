@@ -99,9 +99,27 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
                     except: pass
             else:
                 # Standard Search
-                found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
-                for fid in found:
+                # We need to split by item to associate rating with ID
+                items = html.split('class="workshopItem"')
+                for item in items[1:]:
+                    fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
+                    if not fid_m: continue
+                    fid = fid_m.group(1)
                     if fid not in page_ids: page_ids.append(fid)
+                    
+                    # Extract Rating (0-5 stars)
+                    # src=".../5-star.png"
+                    rating = 0
+                    star_m = re.search(r'src=".*?([0-9])-star\.png', item)
+                    if star_m:
+                        rating = int(star_m.group(1))
+                    
+                    # Update Cache with Rating immediately
+                    d_key = f"details_{fid}"
+                    if d_key not in cache:
+                        cache[d_key] = {'timestamp': 0, 'data': {'id': fid}} # Timestamp 0 forces refresh but keeps data
+                    
+                    cache[d_key]['data']['rating_stars'] = rating
             
             all_found_ids.extend(page_ids)
             
@@ -133,18 +151,17 @@ def scrape_dependencies(mod_id):
         with urllib.request.urlopen(req) as response:
             html = response.read().decode('utf-8', errors='ignore')
         
+        reqs = []
         sidebar_id = 'id="RequiredItems_container"'
         if sidebar_id in html:
             container = html.split(sidebar_id)[1].split('</div>')[0]
-            return re.findall(r'id=([0-9]+)', container)
-        
-        if "Required items" in html:
+            reqs = re.findall(r'id=([0-9]+)', container)
+        elif "Required items" in html:
             section = html.split("Required items")[1].split("</div>")[0]
             reqs = re.findall(r'id=([0-9]+)', section)
         
         author = "Unknown"
-        # Robust Author Regex: Look for friendBlockContent, then capture text inside (or inside anchor)
-        # Matches: <div class="friendBlockContent">Username</div> OR <div ...><a ...>Username</a>...
+        # Robust Author Regex
         try:
             # Find all authors (Creators)
             found_authors = re.findall(r'class="friendBlockContent"[^>]*>[\s\r\n]*?(?:<a[^>]*>)?([^<]+)(?:</a>)?', html)
@@ -250,8 +267,14 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                         "dependencies": req_items,
                         "author": author
                     }
+                    
+                    # Preserve scraped rating if exists in cache
+                    d_key = f"details_{mid}"
+                    if d_key in cache and 'rating_stars' in cache[d_key]['data']:
+                        details_obj['rating_stars'] = cache[d_key]['data']['rating_stars']
+                    
                     fetched_details[mid] = details_obj
-                    cache[f"details_{mid}"] = {'timestamp': time.time(), 'data': details_obj}
+                    cache[d_key] = {'timestamp': time.time(), 'data': details_obj}
                     
                     if recursive:
                         for r_id in req_items:
