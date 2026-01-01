@@ -145,7 +145,7 @@ fb_browse_dir() {
             local name=$(basename "$p")
             # Filter hidden and ignored patterns
             [[ "$name" == .* ]] && continue
-            if [[ -n "$ignore_pattern" ]] && [[ "$name" =~ "$ignore_pattern" ]]; then
+            if [[ -n "$ignore_pattern" ]] && [[ "$name" =~ $ignore_pattern ]]; then
                 continue
             fi
             
@@ -175,23 +175,32 @@ fb_browse_dir() {
         move_to 3 2
         local name_w
         if [[ "$mode" == "folders" ]]; then
-            name_w=$((TERM_COLS - 45))
+            name_w=$((${TERM_COLS:-80} - 45))
             [[ $name_w -lt 20 ]] && name_w=20
             fb_log "Mode folders. name_w=$name_w"
-            printf "%s%s%-*s %-10s %-19s%s" "$BOLD$CYAN" "" "$name_w" "Folder Name" "Files" "Last Modified" "$RESET"
+            printf "%s" "$BOLD$CYAN"
+            printf "%-*s %-10s %-19s" "$name_w" "Folder Name" "Files" "Last Modified"
+            printf "%s" "$RESET"
+            fb_log "Folder headers printed"
         else
-            name_w=$((TERM_COLS - 65))
+            name_w=$((${TERM_COLS:-80} - 65))
             [[ $name_w -lt 20 ]] && name_w=20
             fb_log "Mode all. name_w=$name_w"
-            printf "%s%s%-*s %-8s %-19s %-19s%s" "$BOLD$CYAN" "" "$name_w" "File Name" "Size" "Created" "Modified" "$RESET"
+            printf "%s" "$BOLD$CYAN"
+            printf "%-*s %-8s %-19s %-19s" "$name_w" "File Name" "Size" "Created" "Modified"
+            printf "%s" "$RESET"
+            fb_log "File headers printed"
         fi
 
         # Draw List
         local row=4
-        local max_rows=$((TERM_ROWS - 6))
+        local term_r=${TERM_ROWS:-24}
+        local max_rows=$((term_r - 6))
         local start_row=0
-        [[ $selected -ge $max_rows ]] && start_row=$selected # Simplification for debug
-        fb_log "Drawing loop start. row=$row, max_rows=$max_rows, start_row=$start_row"
+        if [[ $selected -ge $max_rows ]]; then
+            start_row=$((selected - max_rows + 1))
+        fi
+        fb_log "Drawing loop preparred. row=$row, max_rows=$max_rows, start_row=$start_row, count=$count"
 
         for ((i=start_row; i<count && i<start_row+max_rows; i++)); do
             local name="${items[$i]}"
