@@ -367,8 +367,16 @@ config_table_editor() {
                 $'\x1b')
                     read -rsn2 -t 0.1 seq || true
                     case "$seq" in
-                        '[A') ((selection > 0)) && ((selection--)) ;;
-                        '[B') ((selection < count - 1)) && ((selection++)) ;;
+                        '[A') 
+                            if [[ $selection -gt 0 ]]; then
+                                selection=$((selection - 1))
+                            fi
+                            ;;
+                        '[B') 
+                            if [[ $selection -lt $((count - 1)) ]]; then
+                                selection=$((selection + 1))
+                            fi
+                            ;;
                     esac
                     ;;
                 '') # Enter - Edit
