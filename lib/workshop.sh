@@ -22,10 +22,13 @@ _fetch_workshop_details() {
     local ids="$1"
     local recursive="${2:-""}"
     local rules_path="${3:-""}"
+    echo "FETCH_DETAILS: ids=$ids recursive=$recursive" >> /tmp/workshop_crash.log
     local cmd="timeout 90s python3 \"${SCRIPT_DIR}/lib/workshop_search.py\" --details \"$ids\""
     [[ "$recursive" == "1" ]] && cmd="$cmd --recursive"
     [[ -n "$rules_path" ]] && cmd="$cmd --update-rules \"$rules_path\""
+    echo "FETCH_DETAILS: Running cmd" >> /tmp/workshop_crash.log
     eval "$cmd"
+    echo "FETCH_DETAILS: Done" >> /tmp/workshop_crash.log
 }
 
 # Unified Drawing Logic for the Workshop Browser
@@ -600,18 +603,25 @@ except Exception as e:
             fi
         elif [[ "$key" == "" ]]; then
             if [[ $count -gt 0 ]]; then
+                # Disable strict mode for install block to prevent crashes
+                set +e
+                
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
                 if [[ -z "${installed_mods[$mid]:-}" ]]; then
                     # Non-blocking status banner
+                    echo "INSTALL: Starting for $mid" > /tmp/workshop_crash.log
                     local msg="Fetching dependency chain for '$mname'..."
                     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - ${#msg} / 2))
                     printf "%s%s%s%s" "$BG_BLUE" "$WHITE$BOLD" " $msg " "$RESET"
                     
-                    local chain_json
-                    chain_json=$(_fetch_workshop_details "$mid" "1" "$rules_json")
+                    echo "INSTALL: Calling _fetch_workshop_details" >> /tmp/workshop_crash.log
+                    local chain_json=""
+                    chain_json=$(_fetch_workshop_details "$mid" "1" "$rules_json") || true
+                    echo "INSTALL: Got chain_json len=${#chain_json}" >> /tmp/workshop_crash.log
                     
                     if [[ -z "$chain_json" ]]; then
                         show_message "Failed to fetch dependencies (timeout or network error)." "Error"
+                        set -e
                         continue
                     fi
                     
