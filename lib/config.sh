@@ -434,36 +434,9 @@ types_selection_menu() {
             done
         fi
         
-        # 3. Modular types from CustomCE
-        local custom_ce="${mission_path}/CustomCE/types"
-        if [[ -d "$custom_ce" ]]; then
-            echo "[$(date +%T)] HUB: Scanning CustomCE: $custom_ce" >> "${SCRIPT_DIR}/loot_manager.log"
-            items+=("--------------------")
-            paths+=("")
-            
-            # Find all XMLs in CustomCE/types
-            local linked_files=""
-            if [[ -f "${mission_path}/cfgeconomycore.xml" ]]; then
-                linked_files=$(grep -o '<file name="[^"]*"' "${mission_path}/cfgeconomycore.xml" | cut -d'"' -f2)
-            fi
-
-            while IFS= read -r p; do
-                [[ -z "$p" ]] && continue
-                local bn=$(basename "$p")
-                
-                # Check link status for icon
-                local icon="🧩"
-                if echo "$linked_files" | grep -qF "$bn"; then
-                    icon="✅"
-                else
-                    icon="❌"
-                fi
-
-                echo "[$(date +%T)] HUB: Found file: $bn (Linked: $icon)" >> "${SCRIPT_DIR}/loot_manager.log"
-                items+=("$icon|$bn")
-                paths+=("$p")
-            done < <(find "$custom_ce" -name "*.xml" -type f | sort)
-        fi
+        # 3. Core Files (Handled in main list)
+        items+=("--------------------")
+        paths+=("")
         
         items+=("--------------------")
         paths+=("")

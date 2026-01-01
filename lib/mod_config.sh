@@ -177,7 +177,14 @@ register_modular_loot() {
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
     local bname=$(basename "$source_xml")
-    local target_filename="${mod_name}_${bname}"
+    
+    local target_filename
+    if [[ "$mod_name" == "LOCAL" || "$mod_name" == "ORPHAN" ]]; then
+        target_filename="$bname"
+    else
+        target_filename="${mod_name}_${bname}"
+    fi
+
     # Clean target name for FS safety
     target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
     
@@ -435,7 +442,7 @@ except: pass
         
         # Footer
         move_to $((TERM_ROWS - 1)) 1
-        local footer=" [Enter] Toggle   [r] Rollback   [d] Delete   [q] Back"
+        local footer=" [Enter] Edit   [L] Toggle Link   [r] Rollback   [d] Delete   [q] Back"
         printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
         
         # 3. Handle Input
@@ -481,19 +488,18 @@ except: pass
             else
                 show_message "File does not exist: $p" "Warning"
             fi
-        elif [[ "$key" == "" ]]; then
+        elif [[ "$key" == "l" || "$key" == "L" ]]; then
             # Toggle Link/Unlink
             local midx=$selection
             local src="${src_paths[$midx]}"
-            local mn="${smod_names[$midx]}"
+            local mn="${smod_ids[$midx]}"
             local fn="${sfile_names[$midx]}"
             local ct="${sce_types[$midx]:-types}"
-            local tn="${mn}_${fn}"
-            tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
             
             if [[ ${states[$midx]} -eq 1 ]]; then
                 # LINKED -> Unlink
                 local target_to_unlink="${smod_ids[$midx]}_${fn}"
+                if [[ "$mn" == "LOCAL" ]]; then target_to_unlink="$fn"; fi
                 
                 # Use ACTUAL linked filename if detected (handles legacy names like ModName_File.xml)
                 if [[ -n "${slinked_names[$midx]}" ]]; then
@@ -510,6 +516,28 @@ except: pass
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1
                      show_message "Linked $fn ($ct)" "Success"
                 fi
+            fi
+        elif [[ "$key" == "" ]]; then
+            # Edit File
+            local midx=$selection
+            local fn="${sfile_names[$midx]}"
+            local ct="${sce_types[$midx]:-types}"
+            
+            # Determine target for editing
+            local target_edit_path="${src_paths[$midx]}" # Default: workshop source
+            if [[ ${states[$midx]} -eq 1 ]]; then
+                # If linked, edit the ACTIVE copy in CustomCE
+                local m_id="${smod_ids[$midx]}"
+                local tn="${m_id}_${fn}"
+                if [[ "$m_id" == "LOCAL" ]]; then tn="$fn"; fi
+                if [[ -n "${slinked_names[$midx]}" ]]; then tn="${slinked_names[$midx]}"; fi
+                target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${tn}"
+            fi
+            
+            if [[ -f "$target_edit_path" ]]; then
+                xml_edit_file "$target_edit_path" "Edit ${fn}"
+            else
+                show_message "File not found for editing: $(basename "$target_edit_path")" "Error"
             fi
         fi
     done
@@ -799,85 +827,36 @@ for mod_id in sorted(mod_ids):
             })
             
             # Track for orphan detection (exact relative path in CustomCE?)
-            # Actually orphans checks filename uniqueness mostly.
-            scanned_files.add(fname)
+            if is_linked:
+                scanned_files.add(linked_name if is_linked else "")
+            else:
+                # We also track the potential filename it WOULD have
+                scanned_files.add(f"{mod_id}_{fname}")
 
 # 2. SCAN ORPHANS (Local files in CustomCE not from mods)
 ce_folders = ["types", "spawnabletypes", "events", "eventspawns"]
 for folder in ce_folders:
-    ce_path = os.path.join(mission_path, "CustomCE", folder)
-    if not os.path.isdir(ce_path):
-        continue
-        
-    for root, dirs, files in os.walk(ce_path):
+    dir_path = os.path.join(mission_path, "CustomCE", folder)
+    if not os.path.isdir(dir_path): continue
+    for root, dirs, files in os.walk(dir_path):
         for fname in files:
-            if not fname.lower().endswith('.xml'):
-                continue
-            # Skip .originals or .backups
-            if ".originals" in root or ".backups" in root:
-                continue
-
-            # If we saw this filename in a mod scan, it's likely the linked copy, NOT an orphan
-            # EXCEPT if the filename is significantly renamed (ModID_Name).
-            # Orphans are files that DON'T match the naming convention of active mods?
+            if not fname.lower().endswith('.xml'): continue
+            if ".originals" in root or ".backups" in root: continue
             
-            # Actually, modular_loot_manager wants to show "Local/Orphan" files too.
-            # If the file path is in CustomCE, and we didn't just 'find' it as a source in workshop,
-            # it IS an orphan/local file.
+            # If we already saw this file in mod scan, skip
+            if fname in scanned_files: continue
             
-            # But wait, 'results' contains WORKSHOP paths.
-            # This loop finds CUSTOMCE paths.
-            # These are arguably ALL 'linked' files or manual files.
-            
-            # We only want to list them if they are NOT just the linked results of the above mods.
-            # i.e. if I have '123_types.xml' in CustomCE, and I scanned '123' and found 'types.xml',
-            # that '123_types.xml' is just the linked instance. We don't list it as a separate 'source'.
-            
-            # But if I have 'MyLocal_types.xml', it is a source.
-            
-            # Heuristic: Does fname start with any ModID?
-            matches_mod = False
-            for res in results:
-                 # If the orphan name contains the original filename AND (mod_id or mod_name?)
-                 # It's hard to be perfect without mod names.
-                 # Let's assume if it is in 'linked' map, it's accounted for?
-                 pass
-            
-            # If file is in linked_json, it is 'Linked'.
-            # We want to show it as a specific entry in the list iff it is NOT a mod file.
-            
-            # Simplified: modular_loot_manager logic in bash handled this by checking against expected names.
-            # Here we just output it as "LOCAL" mod_id if it's not seemingly auto-generated.
-            
-            # Check if this file object is in 'linked' (by name)
-            if fname in linked:
-                 # It is definitely a linked file.
-                 # Is it from a mod we verified?
-                 # If yes, we skip (it's covered by the mod entry showing 'linked')
-                 pass
-            
-            # Actually, to reproduce the bash logic:
-            # "Check if this filename matches our CURRENT standard name"
-            # If mod 123 has 'types.xml', standard is 'ModName_types.xml'.
-            # If 'ModName_types.xml' exists in CustomCE, it is the linked file.
-            # We DON'T show 'ModName_types.xml' as a separate row.
-            
-            # Implementation:
-            # We trust 'results' covers all mod-based files.
-            # We only add entries here if they don't seem to map to 'results'.
-            
-            # Python side doesn't have names easily.
-            # We will accept a small limitation: The Python script mainly scans MODS.
-            # Orphans are nice to have but tricky without Mod Names.
-            # I will omit complex orphan logic here to avoid clutter/errors, 
-            # as the Bash side `modular_loot_manager` usually just cared about Mod files.
-            # The previous Bash implementation of Orphans relied on `smod_names` (bash array).
-            # We can't replicate that perfectly here without fetching mod names.
-            
-            # BUT, the user's objective is confirming CE detection (MODS).
-            # So skipping Orphans is acceptable for now if checks are complex.
-            # I will include a simple check: if filename doesn't look like "Mod_*" or "123_*", maybe?
-            pass
+            # This is a local file not mapped to any active mod
+            is_linked = fname in linked
+            results.append({
+                "mod_id": "LOCAL",
+                "mod_name": "[ Manual / Local ]",
+                "file_path": os.path.join(root, fname),
+                "filename": fname,
+                "ce_type": folder,
+                "status": "linked" if is_linked else "unlinked",
+                "linked_filename": fname if is_linked else ""
+            })
 
 print(json.dumps(results))
 PYTHON_CE_SCAN
