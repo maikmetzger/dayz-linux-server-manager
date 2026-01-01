@@ -97,8 +97,8 @@ _is_separator() {
     [[ "$1" == ----* ]]
 }
 
-# Find next valid (non-separator) index in direction
-# Usage: _find_valid_index "array_name" current_index direction(1 or -1)
+# Find next valid (non-separator) index in direction with wrap-around
+# Usage: _find_next_valid "array_name" current_index direction(1 or -1)
 _find_next_valid() {
     local _arr_name=$1
     local current=$2
@@ -107,17 +107,34 @@ _find_next_valid() {
     eval "local count=\${#${_arr_name}[@]}"
     local next=$((current + direction))
     
-    while [[ $next -ge 0 && $next -lt $count ]]; do
+    # Wrap around at boundaries
+    if [[ $next -lt 0 ]]; then
+        next=$((count - 1))
+    elif [[ $next -ge $count ]]; then
+        next=0
+    fi
+    
+    # Search for valid item (with wrap protection)
+    local checked=0
+    while [[ $checked -lt $count ]]; do
         local item
         eval "item=\"\${${_arr_name}[\$next]}\""
         if ! _is_separator "$item"; then
             echo "$next"
             return 0
         fi
+        
+        # Move to next, with wrap
         next=$((next + direction))
+        if [[ $next -lt 0 ]]; then
+            next=$((count - 1))
+        elif [[ $next -ge $count ]]; then
+            next=0
+        fi
+        ((checked++))
     done
     
-    # No valid item found, return current
+    # Fallback (all separators?)
     echo "$current"
 }
 
