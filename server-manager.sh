@@ -481,8 +481,10 @@ mod_manager() {
                     ce_result=$(scan_mods_for_ce_files "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null || echo "[]")
                     
                     # Count new CE files
-                    local new_ce_count
                     new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>/dev/null || echo "0")
+                    
+                    show_message "DEBUG: Scan finished. Detected: $new_ce_count NEW files." "Debug" # Temporary Debug
+
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
                         # Ask user if they want to link new CE files
