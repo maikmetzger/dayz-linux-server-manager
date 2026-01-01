@@ -3,7 +3,6 @@
 # DayZ types.xml Editor - TUI Library
 # =============================================================================
 # Provides high-performance XML editing for loot economy files.
-# Extracted from lib/config.sh
 # =============================================================================
 
 # Fetch filtered items from types.xml
@@ -23,6 +22,143 @@ _fetch_xml_items() {
     "${cmd[@]}"
 }
 
+# Unified Drawing Logic for the Table View
+# Usage: _draw_xml_editor_screen "$xml_file" $count $selection $offset "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
+_draw_xml_editor_screen() {
+    local xml_file="$1"
+    local count=$2
+    local selection=$3
+    local offset=$4
+    local f_name="$5"
+    local f_cat="$6"
+    local f_use="$7"
+    local f_tier="$8"
+    local -a _items=("${!9}")
+    
+    get_term_size
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    
+    # 1. Header Bar
+    local filename=$(basename "$xml_file")
+    move_to 1 1
+    printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Loot Economy Editor - $filename" "$RESET"
+    
+    # 2. Filter Status (Line 2)
+    local filter_str=""
+    [[ -n "$f_name" ]] && filter_str+="Name: $f_name "
+    [[ -n "$f_cat" ]] && filter_str+="Cat: $f_cat "
+    [[ -n "$f_use" ]] && filter_str+="Use: $f_use "
+    [[ -n "$f_tier" ]] && filter_str+="Tier: $f_tier "
+    
+    move_to 2 2
+    if [[ -n "$filter_str" ]]; then
+        printf "%sFilter: %s%s (%d found)%s" "$YLW" "$WHITE" "$filter_str" "$count" "$RESET"
+    else
+        printf "%sTotal Items: %s%d%s" "$YLW" "$WHITE" "$count" "$RESET"
+    fi
+    
+    # 3. Table Header
+    local table_start=3
+    move_to $table_start 1
+    printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+    
+    local col_name=2 w_name=34
+    local col_nom=$((col_name + w_name)) w_nom=8
+    local col_min=$((col_nom + w_nom)) w_min=8
+    local col_life=$((col_min + w_min)) w_life=10
+    local col_rs=$((col_life + w_life)) w_rs=10
+    
+    move_to $((table_start + 1)) $col_name
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_name "NAME" "$RESET"
+    move_to $((table_start + 1)) $col_nom
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_nom "NOM" "$RESET"
+    move_to $((table_start + 1)) $col_min
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_min "MIN" "$RESET"
+    move_to $((table_start + 1)) $col_life
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_life "LIFE" "$RESET"
+    move_to $((table_start + 1)) $col_rs
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_rs "RS" "$RESET"
+    
+    move_to $((table_start + 2)) 1
+    printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+    
+    # 4. Rows
+    local start_row=$((table_start + 3))
+    local v_height=$((TERM_ROWS - 14))
+    [[ $v_height -lt 5 ]] && v_height=5
+    
+    for ((i=0; i<v_height; i++)); do
+        local idx=$((offset + i))
+        move_to $((start_row + i)) 1
+        
+        if [[ $idx -lt $count ]]; then
+            IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items[$idx]}"
+            local style="$WHITE"
+            if [[ $idx -eq $selection ]]; then
+                style="$BG_RED$WHITE$BOLD"
+                printf "%s%*s%s" "$BG_RED" "$TERM_COLS" "" "$RESET"
+                move_to $((start_row + i)) 1
+            fi
+            
+            local d_name="$name"
+            [[ ${#d_name} -ge $((w_name-2)) ]] && d_name="${d_name:0:$((w_name-4))}.."
+            
+            move_to $((start_row + i)) $col_name
+            printf "%s%-*s%s" "$style" $w_name "$d_name" "$RESET"
+            move_to $((start_row + i)) $col_nom
+            printf "%s%-*s%s" "$style" $w_nom "$nom" "$RESET"
+            move_to $((start_row + i)) $col_min
+            printf "%s%-*s%s" "$style" $w_min "$min" "$RESET"
+            move_to $((start_row + i)) $col_life
+            printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
+            move_to $((start_row + i)) $col_rs
+            printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
+        fi
+    done
+    
+    # 5. Detail Pane
+    local footer_row=$((start_row + v_height + 1))
+    move_to $footer_row 1
+    printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+    
+    if [[ $count -gt 0 ]]; then
+        IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items[$selection]}"
+        move_to $((footer_row + 1)) 2
+        printf "%sCategory: %s%-15s %sUsage: %s%s" "$YLW" "$WHITE" "$cat" "$YLW" "$WHITE" "$usages"
+        move_to $((footer_row + 2)) 2
+        printf "%sTiers:    %s%s" "$YLW" "$WHITE" "$tiers"
+        
+        # Flags
+        local f_map f_hoarder f_cargo f_player f_crafted f_deloot
+        f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_map'])")
+        f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_hoarder'])")
+        f_cargo=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_cargo'])")
+        f_player=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_player'])")
+        f_crafted=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['crafted'])")
+        f_deloot=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['deloot'])")
+        
+        move_to $((footer_row + 3)) 2
+        printf "%sFlags:    %s[%s] Map  [%s] Hoarder  [%s] Cargo  [%s] Player  [%s] Crafted  [%s] DeLoot" \
+            "$YLW" "$WHITE" \
+            "$([[ $f_map == 1 ]] && echo "x" || echo " ")" \
+            "$([[ $f_hoarder == 1 ]] && echo "x" || echo " ")" \
+            "$([[ $f_cargo == 1 ]] && echo "x" || echo " ")" \
+            "$([[ $f_player == 1 ]] && echo "x" || echo " ")" \
+            "$([[ $f_crafted == 1 ]] && echo "x" || echo " ")" \
+            "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
+    fi
+    
+    # 6. Keyboard Hints
+    move_to $((TERM_ROWS - 1)) 1
+    local footer_text=" [↑↓] Navigate   [Enter] Edit   [f] Filter   [x] Clear   [q] Back"
+    local pad_len=$((TERM_COLS - ${#footer_text}))
+    [[ $pad_len -lt 0 ]] && pad_len=0
+    printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
+}
+
 config_xml_editor() {
     local container="$1"
     local xml_file="$2"
@@ -36,12 +172,7 @@ config_xml_editor() {
     # Load metadata for menus
     local meta_json
     meta_json=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" metadata "$xml_file")
-    
-    local -a cat_list=()
-    local -a use_list=()
-    local -a tier_list=()
-    
-    # Extract metadata using python
+    local -a cat_list=() use_list=() tier_list=()
     while IFS= read -r line; do cat_list+=("$line"); done < <(echo "$meta_json" | python3 -c "import sys, json; [print(x) for x in json.load(sys.stdin)['categories']]")
     while IFS= read -r line; do use_list+=("$line"); done < <(echo "$meta_json" | python3 -c "import sys, json; [print(x) for x in json.load(sys.stdin)['usages']]")
     while IFS= read -r line; do tier_list+=("$line"); done < <(echo "$meta_json" | python3 -c "import sys, json; [print(x) for x in json.load(sys.stdin)['tiers']]")
@@ -52,15 +183,10 @@ config_xml_editor() {
     local -a items=()
     local count=0
     
-    local table_start=3 # Standard start row for separators
-    
     while true; do
         if [[ $f_changed -eq 1 ]]; then
-            # 1. Fetch filtered items
             local items_json
             items_json=$(_fetch_xml_items "$xml_file" "$f_name" "$f_cat" "$f_use" "$f_tier")
-            
-            # Parse into bash arrays
             items=()
             while IFS= read -r line; do items+=("$line"); done < <(echo "$items_json" | python3 -c "
 import sys, json
@@ -73,142 +199,14 @@ for x in data:
             f_changed=0
         fi
         
-        get_term_size
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        
-        # 1. Header Bar
-        local filename=$(basename "$xml_file")
-        move_to 1 1
-        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Loot Economy Editor - $filename" "$RESET"
-        
-        # Filter status line (Line 2)
-        local filter_str=""
-        [[ -n "$f_name" ]] && filter_str+="Name: $f_name "
-        [[ -n "$f_cat" ]] && filter_str+="Cat: $f_cat "
-        [[ -n "$f_use" ]] && filter_str+="Use: $f_use "
-        [[ -n "$f_tier" ]] && filter_str+="Tier: $f_tier "
-        
-        move_to 2 2
-        if [[ -n "$filter_str" ]]; then
-            printf "%sFilter: %s%s (%d found)%s" "$YLW" "$WHITE" "$filter_str" "$count" "$RESET"
-        else
-            printf "%sTotal Items: %s%d%s" "$YLW" "$WHITE" "$count" "$RESET"
-        fi
-        
-        # 2. Table Header
-        move_to $table_start 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        local col_name=2 w_name=34
-        local col_nom=$((col_name + w_name)) w_nom=8
-        local col_min=$((col_nom + w_nom)) w_min=8
-        local col_life=$((col_min + w_min)) w_life=10
-        local col_rs=$((col_life + w_life)) w_rs=10
-        
-        move_to $((table_start + 1)) $col_name
-        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_name "NAME" "$RESET"
-        move_to $((table_start + 1)) $col_nom
-        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_nom "NOM" "$RESET"
-        move_to $((table_start + 1)) $col_min
-        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_min "MIN" "$RESET"
-        move_to $((table_start + 1)) $col_life
-        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_life "LIFE" "$RESET"
-        move_to $((table_start + 1)) $col_rs
-        printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_rs "RS" "$RESET"
-        
-        move_to $((table_start + 2)) 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        # Viewport variables
-        local start_row=$((table_start + 3))
+        # Viewport adjustment
         local v_height=$((TERM_ROWS - 14))
         [[ $v_height -lt 5 ]] && v_height=5
-        
-        # Adjust offset
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
-        
-        for ((i=0; i<v_height; i++)); do
-            local idx=$((offset + i))
-            move_to $((start_row + i)) 1
-            
-            if [[ $idx -lt $count ]]; then
-                IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$idx]}"
-                
-                local style="$WHITE"
-                [[ $idx -eq $selection ]] && style="$BG_RED$WHITE$BOLD"
-                
-                # Draw Highlight background for full width? (As established in menu.sh fix)
-                # But here we just use the styled text for columns.
-                # If we want consistent AAA highlighting, we should fill the width.
-                if [[ $idx -eq $selection ]]; then
-                    printf "%s%*s%s" "$BG_RED" "$TERM_COLS" "" "$RESET"
-                    move_to $((start_row + i)) 1
-                fi
-                
-                # Truncate visuals
-                local d_name="$name"
-                [[ ${#d_name} -ge $((w_name-2)) ]] && d_name="${d_name:0:$((w_name-4))}.."
-                
-                move_to $((start_row + i)) $col_name
-                printf "%s%-*s%s" "$style" $w_name "$d_name" "$RESET"
-                move_to $((start_row + i)) $col_nom
-                printf "%s%-*s%s" "$style" $w_nom "$nom" "$RESET"
-                move_to $((start_row + i)) $col_min
-                printf "%s%-*s%s" "$style" $w_min "$min" "$RESET"
-                move_to $((start_row + i)) $col_life
-                printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
-                move_to $((start_row + i)) $col_rs
-                printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
-            else
-                # printf "%$((TERM_COLS))s" "" # Clear row if needed
-                :
-            fi
-        done
-        
-        # 3. Footer (Detail Pane)
-        local footer_row=$((start_row + v_height + 1))
-        move_to $footer_row 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        if [[ $count -gt 0 ]]; then
-            IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]}"
-            move_to $((footer_row + 1)) 2
-            printf "%sCategory: %s%-15s %sUsage: %s%s" "$YLW" "$WHITE" "$cat" "$YLW" "$WHITE" "$usages"
-            move_to $((footer_row + 2)) 2
-            printf "%sTiers:    %s%s" "$YLW" "$WHITE" "$tiers"
-            
-            # Flags (Optimized parse skip if possible, but keep for now)
-            local f_map f_hoarder f_cargo f_player f_crafted f_deloot
-            f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_map'])")
-            f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_hoarder'])")
-            f_cargo=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_cargo'])")
-            f_player=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_player'])")
-            f_crafted=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['crafted'])")
-            f_deloot=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['deloot'])")
-            
-            move_to $((footer_row + 3)) 2
-            printf "%sFlags:    %s[%s] Map  [%s] Hoarder  [%s] Cargo  [%s] Player  [%s] Crafted  [%s] DeLoot" \
-                "$YLW" "$WHITE" \
-                "$([[ $f_map == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_hoarder == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_cargo == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_player == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_crafted == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
-        fi
-        
-        # Static footer hint bar ( AAA style matching config.sh )
-        move_to $((TERM_ROWS - 1)) 1
-        local footer_text=" [↑↓] Navigate   [Enter] Edit   [f] Filter   [x] Clear   [q] Back"
-        local pad_len=$((TERM_COLS - ${#footer_text}))
-        [[ $pad_len -lt 0 ]] && pad_len=0
-        printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
 
-        # 4. Input Handling
+        _draw_xml_editor_screen "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
+
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
@@ -223,15 +221,17 @@ for x in data:
             f_changed=1
             selection=0
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            # Filter Dialog
-            _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@]
+            # Filter Dialog (Passes scope for background redraw)
+            _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@] \
+                "$xml_file" "$count" "$selection" "$offset" items[@]
             f_changed=1
             selection=0
         elif [[ "$key" == "" ]]; then
             # Edit Item
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]}"
-                _edit_xml_item "$xml_file" "$name"
+                _edit_xml_item "$xml_file" "$name" \
+                    "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
                 f_changed=1
             fi
         fi
@@ -240,18 +240,19 @@ for x in data:
 
 _draw_xml_filter_dialog() {
     local -n _fn=$1 _fc=$2 _fu=$3 _ft=$4
-    local -a _cats=("${!5}")
-    local -a _uses=("${!6}")
-    local -a _tiers=("${!7}")
+    local -a _cats=("${!5}") _uses=("${!6}") _tiers=("${!7}")
+    # Background Redraw Info
+    local bg_xml="$8" bg_count="$9" bg_sel="${10}" bg_off="${11}"
+    local -a bg_items=("${!12}")
     
-    local d_width=60
-    local d_height=16
+    local d_width=60 d_height=16
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
-    
     local d_sel=0
-    printf "%s" "$CLEAR_SCREEN"
+
     while true; do
+        # REDRAW BACKGROUND
+        _draw_xml_editor_screen "$bg_xml" "$bg_count" "$bg_sel" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" bg_items[@]
         draw_box $d_row $d_col $d_height $d_width "Filter types.xml"
         
         move_to $((d_row + 2)) $((d_col + 2))
@@ -292,58 +293,72 @@ _draw_xml_filter_dialog() {
             case "$s" in
                 "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
                 "[B") [[ $d_sel -lt 4 ]] && ((d_sel++)) ;;
-                "") return ;; # Escape
+                "") return ;;
             esac
         elif [[ "$k" == "" ]]; then
             case $d_sel in
-                0) # Name Select
-                    _fn=$(input_dialog "Filter by Classname" "$_fn")
-                    ;;
-                1) # Category dropdown
-                    local -a m=("all" "${_cats[@]}")
-                    if run_menu m "Select Category"; then
-                        if [[ "${m[$MENU_RESULT]}" == "all" ]]; then _fc=""; else _fc="${m[$MENU_RESULT]}"; fi
-                    fi
-                    ;;
-                2) # Usage dropdown
-                    local -a m=("all" "${_uses[@]}")
-                    if run_menu m "Select Usage"; then
-                         if [[ "${m[$MENU_RESULT]}" == "all" ]]; then _fu=""; else _fu="${m[$MENU_RESULT]}"; fi
-                    fi
-                    ;;
-                3) # Tier dropdown
-                    local -a m=("all" "${_tiers[@]}")
-                    if run_menu m "Select Tier"; then
-                         if [[ "${m[$MENU_RESULT]}" == "all" ]]; then _ft=""; else _ft="${m[$MENU_RESULT]}"; fi
-                    fi
-                    ;;
-                4) # Reset
-                    _fn="" _fc="" _fu="" _ft=""
-                    ;;
+                0) _fn=$(input_dialog "Filter by Classname" "$_fn") ;;
+                1) local -a m=("all" "${_cats[@]}"); if run_menu m "Select Category"; then
+                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _fc="" || _fc="${m[$MENU_RESULT]}"; fi ;;
+                2) local -a m=("all" "${_uses[@]}"); if run_menu m "Select Usage"; then
+                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _fu="" || _fu="${m[$MENU_RESULT]}"; fi ;;
+                3) local -a m=("all" "${_tiers[@]}"); if run_menu m "Select Tier"; then
+                   [[ "${m[$MENU_RESULT]}" == "all" ]] && _ft="" || _ft="${m[$MENU_RESULT]}"; fi ;;
+                4) _fn="" _fc="" _fu="" _ft="" ;;
             esac
         fi
     done
 }
 
 _edit_xml_item() {
-    local xml_file="$1"
-    local item_name="$2"
-    
-    local -a fields=("nominal" "min" "lifetime" "restock")
-    if run_menu fields "Edit Item: $item_name"; then
-        local field="${fields[$MENU_RESULT]}"
-        local current_val
-        current_val=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" query "$xml_file" --name "$item_name" | python3 -c "import sys, json; print(json.load(sys.stdin)[0]['$field'])")
+    local xml_file="$1" item_name="$2"
+    local bg_count="$3" bg_sel="$4" bg_off="$5"
+    local bg_fn="$6" bg_fc="$7" bg_fu="$8" bg_ft="$9"
+    local -a bg_items=("${!10}")
+
+    # Initial Fetch
+    local item_json
+    item_json=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" query "$xml_file" --name "$item_name")
+    local nom min life rs
+    nom=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['nominal'] if data else '')")
+    min=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['min'] if data else '')")
+    life=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['lifetime'] if data else '')")
+    rs=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['restock'] if data else '')")
+
+    while true; do
+        # REDRAW BACKGROUND before showing menu
+        _draw_xml_editor_screen "$xml_file" "$bg_count" "$bg_sel" "$bg_off" "$bg_fn" "$bg_fc" "$bg_fu" "$bg_ft" bg_items[@]
+        
+        local -a fields=(
+            "Nominal:  $nom"
+            "Min:      $min"
+            "Lifetime: $life"
+            "Restock:  $rs"
+        )
+        if ! run_menu fields "Edit Item: $item_name"; then break; fi
+        
+        local field current_val
+        case $MENU_RESULT in
+            0) field="nominal"; current_val="$nom" ;;
+            1) field="min";     current_val="$min" ;;
+            2) field="lifetime"; current_val="$life" ;;
+            3) field="restock";  current_val="$rs" ;;
+        esac
         
         local new_val
-        new_val=$(input_dialog "Edit $field for $item_name" "$current_val")
+        new_val=$(input_dialog "Edit $field" "$current_val")
         
         if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
             if python3 "${SCRIPT_DIR}/lib/xml_parser.py" update "$xml_file" --item "$item_name" --key "$field" --val "$new_val"; then
-                show_message "Updated $item_name: $field = $new_val" "Success"
+                case $field in
+                    nominal)  nom="$new_val" ;;
+                    min)      min="$new_val" ;;
+                    lifetime) life="$new_val" ;;
+                    restock)  rs="$new_val" ;;
+                esac
             else
                 show_message "Failed to update XML" "Error"
             fi
         fi
-    fi
+    done
 }
