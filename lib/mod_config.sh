@@ -467,6 +467,8 @@ except: pass
                 if confirm "Delete physical file '$(basename "$p")'?" "n"; then
                     unregister_modular_loot "$inst_dir" "$(basename "$p")" # Unlink it first
                     rm -f "$p"
+                    echo "DEBUG: New Count: $new_ce_count" >> "${SELECTED_DIR}/debug_post_sync.log"
+                    show_message "Debug: Check ${SELECTED_DIR}/debug_post_sync.log (Count: $new_ce_count)" "Debug"
                     show_message "Deleted $(basename "$p")" "Success"
                 fi
             else
@@ -636,10 +638,19 @@ scan_dayz_ce_files_python() {
         found=$(find "$instance_dir" -name "mods.txt" 2>/dev/null | grep "/config/mods.txt" | head -n 1)
         if [[ -n "$found" ]]; then
             mods_file="$found"
-            servermods_file="${found%mods.txt}servermods.txt"
+            # Assuming servermods is sibling
+            servermods_file="$(dirname "$found")/servermods.txt"
         fi
     fi
-    
+
+    # DEBUG: Print detected paths to stderr (log)
+    >&2 echo "DEBUG: scan_dayz_ce_files_python"
+    >&2 echo "DEBUG: instance_dir=$instance_dir"
+    >&2 echo "DEBUG: mission_path=$mission_path"
+    >&2 echo "DEBUG: mods_file=$mods_file"
+    >&2 echo "DEBUG: servermods_file=$servermods_file"
+    >&2 echo "DEBUG: workshop_dir=$workshop_dir"
+
     # Get already linked files for status checking
     local linked_json
     linked_json=$(get_linked_ce_files "$instance_dir")
