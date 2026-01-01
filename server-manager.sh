@@ -531,15 +531,21 @@ wipe_menu() {
                             rm -rf "${storage_dir}/data"/*
                         fi
                         
-                        # 3. Loot / CLE Reset (Types & Dynamics)
+                        # 3. Loot / CLE Reset (Types & Dynamics & Events)
                         if [[ ${states[3]} -eq 1 && ${states[2]} -eq 0 ]]; then
                             # Only delete loot bins if we didn't already wipe the whole data folder
                             echo "Wiping Loot Economy state..."
+                            # Types (Spawn rules)
                             rm -f "${storage_dir}/data/types.bin" "${storage_dir}/data/types.bin-journal"
-                            rm -f "${storage_dir}/data/dynamics.bin" "${storage_dir}/data/dynamics.bin-journal"
-                            # Also delete backups
                             rm -f "${storage_dir}/data/types."*
-                            rm -f "${storage_dir}/data/dynamics."*
+                            
+                            # Dynamics (Individual ground items - often chunked as dynamic_001.bin etc)
+                            rm -f "${storage_dir}/data/dynamic_"*
+                            rm -f "${storage_dir}/data/dynamics.bin" "${storage_dir}/data/dynamics.bin-journal"
+                            
+                            # Events (Heli crashes, convoys, etc)
+                            rm -f "${storage_dir}/data/events.bin" "${storage_dir}/data/events.bin-journal"
+                            rm -f "${storage_dir}/data/events."*
                         fi
                         
                         show_message "Wipe Complete. Files have been reset." "Success"
