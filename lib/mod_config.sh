@@ -189,15 +189,19 @@ register_modular_loot() {
     local originals_folder="${mission_path}/${ce_folder}/.originals"
     local original_path="${originals_folder}/${target_filename}"
     
+    local skip_copy=0
     if [[ -f "$target_path" && "$silent" == "0" ]]; then
         if ! confirm "File '$target_filename' already exists in $ce_folder. Overwrite?" "n"; then
-            return 0
+            echo "Skipping overwrite, but will ensure it is linked in XML."
+            skip_copy=1
         fi
     fi
     
     # 1. Copy file to the correct CE folder (user's working copy)
-    mkdir -p "$(dirname "$target_path")"
-    cp "$source_xml" "$target_path"
+    if [[ "$skip_copy" -eq 0 ]]; then
+        mkdir -p "$(dirname "$target_path")"
+        cp "$source_xml" "$target_path"
+    fi
     
     # 2. Save original snapshot for merge tracking (only if not exists or overwriting)
     #    This snapshot is compared against workshop updates to detect changes

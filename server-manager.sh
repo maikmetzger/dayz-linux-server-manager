@@ -499,34 +499,43 @@ mod_manager() {
                             # Process each new/unlinked CE file
                             local mission_path
                             mission_path=$(get_mission_path "$SELECTED_DIR" 2>/dev/null)
-                            
-                            echo "$ce_result" | python3 -c "
+                               # Prepare python script to run
+    local py_script="
 import json, sys
-data = json.load(sys.stdin)
-for item in data:
-    if item.get('status') in ['new', 'unlinked']:
-        print(f\"{item['mod_id']}|{item['file_path']}|{item['filename']}|{item['ce_type']}\")
-" | while IFS='|' read -r mod_id file_path filename ce_type; do
-                                [[ -z "$mod_id" ]] && continue
-                                
-                                # Ask for each file
-                                printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-                                move_to 1 1
-                                printf "%s%s New CE File Found %s\n" "$BG_RED" "$WHITE$BOLD" "$RESET"
-                                echo ""
-                                echo "  Mod ID:   $mod_id"
-                                echo "  File:     $filename"
-                                echo "  Type:     $ce_type"
-                                echo "  Path:     $file_path"
-                                echo ""
-                                
-                                if confirm "Link this file to cfgeconomycore.xml?" "y"; then
-                                    register_modular_loot "$SELECTED_DIR" "$file_path" "$mod_id" 0
-                                else
-                                    echo "Skipped."
-                                    sleep 1
-                                fi
-                            done
+try:
+    data = json.load(sys.stdin)
+    for item in data:
+        if item.get('status') in ['new', 'unlinked']:
+            print(f\"{item['mod_id']}|{item['file_path']}|{item['filename']}|{item['ce_type']}\")
+except:
+    pass
+"
+                            
+    # Use FD 3 for reading data so FD 0 keypresses work for confirm()
+    while IFS='|' read -u 3 -r mod_id file_path filename ce_type; do
+        [[ -z "$mod_id" ]] && continue
+        
+        # Ask for each file
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        move_to 1 1
+        printf "%s%s New CE File Found %s\n" "$BG_RED" "$WHITE$BOLD" "$RESET"
+        echo ""
+        echo "  Mod ID:   $mod_id"
+        echo "  File:     $filename"
+        echo "  Type:     $ce_type"
+        echo "  Path:     $file_path"
+        echo ""
+        
+        # Determine prompt based on file existence
+        # (We assume register_modular_loot handles the 'Overwrite' prompt if needed)
+        
+        if confirm "Link this file to cfgeconomycore.xml?" "y"; then
+            register_modular_loot "$SELECTED_DIR" "$file_path" "$mod_id" 0
+        else
+            echo "Skipped."
+            sleep 0.5
+        fi
+    done 3< <(echo "$ce_result" | python3 -c "$py_script")
                             
                             show_message "CE file linking complete!" "CE Detection"
                         fi
