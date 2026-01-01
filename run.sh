@@ -410,6 +410,11 @@ start_foreground() {
 
   # 2. Symlink config locally so we can use relative path "-config=serverDZ.cfg"
   ln -sf "${DZ_CONFIG_DIR}/serverDZ.cfg" "serverDZ.cfg"
+  
+  # Link BattlEye config if present
+  if [[ -f "${DZ_CONFIG_DIR}/BEServer_x64.cfg" ]]; then
+      ln -sf "${DZ_CONFIG_DIR}/BEServer_x64.cfg" "battleye/BEServer_x64.cfg"
+  fi
 
   # 3. Use bash array to guarantee clean arguments (no newline/quoting issues)
   local -a args=(
