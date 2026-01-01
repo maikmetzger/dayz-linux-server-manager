@@ -200,6 +200,8 @@ modular_loot_manager() {
     local selection=0
     local offset=0
     
+    echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
+    
     while true; do
         # 1. Scan everything
         local -a mod_ids=()
@@ -222,8 +224,9 @@ modular_loot_manager() {
 
         for mid in "${mod_ids[@]}"; do
             local mod_path="${workshop_base}/${mid}"
-            [[ ! -d "$mod_path" ]] && continue
+            [[ ! -d "$mod_path" ]] && { echo "[$(date +%T)] MGR: Skipping mod $mid - No path: $mod_path" >> "${SCRIPT_DIR}/loot_manager.log"; continue; }
             local mname=$(get_mod_name "$mid")
+            echo "[$(date +%T)] MGR: Scanning Mod: $mname ($mid)" >> "${SCRIPT_DIR}/loot_manager.log"
             
             while IFS= read -r xml_file; do
                 [[ -z "$xml_file" ]] && continue
@@ -238,6 +241,8 @@ modular_loot_manager() {
                     src_paths+=("$xml_file")
                     smod_names+=("$mname")
                     sfile_names+=("$bname")
+                    
+                    echo "[$(date +%T)] MGR: Found XML: $bname -> Standard: $target_name" >> "${SCRIPT_DIR}/loot_manager.log"
                     
                     if echo "$linked_files" | grep -qF "$target_name"; then
                         states+=(1) # Linked
@@ -282,10 +287,13 @@ modular_loot_manager() {
                         fi
                     done
                     
+                    echo "[$(date +%T)] MGR: Flagged as Orphan: $ce_bname (Probable Owner: $owner)" >> "${SCRIPT_DIR}/loot_manager.log"
                     src_paths+=("ORPHAN")
                     smod_names+=("$owner")
                     sfile_names+=("$ce_bname")
                     states+=(2) # Orphaned/Stray
+                else
+                    echo "[$(date +%T)] MGR: File $ce_bname matched to active mod scan." >> "${SCRIPT_DIR}/loot_manager.log"
                 fi
             done < <(find "$custom_ce" -name "*.xml" -type f 2>/dev/null | sort)
         fi

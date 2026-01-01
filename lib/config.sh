@@ -437,13 +437,16 @@ types_selection_menu() {
         # 3. Modular types from CustomCE
         local custom_ce="${mission_path}/CustomCE/types"
         if [[ -d "$custom_ce" ]]; then
+            echo "[$(date +%T)] HUB: Scanning CustomCE: $custom_ce" >> "${SCRIPT_DIR}/loot_manager.log"
             items+=("--------------------")
             paths+=("")
             
             # Find all XMLs in CustomCE/types
             while IFS= read -r p; do
                 [[ -z "$p" ]] && continue
-                items+=("🧩|$(basename "$p")")
+                local bn=$(basename "$p")
+                echo "[$(date +%T)] HUB: Found file: $bn" >> "${SCRIPT_DIR}/loot_manager.log"
+                items+=("🧩|$bn")
                 paths+=("$p")
             done < <(find "$custom_ce" -name "*.xml" -type f | sort)
         fi
