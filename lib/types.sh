@@ -64,22 +64,22 @@ _draw_xml_editor_screen() {
     printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
     printf "%s" "$RESET"
     
-    local col_name=2 w_name=34
-    local col_nom=$((col_name + w_name)) w_nom=8
-    local col_min=$((col_nom + w_nom)) w_min=8
-    local col_life=$((col_min + w_min)) w_life=10
-    local col_rs=$((col_life + w_life)) w_rs=10
+    local col_name=2 w_name=30
+    local col_nom=$((col_name + w_name)) w_nom=12
+    local col_min=$((col_nom + w_nom)) w_min=12
+    local col_life=$((col_min + w_min)) w_life=20
+    local col_rs=$((col_life + w_life)) w_rs=12
     
     move_to $((table_start + 1)) $col_name
     printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_name "NAME" "$RESET"
     move_to $((table_start + 1)) $col_nom
-    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_nom "NOM" "$RESET"
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_nom "NOM (VAN)" "$RESET"
     move_to $((table_start + 1)) $col_min
-    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_min "MIN" "$RESET"
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_min "MIN (VAN)" "$RESET"
     move_to $((table_start + 1)) $col_life
-    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_life "LIFE" "$RESET"
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_life "LIFE (VANILLA)" "$RESET"
     move_to $((table_start + 1)) $col_rs
-    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_rs "RS" "$RESET"
+    printf "%s%s%-*s%s" "$DIM" "$WHITE" $w_rs "RS (VAN)" "$RESET"
     
     move_to $((table_start + 2)) 1
     printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
@@ -98,8 +98,10 @@ _draw_xml_editor_screen() {
             # Fields: name|nom|min|life|rs|cat|usages|tiers|flags|nom_v|min_v|life_v|rs_v
             IFS='|' read -r name nom min life rs cat usages tiers flags nom_v min_v life_v rs_v <<< "${_items_ref[$idx]:-}"
             local style="$WHITE"
+            local dim_style="$DIM"
             if [[ $idx -eq $selection ]]; then
                 style="$BG_RED$WHITE$BOLD"
+                dim_style="$BG_RED$WHITE$DIM"
                 printf "%s%*s%s" "$BG_RED" "$TERM_COLS" "" "$RESET"
                 move_to $((start_row + i)) 1
             fi
@@ -109,14 +111,19 @@ _draw_xml_editor_screen() {
             
             move_to $((start_row + i)) $col_name
             printf "%s%-*s%s" "$style" $w_name "$d_name" "$RESET"
+            
+            # Formatted values with vanilla in parens
             move_to $((start_row + i)) $col_nom
-            printf "%s%-*s%s" "$style" $w_nom "$nom" "$RESET"
+            printf "%s%-4s %s(%s)%s" "$style" "$nom" "$dim_style" "$nom_v" "$RESET"
+            
             move_to $((start_row + i)) $col_min
-            printf "%s%-*s%s" "$style" $w_min "$min" "$RESET"
+            printf "%s%-4s %s(%s)%s" "$style" "$min" "$dim_style" "$min_v" "$RESET"
+            
             move_to $((start_row + i)) $col_life
-            printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
+            printf "%s%-8s %s(%s)%s" "$style" "$life" "$dim_style" "$life_v" "$RESET"
+            
             move_to $((start_row + i)) $col_rs
-            printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
+            printf "%s%-4s %s(%s)%s" "$style" "$rs" "$dim_style" "$rs_v" "$RESET"
         fi
     done
     
