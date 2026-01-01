@@ -268,6 +268,7 @@ modular_loot_manager() {
             while IFS= read -r ce_file; do
                 [[ -z "$ce_file" ]] && continue
                 local ce_bname=$(basename "$ce_file")
+                local ce_norm=$(echo "$ce_bname" | tr -cd '[:alnum:]_.-')
                 
                 # Check if this filename matches our CURRENT standard name
                 local matched=0
