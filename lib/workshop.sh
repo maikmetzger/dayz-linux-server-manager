@@ -60,7 +60,8 @@ _draw_workshop_screen() {
     printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
     printf "%s" "$RESET"
     
-    local col_name=2 w_name=40
+    local col_stat=2 w_stat=2
+    local col_name=$((col_stat + w_stat + 1)) w_name=40
     local col_id=$((col_name + w_name)) w_id=12
     local col_size=$((col_id + w_id)) w_size=10
     local col_subs=$((col_size + w_size)) w_subs=15
@@ -99,10 +100,10 @@ _draw_workshop_screen() {
             IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$idx]:-}"
             
             local style="$WHITE"
-            local status_mark=""
+            local status_mark=" "
             
-            [[ -n "${_installed_ref[$mid]:-}" ]] && { style="$GRN"; status_mark="$GRN$BOLD✓$RESET"; }
-            [[ "${_rules_ref[$mid]:-}" == "conflict" ]] && { style="$RED"; status_mark="$RED$BOLD!$RESET"; }
+            [[ -n "${_installed_ref[$mid]:-}" ]] && { style="$GRN"; status_mark="✓"; }
+            [[ "${_rules_ref[$mid]:-}" == "conflict" ]] && { style="$RED"; status_mark="!"; }
             [[ "${_rules_ref[$mid]:-}" == "framework" ]] && { [[ "$style" == "$WHITE" ]] && style="$YLW"; }
 
             if [[ $idx -eq $selection ]]; then
@@ -114,8 +115,10 @@ _draw_workshop_screen() {
             local d_name="$mname"
             [[ ${#d_name} -ge $((w_name-4)) ]] && d_name="${d_name:0:$((w_name-6))}.."
             
+            move_to $((start_row + i)) $col_stat
+            printf "%s%-*s" "$style" $w_stat "$status_mark"
             move_to $((start_row + i)) $col_name
-            printf "%s%-*s %s" "$style" $((w_name-2)) "$d_name" "$status_mark"
+            printf "%s%-*s" "$style" $((w_name-2)) "$d_name"
             move_to $((start_row + i)) $col_id
             printf "%s%-*s" "$style" $w_id "$mid"
             move_to $((start_row + i)) $col_size
