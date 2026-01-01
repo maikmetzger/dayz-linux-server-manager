@@ -575,7 +575,7 @@ get_linked_ce_files() {
     local core_xml="${mission_path}/cfgeconomycore.xml"
     [[ ! -f "$core_xml" ]] && echo "[]" && return 0
     
-    python3 <<EOF
+    python3 <<PYTHON_GET_LINKED
 import xml.etree.ElementTree as ET
 import json
 import os
@@ -607,12 +607,11 @@ try:
             })
     
     print(json.dumps(files))
-    print(json.dumps(files))
 except Exception as e:
     import sys
-    sys.stderr.write(f"DEBUG: Python Error: {e}\n")
+    sys.stderr.write(f"DEBUG: Python Error (get_linked): {e}\n")
     print('[]')
-EOF
+PYTHON_GET_LINKED
 }
 
 # Scans mods for CE files and returns structured data (Python based)

@@ -482,25 +482,16 @@ mod_manager() {
                     
                     # Scan for CE files (Phase 3-4)
                     local ce_result
-                    echo "DEBUG: Running scan on $SELECTED_DIR" > "${SELECTED_DIR}/debug_post_sync.log"
-                    # Capture stderr from scanner to log file
-                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>> "${SELECTED_DIR}/debug_post_sync.log" | tail -n 1)
-                    
-                    echo "DEBUG: CE Result raw: '$ce_result'" >> "${SELECTED_DIR}/debug_post_sync.log"
+                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>/dev/null | tail -n 1)
 
                     # Count new CE files
                     local new_ce_count
                     if [[ -z "$ce_result" ]]; then
                          new_ce_count=0
-                         echo "DEBUG: Empty result!" >> "${SELECTED_DIR}/debug_post_sync.log"
                     else
                          # Count NEW or UNLINKED files
-                         new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status') in ['new', 'unlinked']))" 2>> "${SELECTED_DIR}/debug_post_sync.log" || echo "0")
+                         new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status') in ['new', 'unlinked']))" 2>/dev/null || echo "0")
                     fi
-                    
-                    echo "DEBUG: New Count: $new_ce_count" >> "${SELECTED_DIR}/debug_post_sync.log"
-                    
-                    show_message "Debug: Check ${SELECTED_DIR}/debug_post_sync.log (Count: $new_ce_count)" "Debug"
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
                         # Ask user if they want to link new CE files
