@@ -311,6 +311,7 @@ create_instance() {
     local use_host_net="$3" dz_port="$4" query_port="$5"
     local steam_user="$6" steam_pass="$7" extra_params="$8"
     local sync_on_start="$9" update_on_start="${10}"
+    local rcon_pass="${11}"
 
     step "Step: Creating instance files"
     info "Instance directory: ${inst_dir}"
@@ -348,8 +349,12 @@ class Missions { class DayZ { template = \"dayzOffline.chernarusplus\"; }; };
 "
     chmod 600 "${inst_dir}/data/config/serverDZ.cfg"
 
+    if [[ -z "${rcon_pass}" ]]; then
+        rcon_pass="CHANGEME_RCON_$(date +%s)"
+    fi
+
     write_file "${inst_dir}/data/config/BEServer_x64.cfg" \
-"RConPassword CHANGEME_RCON_PASSWORD
+"RConPassword ${rcon_pass}
 RConPort $((dz_port+3))
 RestrictRCon 1
 "
@@ -371,6 +376,7 @@ RUN apt-get update \\
     libtbb2 \\
     procps iproute2 \\
     tini tar gzip unzip \\
+    python3 \\
 && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g \${PGID} dayz \\
 && useradd -u \${PUID} -g \${PGID} -m -d /dayz dayz \\
@@ -571,6 +577,7 @@ CLI_HOST_NET=""
 CLI_STEAM_USER=""
 CLI_STEAM_PASS=""
 CLI_ADMIN_PASS=""
+CLI_RCON_PASS=""
 CLI_EXTRA_PARAMS=""
 CLI_SYNC_ON_START=""
 CLI_UPDATE_ON_START=""
@@ -589,6 +596,7 @@ REQUIRED OPTIONS (CLI mode):
   --steam-user <user>     Steam account username
   --steam-pass <pass>     Steam account password
   --admin-pass <pass>     Server admin password
+  --rcon-pass <pass>      RCON password (default: random)
 
 OPTIONAL OPTIONS:
   --name <name>           Instance name (default: server1)
@@ -613,6 +621,7 @@ parse_args() {
             --steam-user) CLI_STEAM_USER="$2"; shift 2 ;;
             --steam-pass) CLI_STEAM_PASS="$2"; shift 2 ;;
             --admin-pass) CLI_ADMIN_PASS="$2"; shift 2 ;;
+            --rcon-pass) CLI_RCON_PASS="$2"; shift 2 ;;
             --name) CLI_NAME="$2"; shift 2 ;;
             --dir) CLI_DIR="$2"; shift 2 ;;
             --port) CLI_PORT="$2"; shift 2 ;;
@@ -661,6 +670,7 @@ run_cli_mode() {
     local use_host_net="${CLI_HOST_NET}"
     local steam_user="${CLI_STEAM_USER}"
     local steam_pass="${CLI_STEAM_PASS}"
+    local rcon_pass="${CLI_RCON_PASS:-CHANGEME_RCON_$(date +%s)}"
     local extra_params="${CLI_EXTRA_PARAMS:-}"
     local sync_on_start="${CLI_SYNC_ON_START}"
     local update_on_start="${CLI_UPDATE_ON_START}"
@@ -686,7 +696,8 @@ run_cli_mode() {
     fi
     
     create_instance "${inst_dir}" "${name}" "${use_host_net}" "${dz_port}" "${query_port}" \
-        "${steam_user}" "${steam_pass}" "${extra_params}" "${sync_on_start}" "${update_on_start}"
+        "${steam_user}" "${steam_pass}" "${extra_params}" "${sync_on_start}" "${update_on_start}" \
+        "${rcon_pass}"
     
     step "Step: Building image"
     run_shell "cd '${inst_dir}' && ${DOCKER_ARR[*]} compose build --no-cache"
@@ -805,6 +816,10 @@ tui_create_instance() {
     admin_pass=$(read_input "DayZ Admin Password" "changeme$(date +%s)" "Security")
     [[ -z "$admin_pass" ]] && return
     
+    local rcon_pass
+    rcon_pass=$(read_input "RCON Password" "rcon$(date +%s | tail -c 4)" "Security")
+    [[ -z "$rcon_pass" ]] && return
+    
     CLI_NAME="$name"
     CLI_DIR="$inst_dir"
     CLI_HOST_NET="$use_host_net"
@@ -813,6 +828,7 @@ tui_create_instance() {
     CLI_STEAM_USER="$steam_user"
     CLI_STEAM_PASS="$steam_pass"
     CLI_ADMIN_PASS="$admin_pass"
+    CLI_RCON_PASS="$rcon_pass"
     CLI_SYNC_ON_START="0"
     CLI_UPDATE_ON_START="0"
     
