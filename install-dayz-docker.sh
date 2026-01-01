@@ -737,14 +737,13 @@ main_tui() {
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
         
         case $MENU_RESULT in
-            0) tui_create_instance; read -rp "Press Enter to return to menu..." ;;
+            0) tui_create_instance ;;
             1)
                 if [[ "${#markers[@]}" -eq 0 ]]; then
                     show_message "No marker-based instances found." "Error"
                     continue
                 fi
                 tui_update_instance "${markers[@]}"
-                read -rp "Press Enter to return to menu..."
                 ;;
             2) tui_delete_menu "${scan_root}" ;;
             3) ;;
@@ -823,6 +822,9 @@ tui_create_instance() {
     hr
     
     run_cli_mode
+    
+    printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
+    read -rsn1
 }
 
 tui_update_instance() {
@@ -844,6 +846,8 @@ tui_update_instance() {
             local chosen="${paths[$MENU_RESULT]}"
             printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
             update_run_sh_only "$chosen"
+            printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
+            read -rsn1
         fi
     fi
 }

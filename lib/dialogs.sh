@@ -40,6 +40,10 @@ read_input() {
     local box_row=$(( (TERM_ROWS - box_height) / 2 ))
     local box_col=$(( (TERM_COLS - box_width) / 2 ))
     
+    # Calculate input field position
+    local input_row=$((box_row + 6))
+    local input_col=$((box_col + 5))
+    
     # Draw box to tty
     move_to $box_row $box_col >&3
     printf "%s%s┌" "$RED" "$BOLD" >&3
@@ -50,10 +54,11 @@ read_input() {
     move_to $box_row $((box_col + 2)) >&3
     printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET" >&3
     
-    # Sides
+    # Sides and clear interior
     for ((i=1; i<box_height-1; i++)); do
         move_to $((box_row+i)) $box_col >&3
         printf "%s│%s" "$RED" "$RESET" >&3
+        printf "%*s" "$((box_width-2))" "" >&3
         move_to $((box_row+i)) $((box_col+box_width-1)) >&3
         printf "%s│%s" "$RED" "$RESET" >&3
     done
@@ -64,25 +69,41 @@ read_input() {
     printf "─%.0s" $(seq 1 $((box_width-2))) >&3
     printf "┘%s" "$RESET" >&3
     
-    # Prompt
+    # Prompt with default hint
     move_to $((box_row + 2)) $((box_col + 3)) >&3
     printf "%s%s%s" "$WHITE" "$prompt" "$RESET" >&3
     
-    # Hint
-    move_to $((box_row + 4)) $((box_col + 3)) >&3
-    printf "%s(Empty to cancel)%s" "$DIM" "$RESET" >&3
+    # Show default value hint
+    if [[ -n "$default" ]]; then
+        move_to $((box_row + 4)) $((box_col + 3)) >&3
+        printf "%sDefault: %s%s" "$DIM" "$default" "$RESET" >&3
+    else
+        move_to $((box_row + 4)) $((box_col + 3)) >&3
+        printf "%s(Empty to cancel)%s" "$DIM" "$RESET" >&3
+    fi
     
-    # Input field
-    move_to $((box_row + 6)) $((box_col + 3)) >&3
-    printf "%s▸ %s%s" "$RED" "$RESET" "$SHOW_CURSOR" >&3
+    # Input field prompt
+    move_to $input_row $((box_col + 3)) >&3
+    printf "%s▸ %s" "$RED" "$RESET" >&3
     
     exec 3>&-
     
-    local input
-    read -r -e -i "$default" input </dev/tty
+    # Show cursor and position for input
+    printf "%s" "$SHOW_CURSOR" >/dev/tty
+    move_to $input_row $input_col >/dev/tty
+    
+    # Simple read without -e -i to avoid cursor positioning bugs
+    local input=""
+    read -r input </dev/tty
+    
     printf "%s" "$HIDE_CURSOR" >/dev/tty
     
-    echo "$input"
+    # If empty and we have a default, use the default
+    if [[ -z "$input" && -n "$default" ]]; then
+        echo "$default"
+    else
+        echo "$input"
+    fi
 }
 
 # -----------------------------------------------------------------------------
