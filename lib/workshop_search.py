@@ -35,7 +35,13 @@ def search_workshop(text, sort="trend", num=25, page=1):
 
     encoded_text = urllib.parse.quote(text)
     sort_param = f"&browsesort={sort}" if sort != "relevance" else ""
-    url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
+    
+    # FIX: If searching for "DayZ" (app name), treat as empty search to enable global Browsing Sort
+    # Search mode forces 'Relevance', Browsing mode allows 'Most Subscribed' etc.
+    if text.lower() == "dayz" or not text.strip():
+        url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
+    else:
+        url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
