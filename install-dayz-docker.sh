@@ -732,18 +732,18 @@ main_tui() {
         mapfile -t containers < <(list_dayz_containers)
         
         local -a menu_items=()
-        menu_items+=("🆕 Create NEW Instance")
+        menu_items+=("🆕|Create NEW Instance")
 
         if [[ "${#markers[@]}" -gt 0 ]]; then
-            menu_items+=("🔄 Update run.sh for Instance")
+            menu_items+=("🔄|Update run.sh for Instance")
         else
-            menu_items+=("🔄 Update run.sh (No instances found)")
+            menu_items+=("🔄|Update run.sh (No instances found)")
         fi
         
-        menu_items+=("🗑️  Delete Instance/Container")
+        menu_items+=("🗑️|Delete Instance/Container")
         menu_items+=("--------------------")
-        menu_items+=("✨ Run Server Manager")
-        menu_items+=("❌ Exit")
+        menu_items+=("✨|Run Server Manager")
+        menu_items+=("❌|Exit")
         
         if ! run_menu menu_items "Main Menu"; then exit 0; fi
         
@@ -852,10 +852,10 @@ tui_update_instance() {
         local n d
         n="$(marker_get "${m}" "INSTANCE_NAME")"
         d="$(dirname "${m}")"
-        items+=("📁 ${n:-?} (${d})")
+        items+=("📁|${n:-?} (${d})")
         paths+=("$d")
     done
-    items+=("← Cancel")
+    items+=("←|Cancel")
     
     if run_menu items "Update run.sh - Select Instance"; then
         if [[ $MENU_RESULT -lt ${#paths[@]} ]]; then
@@ -870,7 +870,7 @@ tui_update_instance() {
 
 tui_delete_menu() {
     local scan_root="$1"
-    local choices=("🏷️  Marker-based Instances" "🐳 Containers detected by Docker" "← Back")
+    local choices=("🏷️|Marker-based Instances" "🐳|Containers detected by Docker" "←|Back")
     
     while true; do
         if ! run_menu choices "Delete Instance"; then return; fi
@@ -887,10 +887,10 @@ tui_delete_menu() {
                     local n d
                     n="$(marker_get "${m}" "INSTANCE_NAME")"
                     d="$(dirname "${m}")"
-                items+=("🗑️  ${n} ($d)")
+                items+=("🗑️|${n} ($d)")
                     paths+=("$d")
                 done
-                items+=("← Back")
+                items+=("←|Back")
                 
                 if run_menu items "Select Instance to DELETE"; then
                     [[ $MENU_RESULT -eq ${#paths[@]} ]] && continue
@@ -910,8 +910,8 @@ tui_delete_menu() {
                     continue
                 fi
                 local -a c_items=()
-                for c in "${containers[@]}"; do c_items+=("🗑️  $c"); done
-                c_items+=("← Back")
+                for c in "${containers[@]}"; do c_items+=("🗑️|$c"); done
+                c_items+=("←|Back")
                 if run_menu c_items "Select Container to DELETE"; then
                     [[ $MENU_RESULT -eq ${#containers[@]} ]] && continue
                     local ctn="${containers[$MENU_RESULT]}"

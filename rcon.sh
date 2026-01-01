@@ -137,10 +137,10 @@ main_menu() {
             local n d
             n="$(marker_get "${m}" "INSTANCE_NAME")"
             d="$(dirname "${m}")"
-            items+=("${n} ($d)")
+            items+=("🖥️|${n} ($d)")
             paths+=("$d")
         done
-        items+=("Exit")
+        items+=("❌|Exit")
         
         if run_menu items "Select Instance to Connect"; then
             if [[ $MENU_RESULT -eq ${#paths[@]} ]]; then

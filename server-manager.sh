@@ -437,10 +437,10 @@ wipe_menu() {
         draw_header "Wipe Server Data - $SELECTED_NAME"
         
         local -a items=()
-        if [[ ${states[0]} -eq 1 ]]; then items+=(" [x] 👤 Wipe Players (players.db)"); else items+=(" [ ] 👤 Wipe Players (players.db)"); fi
-        if [[ ${states[1]} -eq 1 ]]; then items+=(" [x] 🚗 Wipe Vehicles (vehicles.bin)"); else items+=(" [ ] 🚗 Wipe Vehicles (vehicles.bin)"); fi
-        if [[ ${states[2]} -eq 1 ]]; then items+=(" [x] 🏰 Wipe Bases (persistence/data)"); else items+=(" [ ] 🏰 Wipe Bases (persistence/data)"); fi
-        if [[ ${states[3]} -eq 1 ]]; then items+=(" [x] 🎒 Wipe Loot (economy reset)"); else items+=(" [ ] 🎒 Wipe Loot (economy reset)"); fi
+        if [[ ${states[0]} -eq 1 ]]; then items+=("[x] 👤|Wipe Players (players.db)"); else items+=("[ ] 👤|Wipe Players (players.db)"); fi
+        if [[ ${states[1]} -eq 1 ]]; then items+=("[x] 🚗|Wipe Vehicles (vehicles.bin)"); else items+=("[ ] 🚗|Wipe Vehicles (vehicles.bin)"); fi
+        if [[ ${states[2]} -eq 1 ]]; then items+=("[x] 🏰|Wipe Bases (persistence/data)"); else items+=("[ ] 🏰|Wipe Bases (persistence/data)"); fi
+        if [[ ${states[3]} -eq 1 ]]; then items+=("[x] 🎒|Wipe Loot (economy reset)"); else items+=("[ ] 🎒|Wipe Loot (economy reset)"); fi
         
         items+=("--------------------")
         items+=("💀|EXECUTE SELECTED WIPE(S)")
