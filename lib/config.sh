@@ -667,9 +667,16 @@ config_table_editor() {
                     move_to $row $col_key
                     printf "  %s" "$d_key"
                     move_to $row $col_val
-                    printf "%s%s" "$DIM" "$d_val"
+                    # Color based on value state
+                    if [[ "$d_val" == "(not set)" ]]; then
+                        printf "%s%s" "$YELLOW" "$d_val"
+                    elif [[ "$d_val" == "(empty)" ]]; then
+                        printf "%s%s" "$DIM" "$d_val"
+                    else
+                        printf "%s%s" "$WHITE" "$d_val"
+                    fi
                     move_to $row $col_def
-                    printf "%s" "$d_def"
+                    printf "%s%s" "$DIM" "$d_def"
                     printf "%s" "$RESET"
                 fi
                 ((row++))
