@@ -15,7 +15,7 @@
 # Format: "parser|relative_path|display_name"
 declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧 Server Settings"
-    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐 RCON Settings"
+    ["BEServer"]="cfg|config/BEServer_x64.cfg|🔐 RCON Settings"
 )
 
 # =============================================================================
@@ -453,6 +453,15 @@ config_category_editor() {
         
         # Load order array
         eval "categories=(\"\${${cat_order_var}[@]}\")"
+        
+        # Skip category menu if only one category
+        if [[ ${#categories[@]} -eq 1 ]]; then
+            local only_cat="${categories[0]}"
+            local keys_csv
+            eval "keys_csv=\"\${${cats_var}[\$only_cat]}\""
+            config_table_editor "$container" "$config_path" "$only_cat" "$keys_csv" "$prefix"
+            return
+        fi
         
         for cat in "${categories[@]}"; do
             local display_name
