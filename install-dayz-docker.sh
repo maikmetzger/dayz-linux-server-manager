@@ -872,7 +872,7 @@ tui_update_instance() {
 
 tui_delete_menu() {
     local scan_root="$1"
-    local choices=("🏷️|Marker-based Instances" "🐳|Containers detected by Docker" "←|Back")
+    local choices=("🏷️|Marker-based Instances" "🐳|Containers detected by Docker" "--------------------" "←|Back")
     
     while true; do
         if ! run_menu choices "Delete Instance"; then return; fi
