@@ -23,7 +23,7 @@ _fetch_xml_items() {
 }
 
 # Unified Drawing Logic for the Table View
-# Usage: _draw_xml_editor_screen "$xml_file" $count $selection $offset "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
+# Usage: _draw_xml_editor_screen "$xml_file" $count $selection $offset "$f_name" "$f_cat" "$f_use" "$f_tier" "items_array_name"
 _draw_xml_editor_screen() {
     local xml_file="$1"
     local count=$2
@@ -33,7 +33,7 @@ _draw_xml_editor_screen() {
     local f_cat="$6"
     local f_use="$7"
     local f_tier="$8"
-    local -a _items=("${!9}")
+    local -n _items_ref=$9
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -94,7 +94,7 @@ _draw_xml_editor_screen() {
         move_to $((start_row + i)) 1
         
         if [[ $idx -lt $count ]]; then
-            IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items[$idx]}"
+            IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items_ref[$idx]:-}"
             local style="$WHITE"
             if [[ $idx -eq $selection ]]; then
                 style="$BG_RED$WHITE$BOLD"
@@ -114,7 +114,7 @@ _draw_xml_editor_screen() {
             move_to $((start_row + i)) $col_life
             printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
             move_to $((start_row + i)) $col_rs
-            printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
+            printf "%s%-*s%s" "$style" $w_life "$rs" "$RESET" # Use same width as life for RS
         fi
     done
     
@@ -125,30 +125,32 @@ _draw_xml_editor_screen() {
     printf "%s" "$RESET"
     
     if [[ $count -gt 0 ]]; then
-        IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items[$selection]}"
+        IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items_ref[$selection]:-}"
         move_to $((footer_row + 1)) 2
         printf "%sCategory: %s%-15s %sUsage: %s%s" "$YLW" "$WHITE" "$cat" "$YLW" "$WHITE" "$usages"
         move_to $((footer_row + 2)) 2
         printf "%sTiers:    %s%s" "$YLW" "$WHITE" "$tiers"
         
         # Flags
-        local f_map f_hoarder f_cargo f_player f_crafted f_deloot
-        f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_map'])")
-        f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_hoarder'])")
-        f_cargo=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_cargo'])")
-        f_player=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['count_in_player'])")
-        f_crafted=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['crafted'])")
-        f_deloot=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin)['deloot'])")
-        
-        move_to $((footer_row + 3)) 2
-        printf "%sFlags:    %s[%s] Map  [%s] Hoarder  [%s] Cargo  [%s] Player  [%s] Crafted  [%s] DeLoot" \
-            "$YLW" "$WHITE" \
-            "$([[ $f_map == 1 ]] && echo "x" || echo " ")" \
-            "$([[ $f_hoarder == 1 ]] && echo "x" || echo " ")" \
-            "$([[ $f_cargo == 1 ]] && echo "x" || echo " ")" \
-            "$([[ $f_player == 1 ]] && echo "x" || echo " ")" \
-            "$([[ $f_crafted == 1 ]] && echo "x" || echo " ")" \
-            "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
+        if [[ -n "$flags" ]]; then
+            local f_map f_hoarder f_cargo f_player f_crafted f_deloot
+            f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_map', 0))")
+            f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_hoarder', 0))")
+            f_cargo=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_cargo', 0))")
+            f_player=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_player', 0))")
+            f_crafted=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('crafted', 0))")
+            f_deloot=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('deloot', 0))")
+            
+            move_to $((footer_row + 3)) 2
+            printf "%sFlags:    %s[%s] Map  [%s] Hoarder  [%s] Cargo  [%s] Player  [%s] Crafted  [%s] DeLoot" \
+                "$YLW" "$WHITE" \
+                "$([[ $f_map == 1 ]] && echo "x" || echo " ")" \
+                "$([[ $f_hoarder == 1 ]] && echo "x" || echo " ")" \
+                "$([[ $f_cargo == 1 ]] && echo "x" || echo " ")" \
+                "$([[ $f_player == 1 ]] && echo "x" || echo " ")" \
+                "$([[ $f_crafted == 1 ]] && echo "x" || echo " ")" \
+                "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
+        fi
     fi
     
     # 6. Keyboard Hints
@@ -205,7 +207,7 @@ for x in data:
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
-        _draw_xml_editor_screen "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
+        _draw_xml_editor_screen "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items
 
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
@@ -223,15 +225,15 @@ for x in data:
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
             # Filter Dialog (Passes scope for background redraw)
             _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@] \
-                "$xml_file" "$count" "$selection" "$offset" items[@]
+                "$xml_file" "$count" "$selection" "$offset" items
             f_changed=1
             selection=0
         elif [[ "$key" == "" ]]; then
             # Edit Item
             if [[ $count -gt 0 ]]; then
-                IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]}"
+                IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]:-}"
                 _edit_xml_item "$xml_file" "$name" \
-                    "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items[@]
+                    "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items
                 f_changed=1
             fi
         fi
@@ -243,7 +245,7 @@ _draw_xml_filter_dialog() {
     local -a _cats=("${!5}") _uses=("${!6}") _tiers=("${!7}")
     # Background Redraw Info
     local bg_xml="$8" bg_count="$9" bg_sel="${10}" bg_off="${11}"
-    local -a bg_items=("${!12}")
+    local -n _bg_items_ref=${12}
     
     local d_width=60 d_height=16
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
@@ -252,7 +254,7 @@ _draw_xml_filter_dialog() {
 
     while true; do
         # REDRAW BACKGROUND
-        _draw_xml_editor_screen "$bg_xml" "$bg_count" "$bg_sel" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" bg_items[@]
+        _draw_xml_editor_screen "$bg_xml" "$bg_count" "$bg_sel" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" _bg_items_ref
         draw_box $d_row $d_col $d_height $d_width "Filter types.xml"
         
         move_to $((d_row + 2)) $((d_col + 2))
@@ -297,7 +299,7 @@ _draw_xml_filter_dialog() {
             esac
         elif [[ "$k" == "" ]]; then
             case $d_sel in
-                0) _fn=$(input_dialog "Filter by Classname" "$_fn") ;;
+                0) _fn=$(read_input "Filter by Classname" "$_fn" "Filter") ;;
                 1) local -a m=("all" "${_cats[@]}"); if run_menu m "Select Category"; then
                    [[ "${m[$MENU_RESULT]}" == "all" ]] && _fc="" || _fc="${m[$MENU_RESULT]}"; fi ;;
                 2) local -a m=("all" "${_uses[@]}"); if run_menu m "Select Usage"; then
@@ -320,7 +322,7 @@ _edit_xml_item() {
     local bg_fc="$7"
     local bg_fu="$8"
     local bg_ft="$9"
-    local -a bg_items=("${10}")
+    local -n _bg_items_ref=${10}
 
     # Initial Fetch
     local item_json
@@ -339,7 +341,7 @@ _edit_xml_item() {
 
     while true; do
         # REDRAW BACKGROUND
-        _draw_xml_editor_screen "$xml_file" "$bg_count" "$bg_sel" "$bg_off" "$bg_fn" "$bg_fc" "$bg_fu" "$bg_ft" bg_items[@]
+        _draw_xml_editor_screen "$xml_file" "$bg_count" "$bg_sel" "$bg_off" "$bg_fn" "$bg_fc" "$bg_fu" "$bg_ft" _bg_items_ref
         
         draw_box $d_row $d_col $d_height $d_width "Edit: $item_name"
         
@@ -377,7 +379,7 @@ _edit_xml_item() {
             esac
             
             local new_val
-            new_val=$(input_dialog "Edit $field" "$current_val")
+            new_val=$(read_input "Edit $field" "$current_val" "Edit $item_name")
             
             if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
                 if python3 "${SCRIPT_DIR}/lib/xml_parser.py" update "$xml_file" --item "$item_name" --key "$field" --val "$new_val"; then
