@@ -615,28 +615,21 @@ scan_dayz_ce_files_python() {
     local instance_dir="$1"
     local workshop_dir="$2"
     
-    # Path Auto-correction: Ensure we point to the data directory
-    if [[ ! -d "$instance_dir/config" && -d "$instance_dir/data/config" ]]; then
-        instance_dir="${instance_dir}/data"
-    fi
-    
     local mission_path
     mission_path=$(get_mission_path "$instance_dir") || return 1
     
-    # Smart detection for mods.txt location (Bash Side)
-    local mods_file="${instance_dir}/data/config/mods.txt"
-    local servermods_file="${instance_dir}/data/config/servermods.txt"
-    
-    # If instance directory itself (or parent) implies nested structure
-    if [[ "$instance_dir" == *"/data" ]]; then
-        if [[ -f "${instance_dir}/config/mods.txt" ]]; then
-            mods_file="${instance_dir}/config/mods.txt"
-            servermods_file="${instance_dir}/config/servermods.txt"
-        elif [[ -f "${instance_dir}/mods.txt" ]]; then
-            mods_file="${instance_dir}/mods.txt"
-            servermods_file="${instance_dir}/servermods.txt"
-        fi
+    # Locate mods.txt (Root or Data)
+    local mods_file="${instance_dir}/config/mods.txt"
+    if [[ ! -f "$mods_file" && -f "${instance_dir}/data/config/mods.txt" ]]; then
+        mods_file="${instance_dir}/data/config/mods.txt"
     fi
+     
+    local servermods_file="${instance_dir}/config/servermods.txt"
+    if [[ ! -f "$servermods_file" && -f "${instance_dir}/data/config/servermods.txt" ]]; then
+        servermods_file="${instance_dir}/data/config/servermods.txt"
+    fi
+    
+
     # Fallback to finding it
     if [[ ! -f "$mods_file" ]]; then
         local found
