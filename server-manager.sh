@@ -489,7 +489,8 @@ mod_manager() {
                          new_ce_count=0
                          echo "DEBUG: Empty result!" >> "${SELECTED_DIR}/debug_post_sync.log"
                     else
-                         new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>> "${SELECTED_DIR}/debug_post_sync.log" || echo "0")
+                         # Count NEW or UNLINKED files
+                         new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status') in ['new', 'unlinked']))" 2>> "${SELECTED_DIR}/debug_post_sync.log" || echo "0")
                     fi
                     
                     echo "DEBUG: New Count: $new_ce_count" >> "${SELECTED_DIR}/debug_post_sync.log"
@@ -498,8 +499,8 @@ mod_manager() {
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
                         # Ask user if they want to link new CE files
-                        if confirm "Found ${new_ce_count} new CE file(s) from mods. Link them now?" "y"; then
-                            # Process each new CE file
+                        if confirm "Found ${new_ce_count} new/unlinked CE file(s). Link them now?" "y"; then
+                            # Process each new/unlinked CE file
                             local mission_path
                             mission_path=$(get_mission_path "$SELECTED_DIR" 2>/dev/null)
                             
@@ -507,7 +508,7 @@ mod_manager() {
 import json, sys
 data = json.load(sys.stdin)
 for item in data:
-    if item.get('status') == 'new':
+    if item.get('status') in ['new', 'unlinked']:
         print(f\"{item['mod_id']}|{item['file_path']}|{item['filename']}|{item['ce_type']}\")
 " | while IFS='|' read -r mod_id file_path filename ce_type; do
                                 [[ -z "$mod_id" ]] && continue
