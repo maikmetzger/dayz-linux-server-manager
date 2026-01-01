@@ -517,21 +517,21 @@ main_menu() {
         [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${WHITE}]${RESET}"
         
         local -a items=(
-            "▶️  Start Server"
-            "⏹️  Stop Server"
-            "🔄 Restart Server"
+            "▶️|Start Server"
+            "⏹️|Stop Server"
+            "🔄|Restart Server"
             "--------------------"
-            "⚒️  Mod Manager"
-            "📝 Config Editor"
-            "🧹 Wipe Server Data"
+            "⚒️|Mod Manager"
+            "📝|Config Editor"
+            "🧹|Wipe Server Data"
             "--------------------"
-            "🎮 RCON Console"
-            "📜 View Logs"
-            "💻 Enter Shell"
+            "🎮|RCON Console"
+            "📜|View Logs"
+            "💻|Enter Shell"
             "--------------------"
-            "⬆️  Update Server"
+            "⬆️|Update Server"
             "--------------------"
-            "← Switch Instance"
+            "←|Switch Instance"
         )
         
         if ! run_menu items "DayZ: $SELECTED_NAME [$status_text" $selection; then
