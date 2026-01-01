@@ -21,6 +21,7 @@ MENU_RESULT=0
 
 # Draw menu items with current selection highlighted
 # Usage: draw_menu "array_name" selected_index start_row start_col width
+# Items can be "icon|label" format for alignment, or plain text
 draw_menu() {
     local _arr_name=$1
     local selected=$2
@@ -30,54 +31,58 @@ draw_menu() {
     
     eval "local -a _items=(\"\${${_arr_name}[@]}\")"
     
-    # Fixed column offsets for alignment
-    local selector_col=$start_col       # " ▶ " or "   "
-    local emoji_col=$((start_col + 4))  # Emoji at column 4
-    local text_col=$((start_col + 8))   # Text always starts at column 8
+    # Column offsets (relative to start_col)
+    # Format: [selector 3ch] [icon 4ch] [label rest]
+    local icon_offset=4   # Icon starts at +4
+    local label_offset=8  # Label starts at +8
     
     local i=0
     for item in "${_items[@]}"; do
-        # Check if item starts with emoji (non-ASCII followed by space)
-        local emoji=""
-        local text="$item"
+        local icon=""
+        local label="$item"
         
-        # Match emoji: any non-ASCII chars at start, followed by optional spaces
-        if [[ "$item" =~ ^([^[:ascii:]]+)[[:space:]]*(.*) ]]; then
-            emoji="${BASH_REMATCH[1]}"
-            text="${BASH_REMATCH[2]}"
+        # Check for pipe delimiter: "icon|label"
+        if [[ "$item" == *"|"* ]]; then
+            icon="${item%%|*}"
+            label="${item#*|}"
         fi
         
+        # Draw row
+        move_to $((start_row + i)) $start_col
+        
         if [[ $i -eq $selected ]]; then
-            # Fill row with red background first
-            move_to $((start_row + i)) $start_col
-            printf "%s%s%*s%s" "$BG_RED" "$WHITE$BOLD" "$width" "" "$RESET"
+            # Selected: fill with red background
+            printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$width" ""
             
-            # Now draw elements at fixed positions
-            move_to $((start_row + i)) $selector_col
+            # Selector
+            move_to $((start_row + i)) $start_col
             printf "%s%s ▶ " "$BG_RED" "$WHITE$BOLD"
             
-            if [[ -n "$emoji" ]]; then
-                move_to $((start_row + i)) $emoji_col
-                printf "%s" "$emoji"
-                move_to $((start_row + i)) $text_col
-                printf "%s%s" "$text" "$RESET"
+            if [[ -n "$icon" ]]; then
+                # Icon at fixed column
+                move_to $((start_row + i)) $((start_col + icon_offset))
+                printf "%s" "$icon"
+                # Label at fixed column
+                move_to $((start_row + i)) $((start_col + label_offset))
+                printf "%s" "$label"
             else
-                # No emoji - just print text
-                printf "%s%s" "$text" "$RESET"
+                # No icon, label right after selector
+                printf "%s" "$label"
             fi
+            printf "%s" "$RESET"
         else
             # Non-selected row
-            move_to $((start_row + i)) $selector_col
             printf "%s   " "$WHITE"
             
-            if [[ -n "$emoji" ]]; then
-                move_to $((start_row + i)) $emoji_col
-                printf "%s" "$emoji"
-                move_to $((start_row + i)) $text_col
-                printf "%s%s" "$text" "$RESET"
+            if [[ -n "$icon" ]]; then
+                move_to $((start_row + i)) $((start_col + icon_offset))
+                printf "%s" "$icon"
+                move_to $((start_row + i)) $((start_col + label_offset))
+                printf "%s" "$label"
             else
-                printf "%s%s" "$text" "$RESET"
+                printf "%s" "$label"
             fi
+            printf "%s" "$RESET"
         fi
         ((i+=1))
     done

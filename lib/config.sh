@@ -12,10 +12,10 @@
 # =============================================================================
 # Config Registry
 # =============================================================================
-# Format: "parser|relative_path|display_name"
+# Format: "parser|relative_path|icon|label"
 declare -A CONFIG_REGISTRY=(
-    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧  Server Settings"
-    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐  RCON Settings"
+    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
+    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
 )
 
 # =============================================================================
@@ -35,18 +35,18 @@ declare -A SERVERDZ_CATEGORIES=(
     ["NetworkBatch"]="networkObjectBatchLogSlow,networkObjectBatchEnforceBandwidthLimits,networkObjectBatchUseEstimatedBandwidth,networkObjectBatchUseDynamicMaximumBandwidth,networkObjectBatchBandwidthLimit,networkObjectBatchCompute,networkObjectBatchSendCreate,networkObjectBatchSendDelete"
 )
 
-# Display names with emojis (for menu display only)
+# Display names with icons (pipe-delimited for column alignment)
 declare -A SERVERDZ_CATEGORY_DISPLAY=(
-    ["General"]="🏠  General"
-    ["Security"]="🔒  Security"
-    ["Gameplay"]="🎮  Gameplay"
-    ["Time"]="⏱️   Time & Weather"
-    ["Network"]="🌐  Network"
-    ["Persistence"]="💾  Persistence"
-    ["Voice"]="🎤  Voice Chat"
-    ["Logging"]="📝  Logging"
-    ["NetworkRange"]="📡  Network Range"
-    ["NetworkBatch"]="📦  Network Batch"
+    ["General"]="🏠|General"
+    ["Security"]="🔒|Security"
+    ["Gameplay"]="🎮|Gameplay"
+    ["Time"]="⏱️|Time & Weather"
+    ["Network"]="🌐|Network"
+    ["Persistence"]="💾|Persistence"
+    ["Voice"]="🎤|Voice Chat"
+    ["Logging"]="📝|Logging"
+    ["NetworkRange"]="📡|Network Range"
+    ["NetworkBatch"]="📦|Network Batch"
 )
 
 # Order for category display (simple keys)
@@ -276,7 +276,7 @@ declare -A BESERVER_CATEGORIES=(
     ["RCON"]="RConPassword,RConPort,RestrictRCon"
 )
 declare -A BESERVER_CATEGORY_DISPLAY=(
-    ["RCON"]="🔐  RCON Settings"
+    ["RCON"]="🔐|RCON Settings"
 )
 BESERVER_CATEGORY_ORDER=("RCON")
 
@@ -387,14 +387,15 @@ config_editor_menu() {
         local -a config_ids=()
         
         for id in "${!CONFIG_REGISTRY[@]}"; do
-            IFS='|' read -r fmt rel_path display_name <<< "${CONFIG_REGISTRY[$id]}"
+            IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$id]}"
             local full_path="${inst_dir}/${rel_path}"
+            local display_name="${icon}|${label}"
             
             # Check if file exists (via host path since it's mounted)
             if [[ -f "${full_path}" ]]; then
                 items+=("${display_name}")
             else
-                items+=("${display_name} (not found)")
+                items+=("${icon}|${label} (not found)")
             fi
             config_ids+=("$id")
         done
@@ -410,7 +411,7 @@ config_editor_menu() {
         fi
         
         local selected_id="${config_ids[$MENU_RESULT]}"
-        IFS='|' read -r fmt rel_path display_name <<< "${CONFIG_REGISTRY[$selected_id]}"
+        IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$selected_id]}"
         local full_path="${inst_dir}/${rel_path}"
         
         if [[ ! -f "${full_path}" ]]; then
