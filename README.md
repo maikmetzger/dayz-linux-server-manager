@@ -1,166 +1,85 @@
-# DayZ Docker Server
+# DayZ Docker Hub
 
-A complete solution for running DayZ dedicated servers in Docker containers on Linux, with TUI management and Workshop mod support.
+A simple but powerful toolkit for running DayZ servers on Linux. It handles everything from the initial install to daily maintenance and mod management, all through a clean terminal interface.
 
-## Features
+## Core Features
 
-- 🐳 **Docker-based** - Isolated, reproducible server environment
-- 🎮 **Workshop Mods** - Download, enable/disable mods via Steam Workshop
-- 📺 **TUI Manager** - Full-featured text UI for server management
-- ⚡ **CLI Mode** - Non-interactive install for automation/scripting
-- 🔥 **UFW Integration** - Automatic firewall configuration
-- ♻️ **Auto-updates** - Optional server/mod sync on startup
+### 🏢 Instance Management
+- **Multi-Instance Support**: Run multiple isolated servers on a single machine.
+- **Instance Selector**: Switch between your different servers easily from the main menu.
+- **Auto-Installation**: Handles Docker, firewall rules (UFW), and directory structures automatically.
 
-## Quick Start
+### 🎮 Mod & Workshop Ecosystem
+- **Workshop Browser**: Search for mods directly on the Steam Workshop without leaving your terminal.
+- **Dependency Resolver**: Automatically detects and shows required mods when installing.
+- **Sync System**: One-click download and update for all your mods.
+- **Automated Keys**: The script handles copying `.bisign`, `.bikey`  keys for you.
 
-### Prerequisites
+### 📦 Loot & Central Economy
+- **Loot Editor**: A high-performance table view to filter and edit `types.xml` values (nominal, lifetime, etc.) instantly.
+- **Modular Loot Manager**: Use the `cfgeconomycore.xml` include system. Add mod loot as separate files to keep your mission folder clean.
+- **Link Toggling**: Easily enable or disable specific modular loot files with a single keypress.
 
-- Ubuntu/Debian Linux
-- Docker (installed automatically if missing)
-- Steam account (for Workshop mods)
+### 🧹 Maintenance & Monitoring
+- **Precision Wipe**: Choose exactly what to reset. You can wipe just the loot (CLE), or target bases, vehicles, or player data separately.
+- **RCON Console**: Built-in interactive BattlEye RCON client for server commands.
+- **Log Suite**: Browse RPT and ADM logs with a built-in viewer that supports live tailing (`tail -f`).
 
-### Installation
+---
 
+## Getting Started
+
+### 1. Installation
+Clone the scripts and run the installer. It will walk you through the setup.
 ```bash
-# Clone or download the scripts
-git clone https://github.com/yourusername/dayz-docker.git
-cd dayz-docker
-
-# Interactive wizard (recommended for first-time setup)
+git clone https://github.com/maikmetzger/dayz-linux-server-scripts.git
+cd dayz-linux-server-scripts
 ./install-dayz-docker.sh
-
-# Or CLI mode for automation
-./install-dayz-docker.sh \
-  --steam-user YOUR_STEAM_USERNAME \
-  --steam-pass YOUR_STEAM_PASSWORD \
-  --admin-pass YOUR_ADMIN_PASSWORD
 ```
 
-## Usage
-
-### Server Manager (TUI)
-
-Launch the interactive server manager:
-
+### 2. Daily Usage
+Launch the management TUI:
 ```bash
 ./server-manager.sh
 ```
 
-**Features:**
-- Start/Stop/Restart servers
-- View container logs
-- **Mod Management:**
-  - Add mods by Workshop ID
-  - Enable/disable mods with checkboxes
-  - Sync (download) all mods
-  - Uninstall mod files
-- Update server files
-- Enter container shell
+---
 
-### Installer CLI Options
+## Feature Deep Dive
 
-```
-REQUIRED (CLI mode):
-  --steam-user <user>     Steam username
-  --steam-pass <pass>     Steam password  
-  --admin-pass <pass>     Server admin password
+### The Workshop Browser
+When managing mods, press **[W]** to open the Workshop Browser. You can search for mods, read their descriptions, and check for dependencies before hitting install. It simplifies the process of hunting down IDs manually.
 
-OPTIONAL:
-  --name <name>           Instance name (default: server1)
-  --dir <path>            Install directory
-  --port <port>           Game port (default: 2302)
-  --query-port <port>     Query port (default: 27016)
-  --host-net              Use host networking (default)
-  --no-host-net           Use bridge networking
-  --sync-on-start         Auto-sync mods on start
-  --update-on-start       Auto-update on start
-  --no-ufw                Skip firewall config
-  --no-start              Don't start after install
-  --help                  Show help
-```
+### The Table-based Loot Editor
+Located in the **Config Editor** for `types.xml`. Instead of scrolling through thousands of lines of XML, you get a clean table where you can search for "Sledgehammer" and change its spawn rate in seconds.
 
-### Container Commands
+### Modular Loot Workflow
+1. Browse a mod's config files.
+2. If you see a `types.xml`, press **[m]**.
+3. The script copies it, normalizes the filename, and registers it in your economy.
+4. You can manage these links later in the **Loot Economy** menu.
 
-```bash
-# View logs
-docker compose logs -f --tail=200
+### Surgical Wiping
+DayZ servers often need a clean start.
+- **Soft Wipe (Loot)**: Deletes `types.bin` and `dynamics.bin`. This refreshes the loot on the ground without destroying anyone's base.
+- **Hard Wipe**: Deletes persistence data or player databases for a fresh start.
 
-# Enter container
-docker exec -it dayz-server1 /bin/bash
+---
 
-# Inside container:
-/dayz/run.sh status           # Check status
-/dayz/run.sh mod add 1234567  # Add mod
-/dayz/run.sh sync-mods        # Download mods
-/dayz/run.sh update-server    # Update DayZ
-/dayz/run.sh backup           # Backup mission/profile
-```
+## TUI Keybinds Guide
 
-## Ports
+- **[↑/↓]**: Move selection
+- **[Enter]**: Action / Select / Toggle checkbox
+- **[/]**: Open search filter
+- **[L]**: Live Tail (in the log browser)
+- **[V]**: View or edit file
+- **[N]**: Create new file/folder
+- **[D]**: Delete file/folder
 
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 2302 | UDP | Game port (base) |
-| 2303-2305 | UDP | Game port +1 to +3 |
-| 27016 | UDP | Steam query port |
-
-## Directory Structure
-
-```
-~/servers/dayz-<name>/
-├── docker-compose.yml
-├── Dockerfile
-├── run.sh
-├── .env                    # Credentials (chmod 600)
-├── .dayz-instance          # Instance marker
-└── data/
-    ├── serverfiles/        # DayZ server files
-    ├── config/
-    │   ├── serverDZ.cfg    # Server config
-    │   ├── mods.txt        # Workshop mod IDs
-    │   └── servermods.txt  # Server-side mod IDs
-    ├── profile/            # Player data, logs
-    ├── state/              # Runtime state
-    └── backups/            # Mission/profile backups
-```
-
-## Mod Management
-
-### Adding Mods
-
-1. Find the mod on [Steam Workshop](https://steamcommunity.com/app/221100/workshop/)
-2. Copy the Workshop ID from the URL (e.g., `1559212036`)
-3. Use TUI: `./server-manager.sh` → Manage Mods → Actions → Add
-4. Or manually: Add ID to `data/config/mods.txt`
-5. Sync mods to download
-
-### Mod Status Icons
-
-| Icon | Meaning |
-|------|---------|
-| ✓ | Enabled - mod will load |
-| ✗ | Disabled - in list but commented out |
-| - | Removed - uninstalled from disk |
-
-## Troubleshooting
-
-### "Permission denied" on Docker socket
-```bash
-sudo usermod -aG docker $USER
-newgrp docker  # Or log out/in
-```
-
-### Server won't start
-```bash
-docker logs dayz-<name>
-# Check for missing files, port conflicts
-```
-
-### Mods not loading
-1. Ensure mods are synced: `./server-manager.sh` → Sync Mods
-2. Check mod IDs in `mods.txt`
-3. Restart the container
+## Requirements
+- **OS**: Ubuntu or Debian (amd64)
+- **Space**: ~30GB for base server + mods
+- **Permissions**: Docker group access or sudo for the initial setup
 
 ## License
-
-MIT
+MIT. Built to make server hosting less of a chore.
