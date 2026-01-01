@@ -224,9 +224,7 @@ _draw_workshop_details_screen() {
     local desc_height=$((TERM_ROWS - 6))
     
     if [[ $desc_width -gt 20 ]]; then
-        local desc_color="$RED"
-        [[ $focus -eq 0 ]] && desc_color="$WHITE$BOLD"
-        draw_box 3 $desc_col $desc_height $desc_width "Description" "$desc_color"
+        draw_box 3 $desc_col $desc_height $desc_width "Description" "$WHITE"
         
         # Use fold to wrap lines nicely respecting paragraphs
         local -a lines=()
@@ -235,7 +233,8 @@ _draw_workshop_details_screen() {
             lines+=("$line")
         done < <(echo -e "$mdesc" | fold -s -w $((desc_width - 2)))
         
-        local view_height=$((desc_height - 2))
+        # FIX: Reduce height by 1 to avoid touching bottom border
+        local view_height=$((desc_height - 3))
         local total_lines=${#lines[@]}
         local max_scroll=$((total_lines - view_height))
         [[ $max_scroll -lt 0 ]] && max_scroll=0
@@ -255,17 +254,19 @@ _draw_workshop_details_screen() {
             fi
         done
         
-        # Scroll Indicator
-        if [[ $max_scroll -gt 0 ]]; then
-            local pct=$(( (scroll_offset * 100) / max_scroll ))
-            move_to $((3 + desc_height - 1)) $((desc_col + desc_width - 8))
-            printf "%s%3d%%%s" "$DIM" "$pct" "$RESET"
+        # Page Indicator (Bottom Center of Box)
+        if [[ $total_lines -gt $view_height ]]; then
+            local current_page=$(( (scroll_offset / view_height) + 1 ))
+            local total_pages=$(( (total_lines + view_height - 1) / view_height ))
+            local p_str=" Page $current_page/$total_pages "
+            move_to $((3 + desc_height - 1)) $((desc_col + (desc_width / 2) - (${#p_str} / 2)))
+            printf "%s%s%s" "$BG_DARKGRAY" "$p_str" "$RESET"
         fi
     fi
 
     # 5. Footer Actions
     move_to $((TERM_ROWS)) 1
-    local footer=" [Enter] Install  [b] Steam  [i] Image  [Tab] Switch  [←→] Page  [Desc] Scroll  [Esc] Back "
+    local footer=" [Enter] Install  [b] Steam  [i] Image  [↑↓] Select Image  [←→] Turn Page  [Esc] Back "
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
 }
 
@@ -327,45 +328,43 @@ except Exception as e:
 ")
     rm -f "$tmp_json"
     
-    eval "$parse_out"
+    # Restore strict modes
+    set -eu
     
     local scroll=0
-    local focus=0 # 0=Desc, 1=Images
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
     while true; do
-        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel $focus
+        # Recalculate view_height for paging logic inside the loop (depends on resize)
+        local desc_height=$((TERM_ROWS - 6))
+        local view_height=$((desc_height - 3))
+        
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || { set -eu; return; } # ESC - restore strict
             case "$s" in
-                "[A") 
-                    if [[ $focus -eq 0 ]]; then [[ $scroll -gt 0 ]] && ((scroll--)); 
-                    else [[ $img_sel -gt 0 ]] && ((img_sel--)); fi ;;
-                "[B") 
-                    if [[ $focus -eq 0 ]]; then ((scroll++)); 
-                    else [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); fi ;;
-                "[D") # Page Up
-                    if [[ $focus -eq 0 ]]; then scroll=$((scroll - 20)); [[ $scroll -lt 0 ]] && scroll=0; fi ;;
-                "[C") # Page Down
-                    if [[ $focus -eq 0 ]]; then scroll=$((scroll + 20)); fi ;;
+                "[A") # Up - Images
+                    [[ $img_sel -gt 0 ]] && ((img_sel--)); ;;
+                "[B") # Down - Images
+                    [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); ;;
+                "[D") # Left - Page Up
+                    scroll=$((scroll - view_height))
+                    [[ $scroll -lt 0 ]] && scroll=0; ;;
+                "[C") # Right - Page Down
+                    scroll=$((scroll + view_height)); ;;
             esac
         elif [[ "$k" == "q" || "$k" == "Q" ]]; then 
             set -eu; return
-        elif [[ "$k" == $'\t' ]]; then 
-             # Toggle focus if we have images
-             if [[ ${#mimages[@]} -gt 0 ]]; then focus=$((1 - focus)); fi
-             # Visual feedback implicitly handled by _draw (highlight active section if we added that, currently just input routing)
-             if [[ $focus -eq 1 ]]; then img_sel=0; else img_sel=-1; fi
         elif [[ "$k" == "b" || "$k" == "B" ]]; then
             local url="https://steamcommunity.com/sharedfiles/filedetails/?id=${mid}"
             if command -v open &>/dev/null; then open "$url"
             elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
             else show_message "URL: $url" "Link"; fi
         elif [[ "$k" == "i" || "$k" == "I" ]]; then
-            if [[ $focus -eq 1 && $img_sel -ge 0 ]]; then
+            if [[ $img_sel -ge 0 ]]; then
                 local url="${mimages[$img_sel]}"
                 if command -v open &>/dev/null; then open "$url"
                 elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
