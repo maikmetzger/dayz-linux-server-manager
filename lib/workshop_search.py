@@ -48,17 +48,8 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     encoded_text = urllib.parse.quote(text)
     api_sort = SORT_MAP.get(sort, "trend")
     
-    # Logic for Most Subscribed: 
-    # Steam often needs browsesort=trend AND actualsort=totaluniquesubscribers for "All Time"
-    # Otherwise it might default to "Week" or just Trend.
-    sort_param = ""
-    actual_sort_param = f"&actualsort={api_sort}"
-    
-    if api_sort == "totaluniquesubscribers":
-        sort_param = "&browsesort=trend" # Force browse context
-    elif api_sort != "relevance":
-        sort_param = f"&browsesort={api_sort}"
-
+    # Simple approach: just use browsesort for all modes
+    sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
     
     # Steam Logic: Page size is fixed at 30 for Browse
     STEAM_PAGE_SIZE = 30
@@ -76,9 +67,9 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     # Fetch Loop
     for p in range(steam_start_p, steam_end_p + 1):
         if text.lower() == "dayz" or not text.strip():
-            url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems{actual_sort_param}&p={p}"
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&p={p}"
         else:
-            url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems{actual_sort_param}&p={p}"
+            url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&p={p}"
             
         # print(f"DEBUG_URL: {url}", file=sys.stderr)
         
