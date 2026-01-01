@@ -32,12 +32,11 @@ _draw_workshop_screen() {
     local selection=$2
     local offset=$3
     local f_text="$4"
-    local f_local="$5"
-    local f_sort="$6"
-    local page=$7
-    local -n _items_ref=$8
-    local -n _installed_ref=$9
-    local -n _rules_ref=${10}
+    local f_sort="$5"
+    local page=$6
+    local -n _items_ref=$7
+    local -n _installed_ref=$8
+    local -n _rules_ref=$9
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -49,7 +48,6 @@ _draw_workshop_screen() {
     # 2. Search Status
     move_to 2 2
     local query_status="${WHITE}${f_text:-"None"}"
-    [[ -n "$f_local" ]] && query_status+=" ${DIM}(Filtered: $f_local)${RESET}"
     
     printf "%sQuery: %-30s %sSort: %s%-15s %sPage: %s%d %s" \
         "$YLW" "$query_status" \
@@ -156,7 +154,7 @@ _draw_workshop_screen() {
     
     # 6. Keyboard Hints
     move_to $((TERM_ROWS - 1)) 1
-    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Filter  [o] Details  [c] Clear  [q] Back"
+    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Search  [o] Details  [c] Reset  [q] Back"
     local pad_len=$((TERM_COLS - ${#footer_text}))
     [[ $pad_len -lt 0 ]] && pad_len=0
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
@@ -346,17 +344,17 @@ except: pass
 
 # Unified Filter Dialog (Similar to types.sh)
 _draw_workshop_filter_dialog() {
-    local -n _fn=$1 _fl=$2 _fs=$3
+    local -n _fn=$1 _fs=$2
     local -a _sort_opts=("trend" "mostsubscribed" "mostsubscribed_asc" "newestfirst" "lastupdated" "relevance")
     local -a _sort_names=("Standard (Trend)" "Subscribers (Desc)" "Subscribers (Asc)" "Newest First" "Last Updated" "Relevancy")
     
-    local d_width=60 d_height=12
+    local d_width=60 d_height=10
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
     local d_sel=0
 
     while true; do
-        draw_box $d_row $d_col $d_height $d_width "Filter & Search Workshop"
+        draw_box $d_row $d_col $d_height $d_width "Search Workshop"
         
         move_to $((d_row + 2)) $((d_col + 2))
         local s_style="$WHITE"
@@ -364,23 +362,18 @@ _draw_workshop_filter_dialog() {
         printf "%sSearch: [%-38s]%s" "$s_style" "${_fn:0:38}" "$RESET"
         
         move_to $((d_row + 4)) $((d_col + 2))
-        local f_style="$WHITE"
-        [[ $d_sel -eq 1 ]] && f_style="$RED$BOLD"
-        printf "%sFilter: [%-38s]%s" "$f_style" "${_fl:0:38}" "$RESET"
-        
-        move_to $((d_row + 6)) $((d_col + 2))
         local o_style="$WHITE"
-        [[ $d_sel -eq 2 ]] && o_style="$RED$BOLD"
+        [[ $d_sel -eq 1 ]] && o_style="$RED$BOLD"
         local cur_sort="Trend"
         for i in "${!_sort_opts[@]}"; do [[ "${_sort_opts[$i]}" == "$_fs" ]] && cur_sort="${_sort_names[$i]}"; done
         printf "%sSort  : < %-36s >%s" "$o_style" "$cur_sort" "$RESET"
         
-        move_to $((d_row + 8)) $((d_col + 2))
+        move_to $((d_row + 6)) $((d_col + 2))
         local c_style="$WHITE"
-        [[ $d_sel -eq 3 ]] && c_style="$RED$BOLD"
-        printf "%s[ Reset All Filters ]%s" "$c_style" "$RESET"
+        [[ $d_sel -eq 2 ]] && c_style="$RED$BOLD"
+        printf "%s[ Reset All Defaults ]%s" "$c_style" "$RESET"
         
-        move_to $((d_row + 11)) $((d_col + 2))
+        move_to $((d_row + 9)) $((d_col + 2))
         printf "[ Enter ] Edit Select  [ Esc ] Close Apply"
         
         IFS= read -rsn1 k
@@ -388,15 +381,14 @@ _draw_workshop_filter_dialog() {
             read -rsn2 -t 0.1 s || true
             case "$s" in
                 "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
+                "[B") [[ $d_sel -lt 2 ]] && ((d_sel++)) ;;
                 "") return 0 ;;
             esac
         elif [[ "$k" == "" ]]; then
             case $d_sel in
                 0) local new;_fn=$(read_input "Global Search Term" "$_fn" "Search"); return 1 ;;
-                1) _fl=$(read_input "Filter Results Locally" "$_fl" "Filter"); return 1 ;;
-                2) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 1; fi ;;
-                3) _fn="DayZ"; _fl=""; _fs="trend"; return 1 ;;
+                1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 1; fi ;;
+                2) _fn="DayZ"; _fs="trend"; return 1 ;;
             esac
         fi
     done
@@ -408,7 +400,7 @@ workshop_browser() {
     local mods_txt="${instance_dir}/data/config/mods.txt"
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
-    local f_text="DayZ" f_sort="relevance" current_page=1 f_local=""
+    local f_text="DayZ" f_sort="relevance" current_page=1
     local selection=0 offset=0 f_changed=1 count=0
     local -a items=()
     declare -A installed_mods workshop_rules
@@ -421,7 +413,7 @@ workshop_browser() {
             [[ -f "$rules_json" ]] && { while IFS='|' read -r mid val; do workshop_rules["$mid"]="$val"; done < <(python3 -c "import json; r=json.load(open('$rules_json')); for k,v in r.get('incompatibilities', {}).items(): print(f'{k}|conflict'); for k in r.get('frameworks', []): print(f'{k}|framework')"); }
 
             # Show Non-blocking Fetching Badge
-            _draw_workshop_screen "0" "$selection" "$offset" "$f_text" "$f_local" "$f_sort" "$current_page" items installed_mods workshop_rules
+            _draw_workshop_screen "0" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
             move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
             printf "%s%s Fetching Workshop Data... %s" "$BG_RED" "$WHITE$BOLD" "$RESET"
             
@@ -432,10 +424,6 @@ workshop_browser() {
             local read_items=()
             while IFS= read -r line; do 
                 [[ -z "$line" ]] && continue
-                # Local filtering
-                if [[ -n "$f_local" ]]; then
-                    if ! echo "$line" | grep -qi "$f_local"; then continue; fi
-                fi
                 read_items+=("$line")
             done < <(printf "%s" "$json" | python3 -c "
 import sys, json, datetime
@@ -473,7 +461,7 @@ except Exception as e:
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
-        _draw_workshop_screen "$count" "$selection" "$offset" "$f_text" "$f_local" "$f_sort" "$current_page" items installed_mods workshop_rules
+        _draw_workshop_screen "$count" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
 
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
@@ -486,11 +474,11 @@ except Exception as e:
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            if _draw_workshop_filter_dialog f_text f_local f_sort; then
+            if _draw_workshop_filter_dialog f_text f_sort; then
                 current_page=1; selection=0; f_changed=1
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_local=""; f_sort="relevance"; current_page=1; selection=0; f_changed=1
+            f_text="DayZ"; f_sort="relevance"; current_page=1; selection=0; f_changed=1
         elif [[ "$key" == "o" || "$key" == "O" ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
