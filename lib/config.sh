@@ -288,7 +288,7 @@ config_table_editor() {
         
         # Calculate Layout
         get_term_size
-        local table_start=4
+        local table_start=3
         local col_key=2
         local col_val=$((col_key + max_key_len + 5))
         local max_rows=$((TERM_ROWS - table_start - 3)) # leave space for footer
@@ -306,11 +306,11 @@ config_table_editor() {
             printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
             
             # 1. Header Bar
-            move_to 2 1
+            move_to 1 1
             printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Config Editor - $filename - $title" "$RESET"
             
             # 2. Table Header
-            local table_start=4
+            local table_start=3
             move_to $table_start 1
             printf "%s%s" "$DIM" "$RED"
             printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
@@ -361,7 +361,7 @@ config_table_editor() {
             # 4. Footer
             move_to $TERM_ROWS 1
             local footer_text=" [Enter] Edit   [q] Back"
-            local pad_len=$((TERM_COLS - ${#footer_text}))
+            local pad_len=$((TERM_COLS - ${#footer_text} - 1))
             printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
             
             # Input Handling
