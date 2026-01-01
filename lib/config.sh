@@ -448,8 +448,8 @@ types_selection_menu() {
             done < <(find "$custom_ce" -name "*.xml" -type f | sort)
         fi
         
-        # items+=("--------------------") # Removed from here
-        # paths+=("")
+        items+=("--------------------")
+        paths+=("")
         items+=("←|Back")
         paths+=("")
         
