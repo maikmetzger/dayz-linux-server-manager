@@ -278,7 +278,7 @@ _view_mod_details() {
     local -a mimages=()
     
     eval $(echo "$json_str" | python3 -c "
-import sys, json, datetime
+import sys, json, datetime, shlex
 try:
     data = json.load(sys.stdin)
     if data:
@@ -286,17 +286,22 @@ try:
         ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
         # Use description_clean if available, else standard clean
         desc = x.get('description_clean', x.get('description', ''))
-        desc = desc.replace('\"', '\\\"').replace('\'', '\'\\\'\'').replace('\n', ' ').replace('\r', ' ')
-        print(f'mname=\"{x.get(\"name\",\"\")}\"')
-        print(f'mauthor=\"{x.get(\"author\",\"Unknown\")}\"')
-        print(f'msize=\"{x.get(\"size\",\"0B\")}\"')
-        print(f'msubs=\"{x.get(\"subscribers_f\",\"0\")}\"')
-        print(f'mupdated=\"{ud}\"')
-        print(f'mdesc=\"{desc}\"')
-        print(f'mdeps=\"{len(x.get(\"dependencies\",[]))}\"')
+        # Strip newlines for single-line Bash variable
+        desc = desc.replace('\n', ' ').replace('\r', ' ')
+        
+        print(f'mname={shlex.quote(x.get(\"name\",\"\"))}')
+        print(f'mauthor={shlex.quote(x.get(\"author\",\"Unknown\"))}')
+        print(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}')
+        print(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}')
+        print(f'mupdated={shlex.quote(ud)}')
+        print(f'mdesc={shlex.quote(desc)}')
+        print(f'mdeps={len(x.get(\"dependencies\",[]))}')
+        
         # Images array logic
         imgs = x.get('images', [])
-        print('mimages=(' + ' '.join([f'\"{i}\"' for i in imgs]) + ')')
+        # Construct bash array safely
+        img_str = ' '.join([shlex.quote(i) for i in imgs])
+        print(f'mimages=({img_str})')
 except: pass
 ")
 
