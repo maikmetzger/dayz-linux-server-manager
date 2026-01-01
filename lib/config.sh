@@ -92,8 +92,21 @@ config_parser_exec() {
 json_get() {
     local json="$1"
     local key="$2"
-    # Simple extraction using grep/sed (works for flat JSON)
-    echo "$json" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | sed 's/.*: *"\([^"]*\)".*/\1/' | head -1
+    
+    # Grep for "key": ... up to comma or closing brace
+    # Handle quoted "value" or unquoted value (numbers/bools)
+    # Use || true to prevent crash if not found (due to set -o pipefail)
+    local match
+    match=$(echo "$json" | grep -o "\"${key}\"[[:space:]]*:[[:space:]]*[^,}]*" || true)
+    
+    # Clean up structure to extract value
+    # Remove key
+    local value="${match#*:}"
+    # methods to trim whitespace and quotes:
+    # 1. Remove leading whitespace/colon
+    value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/^[[:space:]]*"//' -e 's/"$//')
+    
+    echo "$value"
 }
 
 json_get_status() {
@@ -104,8 +117,9 @@ json_get_status() {
 json_get_keys() {
     local json="$1"
     # Extract keys array: ["key1", "key2"] -> key1 key2
+    # Use || true to prevent crash
     echo "$json" | grep -o '"keys"[[:space:]]*:[[:space:]]*\[[^]]*\]' | \
-        sed 's/.*\[\(.*\)\].*/\1/' | tr ',' '\n' | sed 's/[" ]//g'
+        sed 's/.*\[\(.*\)\].*/\1/' | tr ',' '\n' | sed 's/[" ]//g' || true
 }
 
 # =============================================================================
