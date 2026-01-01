@@ -1,0 +1,13 @@
+# Workshop Cache
+data/workshop_cache.json
+
+# Test Output
+test_output.json
+*.test
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# System Files
+.DS_Store

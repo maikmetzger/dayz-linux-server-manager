@@ -32,11 +32,12 @@ _draw_workshop_screen() {
     local selection=$2
     local offset=$3
     local f_text="$4"
-    local f_sort="$5"
-    local page=$6
-    local -n _items_ref=$7
-    local -n _installed_ref=$8
-    local -n _rules_ref=$9
+    local f_local="$5"
+    local f_sort="$6"
+    local page=$7
+    local -n _items_ref=$8
+    local -n _installed_ref=$9
+    local -n _rules_ref=${10}
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -47,9 +48,11 @@ _draw_workshop_screen() {
     
     # 2. Search Status
     move_to 2 2
-    printf "%sSearch: %s%-20s %sFilter: %s%-15s %sSort: %s%s %sPage: %s%d %s" \
-        "$YLW" "$WHITE" "${f_text:-"None"}" \
-        "$YLW" "$WHITE" "${f_local:-"None"}" \
+    local query_status="${WHITE}${f_text:-"None"}"
+    [[ -n "$f_local" ]] && query_status+=" ${DIM}(Filtered: $f_local)${RESET}"
+    
+    printf "%sQuery: %-30s %sSort: %s%-15s %sPage: %s%d %s" \
+        "$YLW" "$query_status" \
         "$YLW" "$WHITE" "$f_sort" \
         "$YLW" "$WHITE" "$page" "$RESET"
     
@@ -85,13 +88,17 @@ _draw_workshop_screen() {
     local v_height=$((TERM_ROWS - 14))
     [[ $v_height -lt 5 ]] && v_height=5
     
+    if [[ $count -eq 0 ]]; then
+        move_to $start_row 2; printf "%s(No results found for this query)%s" "$DIM" "$RESET"
+    fi
+    
     for ((i=0; i<v_height; i++)); do
         local idx=$((offset + i))
         move_to $((start_row + i)) 1
         
         if [[ $idx -lt $count ]]; then
-            # Fields: id|name|subs_f|size|updated_f|desc|children
-            IFS='|' read -r mid mname msubs msize mdate mdesc mchildren <<< "${_items_ref[$idx]:-}"
+            # Fields: id|name|subs_f|size|updated_f|desc|children|subs_raw
+            IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$idx]:-}"
             
             local style="$WHITE"
             local status_mark=""
@@ -130,7 +137,7 @@ _draw_workshop_screen() {
     printf "%s" "$RESET"
     
     if [[ $count -gt 0 ]]; then
-        IFS='|' read -r mid mname msubs msize mdate mdesc mchildren <<< "${_items_ref[$selection]:-}"
+        IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$selection]:-}"
         move_to $((footer_row + 1)) 2; printf "%sDescription:%s" "$YLW" "$RESET"
         local clean_desc=$(echo "$mdesc" | tr '\n' ' ' | sed 's/  */ /g')
         move_to $((footer_row + 2)) 4; printf "%s%s%s" "$WHITE" "${clean_desc:0:$((TERM_COLS-8))}" "$RESET"
@@ -143,15 +150,74 @@ _draw_workshop_screen() {
         [[ "$f_sort" == "mostsubscribed_asc" ]] && s_desc="Subscribers (Asc)"
         [[ "$f_sort" == "newestfirst" ]] && s_desc="Newest First"
         [[ "$f_sort" == "lastupdated" ]] && s_desc="Last Updated"
+        [[ "$f_sort" == "relevance" ]] && s_desc="Relevancy"
         printf "%sSorted By: %s%s" "$CYN" "$WHITE" "$s_desc"
     fi
     
     # 6. Keyboard Hints
     move_to $((TERM_ROWS - 1)) 1
-    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [x] Search  [f] Filter  [o] Open  [s] Sort  [c] Clear  [q] Back"
+    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Filter  [o] Open  [c] Clear  [q] Back"
     local pad_len=$((TERM_COLS - ${#footer_text}))
     [[ $pad_len -lt 0 ]] && pad_len=0
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
+}
+
+# Unified Filter Dialog (Similar to types.sh)
+_draw_workshop_filter_dialog() {
+    local -n _fn=$1 _fl=$2 _fs=$3
+    local -a _sort_opts=("trend" "mostsubscribed" "mostsubscribed_asc" "newestfirst" "lastupdated" "relevance")
+    local -a _sort_names=("Standard (Trend)" "Subscribers (Desc)" "Subscribers (Asc)" "Newest First" "Last Updated" "Relevancy")
+    
+    local d_width=60 d_height=12
+    local d_row=$(( (TERM_ROWS - d_height) / 2 ))
+    local d_col=$(( (TERM_COLS - d_width) / 2 ))
+    local d_sel=0
+
+    while true; do
+        draw_box $d_row $d_col $d_height $d_width "Filter & Search Workshop"
+        
+        move_to $((d_row + 2)) $((d_col + 2))
+        local s_style="$WHITE"
+        [[ $d_sel -eq 0 ]] && s_style="$RED$BOLD"
+        printf "%sSearch: [%-38s]%s" "$s_style" "${_fn:0:38}" "$RESET"
+        
+        move_to $((d_row + 4)) $((d_col + 2))
+        local f_style="$WHITE"
+        [[ $d_sel -eq 1 ]] && f_style="$RED$BOLD"
+        printf "%sFilter: [%-38s]%s" "$f_style" "${_fl:0:38}" "$RESET"
+        
+        move_to $((d_row + 6)) $((d_col + 2))
+        local o_style="$WHITE"
+        [[ $d_sel -eq 2 ]] && o_style="$RED$BOLD"
+        local cur_sort="Trend"
+        for i in "${!_sort_opts[@]}"; do [[ "${_sort_opts[$i]}" == "$_fs" ]] && cur_sort="${_sort_names[$i]}"; done
+        printf "%sSort  : < %-36s >%s" "$o_style" "$cur_sort" "$RESET"
+        
+        move_to $((d_row + 8)) $((d_col + 2))
+        local c_style="$WHITE"
+        [[ $d_sel -eq 3 ]] && c_style="$RED$BOLD"
+        printf "%s[ Reset All Filters ]%s" "$c_style" "$RESET"
+        
+        move_to $((d_row + 11)) $((d_col + 2))
+        printf "[ Enter ] Edit Select  [ Esc ] Close Apply"
+        
+        IFS= read -rsn1 k
+        if [[ "$k" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 s || true
+            case "$s" in
+                "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
+                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
+                "") return 0 ;;
+            esac
+        elif [[ "$k" == "" ]]; then
+            case $d_sel in
+                0) local new;_fn=$(read_input "Global Search Term" "$_fn" "Search"); return 1 ;;
+                1) _fl=$(read_input "Filter Results Locally" "$_fl" "Filter"); return 1 ;;
+                2) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 1; fi ;;
+                3) _fn="DayZ"; _fl=""; _fs="trend"; return 1 ;;
+            esac
+        fi
+    done
 }
 
 # Main Workshop Controller
@@ -160,9 +226,7 @@ workshop_browser() {
     local mods_txt="${instance_dir}/data/config/mods.txt"
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
-    local f_text="DayZ" f_sort="trend" current_page=1 f_local=""
-    local -a sort_options=("trend" "mostsubscribed" "newestfirst" "lastupdated")
-    
+    local f_text="DayZ" f_sort="relevance" current_page=1 f_local=""
     local selection=0 offset=0 f_changed=1 count=0
     local -a items=()
     declare -A installed_mods workshop_rules
@@ -174,25 +238,39 @@ workshop_browser() {
             workshop_rules=()
             [[ -f "$rules_json" ]] && { while IFS='|' read -r mid val; do workshop_rules["$mid"]="$val"; done < <(python3 -c "import json; r=json.load(open('$rules_json')); for k,v in r.get('incompatibilities', {}).items(): print(f'{k}|conflict'); for k in r.get('frameworks', []): print(f'{k}|framework')"); }
 
-            # 3. Fetch items (Allow empty search for trending mods)
-            _draw_workshop_screen "0" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
+            # Show Non-blocking Fetching Badge
+            _draw_workshop_screen "0" "$selection" "$offset" "$f_text" "$f_local" "$f_sort" "$current_page" items installed_mods workshop_rules
             move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
             printf "%s%s Fetching Workshop Data... %s" "$BG_RED" "$WHITE$BOLD" "$RESET"
             
             local json
             json=$(_fetch_workshop_items "$f_text" "$f_sort" "25" "$current_page")
-            items=()
+            
+            # Robust JSON conversion
+            local read_items=()
             while IFS= read -r line; do 
+                [[ -z "$line" ]] && continue
                 # Local filtering
                 if [[ -n "$f_local" ]]; then
                     if ! echo "$line" | grep -qi "$f_local"; then continue; fi
                 fi
-                items+=("$line")
-            done < <(echo "$json" | python3 -c "import sys, json, datetime; data = json.load(sys.stdin); for x in data: updated_dt = datetime.datetime.fromtimestamp(x['updated']).strftime('%Y-%m-%d'); print(f\"{x['id']}|{x['name']}|{x['subscribers_f']}|{x['size']}|{updated_dt}|{x['description']}|{','.join(x['dependencies'])}|{x['subscribers']}\")")
+                read_items+=("$line")
+            done < <(printf "%s" "$json" | python3 -c "
+import sys, json, datetime
+try:
+    data = json.load(sys.stdin)
+    if not isinstance(data, list): data = []
+    for x in data:
+        updated_dt = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
+        # id|name|subs_f|size|updated_f|desc|children|subs_raw
+        print(f\"{x['id']}|{x['name']}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{x.get('description','')[:500].replace('|',' ')}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
+except Exception as e:
+    pass
+")
+            items=("${read_items[@]}")
             
             # Custom sorting for asc/desc (if needed)
             if [[ "$f_sort" == "mostsubscribed_asc" ]]; then
-                # Re-sort the items array by Field 8 (raw subs)
                 local -a sorted=()
                 while IFS= read -r line; do sorted+=("$line"); done < <(printf "%s\n" "${items[@]}" | sort -t'|' -k8,8n)
                 items=("${sorted[@]}")
@@ -203,7 +281,6 @@ workshop_browser() {
             fi
             
             count=${#items[@]}
-            
             [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
             f_changed=0
         fi
@@ -213,7 +290,7 @@ workshop_browser() {
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
-        _draw_workshop_screen "$count" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
+        _draw_workshop_screen "$count" "$selection" "$offset" "$f_text" "$f_local" "$f_sort" "$current_page" items installed_mods workshop_rules
 
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
@@ -222,18 +299,15 @@ workshop_browser() {
                 "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
                 "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
                 "[D") [[ $current_page -gt 1 ]] && { ((current_page--)); selection=0; offset=0; f_changed=1; } ;; # Left
-                "[C") [[ $count -eq 25 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right
+                "[C") [[ $count -gt 0 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
-        elif [[ "$key" == "x" || "$key" == "X" ]]; then
-            local new_search
-            new_search=$(read_input "Search Steam Workshop (Global)" "$f_text" "Search")
-            if [[ -n "$new_search" ]]; then f_text="$new_search"; current_page=1; selection=0; f_changed=1; fi
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            f_local=$(read_input "Filter Results (Local)" "$f_local" "Filter")
-            selection=0
+            if _draw_workshop_filter_dialog f_text f_local f_sort; then
+                current_page=1; selection=0; f_changed=1
+            fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_local=""; f_sort="trend"; current_page=1; selection=0; f_changed=1
+            f_text="DayZ"; f_local=""; f_sort="relevance"; current_page=1; selection=0; f_changed=1
         elif [[ "$key" == "o" || "$key" == "O" ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
@@ -242,21 +316,9 @@ workshop_browser() {
                 elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
                 else show_message "URL: $url" "Link (No Browser Found)"; fi
             fi
-        elif [[ "$key" == "s" || "$key" == "S" ]]; then
-            local -a m=("Trend" "Most Subscribed (Desc)" "Most Subscribed (Asc)" "Newest First" "Last Updated")
-            if run_menu m "Sort Workshop By"; then
-                case $MENU_RESULT in
-                    0) f_sort="trend" ;;
-                    1) f_sort="mostsubscribed" ;;
-                    2) f_sort="mostsubscribed_asc" ;; # Custom handle? Steam doesn't support ASC in URL easily sometimes
-                    3) f_sort="newestfirst" ;;
-                    4) f_sort="lastupdated" ;;
-                esac
-                current_page=1; selection=0; f_changed=1
-            fi
         elif [[ "$key" == "" ]]; then
             if [[ $count -gt 0 ]]; then
-                IFS='|' read -r mid mname msubs msize mdate mdesc mchildren <<< "${items[$selection]:-}"
+                IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
                 if [[ -z "${installed_mods[$mid]:-}" ]]; then
                     show_message "Resolving full dependency chain for '$mname'..." "Workshop"
                     local chain_json

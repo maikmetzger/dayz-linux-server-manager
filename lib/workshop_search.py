@@ -34,7 +34,8 @@ def search_workshop(text, sort="trend", num=25, page=1):
             return entry['data']
 
     encoded_text = urllib.parse.quote(text)
-    url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}&browsesort={sort}&section=readytouseitems&actualsort={sort}&p={page}"
+    sort_param = f"&browsesort={sort}" if sort != "relevance" else ""
+    url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&actualsort={sort}&p={page}"
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -43,7 +44,7 @@ def search_workshop(text, sort="trend", num=25, page=1):
             html = response.read().decode('utf-8')
         
         ids = []
-        found = re.findall(r'id="sharedfile_([0-9]+)"', html)
+        found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
         for fid in found:
             if fid not in ids:
                 ids.append(fid)
