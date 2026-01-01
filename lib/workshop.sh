@@ -385,12 +385,13 @@ except Exception as e:
 # Unified Filter Dialog (Similar to types.sh)
 # Unified Filter Dialog (Similar to types.sh)
 _draw_workshop_filter_dialog() {
-    local -n _fn=$1 _fs=$2 _fl=$3
+    local -n _fn=$1 _fs=$2 _fl=$3 _fm=$4
     local -a _sort_opts=("trend" "mostsubscribed" "mostsubscribed_asc" "newestfirst" "lastupdated" "relevance")
     local -a _sort_names=("Standard (Trend)" "Subscribers (Desc)" "Subscribers (Asc)" "Newest First" "Last Updated" "Relevancy")
     local -a _lim_opts=("Fill" "5" "10" "25" "50" "100")
+    local -a _mode_opts=("Title" "Author")
     
-    local d_width=60 d_height=12
+    local d_width=60 d_height=14
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
     local d_sel=0
@@ -416,11 +417,16 @@ _draw_workshop_filter_dialog() {
         printf "%sLimit : < %-36s >%s" "$l_style" "$_fl" "$RESET"
         
         move_to $((d_row + 8)) $((d_col + 2))
+        local m_style="$WHITE"
+        [[ $d_sel -eq 3 ]] && m_style="$RED$BOLD"
+        printf "%sMode  : < %-36s >%s" "$m_style" "$_fm" "$RESET"
+        
+        move_to $((d_row + 10)) $((d_col + 2))
         local c_style="$WHITE"
-        [[ $d_sel -eq 3 ]] && c_style="$RED$BOLD"
+        [[ $d_sel -eq 4 ]] && c_style="$RED$BOLD"
         printf "%s[ Reset All Defaults ]%s" "$c_style" "$RESET"
         
-        move_to $((d_row + 11)) $((d_col + 2))
+        move_to $((d_row + 13)) $((d_col + 2))
         printf "[ Enter ] Edit Select  [ Esc ] Close Apply"
         
         IFS= read -rsn1 k
@@ -428,15 +434,16 @@ _draw_workshop_filter_dialog() {
             read -rsn2 -t 0.1 s || true
             case "$s" in
                 "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
-                "") return 0 ;;
+                "[B") [[ $d_sel -lt 4 ]] && ((d_sel++)) ;;
+                "") return 1 ;;
             esac
         elif [[ "$k" == "" ]]; then
             case $d_sel in
-                0) local new;_fn=$(read_input "Global Search Term" "$_fn" "Search"); return 1 ;;
-                1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 1; fi ;;
-                2) if run_menu _lim_opts "Select Items Per Page"; then _fl="${_lim_opts[$MENU_RESULT]}"; return 1; fi ;;
-                3) _fn="DayZ"; _fs="trend"; _fl="Fill"; return 1 ;;
+                0) local new;_fn=$(read_input "Global Search Term" "$_fn" "Search"); return 0 ;;
+                1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 0; fi ;;
+                2) if run_menu _lim_opts "Select Items Per Page"; then _fl="${_lim_opts[$MENU_RESULT]}"; return 0; fi ;;
+                3) if run_menu _mode_opts "Select Search Mode"; then _fm="${_mode_opts[$MENU_RESULT]}"; return 0; fi ;;
+                4) _fn="DayZ"; _fs="trend"; _fl="Fill"; _fm="Title"; return 0 ;;
             esac
         fi
     done
@@ -448,7 +455,7 @@ workshop_browser() {
     local mods_txt="${instance_dir}/data/config/mods.txt"
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
-    local f_text="DayZ" f_sort="relevance" f_limit="Fill" current_page=1
+    local f_text="DayZ" f_sort="relevance" f_limit="Fill" f_mode="Title" current_page=1
     local selection=0 offset=0 f_changed=1 count=0
     local -a items=()
     declare -A installed_mods workshop_rules
@@ -472,7 +479,8 @@ workshop_browser() {
             printf "%s%s Fetching Workshop Data ($fetch_count)... %s" "$BG_RED" "$WHITE$BOLD" "$RESET"
             
             local json
-            json=$(_fetch_workshop_items "$f_text" "$f_sort" "$fetch_count" "$current_page")
+            local clean_mode="title"; [[ "$f_mode" == "Author" ]] && clean_mode="author"
+            json=$(_fetch_workshop_items "$f_text" "$f_sort" "$fetch_count" "$current_page" "$clean_mode")
             
             # Robust JSON conversion
             local read_items=()
@@ -529,11 +537,11 @@ except Exception as e:
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            if _draw_workshop_filter_dialog f_text f_sort f_limit; then
-                current_page=1; selection=0; f_changed=1
+            if _draw_workshop_filter_dialog f_text f_sort f_limit f_mode; then
+                current_page=1; selection=0; f_changed=1; continue
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_sort="relevance"; f_limit="Fill"; current_page=1; selection=0; f_changed=1
+            f_text="DayZ"; f_sort="relevance"; f_limit="Fill"; f_mode="Title"; current_page=1; selection=0; f_changed=1; continue
         elif [[ "$key" == "o" || "$key" == "O" || "$key" == " " ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"

@@ -34,9 +34,9 @@ def save_cache(cache):
         with open(CACHE_FILE, 'w') as f: json.dump(cache, f, indent=2)
     except: pass
 
-def search_workshop(text, sort="trend", num=25, page=1):
+def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     cache = load_cache()
-    cache_key = f"search_{text}_{sort}_{num}_{page}"
+    cache_key = f"search_{text}_{sort}_{num}_{page}_{mode}"
     if cache_key in cache:
         entry = cache[cache_key]
         if time.time() - entry['timestamp'] < CACHE_EXPIRY_SEARCH:
@@ -47,7 +47,6 @@ def search_workshop(text, sort="trend", num=25, page=1):
     sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
     
     # FIX: If searching for "DayZ" (app name), treat as empty search to enable global Browsing Sort
-    # Search mode forces 'Relevance', Browsing mode allows 'Most Subscribed' etc.
     if text.lower() == "dayz" or not text.strip():
         url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&actualsort={api_sort}&p={page}"
     else:
@@ -60,11 +59,31 @@ def search_workshop(text, sort="trend", num=25, page=1):
             html = response.read().decode('utf-8')
         
         ids = []
-        found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
-        for fid in found:
-            if fid not in ids:
-                ids.append(fid)
+        
+        if mode == "author" and text.strip() and text.lower() != "dayz":
+            # Strict Author Filter: Parse blocks to find author name
+            # Block: <div class="workshopItem"> ... data-publishedfileid="ID" ... <div class="workshopItemAuthorName">...<a ...>NAME</a>
+            items = html.split('class="workshopItem"')
+            for item in items[1:]: # Skip first split (header)
+                try:
+                    fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
+                    if not fid_m: continue
+                    fid = fid_m.group(1)
+                    
+                    author_m = re.search(r'class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>', item)
+                    if author_m:
+                        author_name = author_m.group(1).strip()
+                        if text.lower() in author_name.lower():
+                            if fid not in ids: ids.append(fid)
+                except: pass
                 if len(ids) >= num: break
+        else:
+            # Standard Title/Desc Search (just grab IDs)
+            found = re.findall(r'data-publishedfileid="([0-9]+)"', html)
+            for fid in found:
+                if fid not in ids:
+                    ids.append(fid)
+                    if len(ids) >= num: break
         
         cache[cache_key] = {'timestamp': time.time(), 'data': ids}
         save_cache(cache)
