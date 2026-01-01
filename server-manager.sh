@@ -473,13 +473,18 @@ mod_manager() {
                     run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     
                     # Refresh update cache after sync
+                    # Refresh update cache after sync
                     show_message "Refreshing update cache..." "Sync"
-                    check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
+                    local workshop_path="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+                    if [[ ! -d "$workshop_path" ]]; then workshop_path="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"; fi
+                    
+                    check_all_mod_updates "$SELECTED_DIR" "$workshop_path" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
                     
                     # Scan for CE files (Phase 3-4)
                     local ce_result
                     echo "DEBUG: Running scan on $SELECTED_DIR" > "${SELECTED_DIR}/debug_post_sync.log"
-                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>> "${SELECTED_DIR}/debug_post_sync.log" | tail -n 1)
+                    # Capture stderr from scanner to log file
+                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>> "${SELECTED_DIR}/debug_post_sync.log" | tail -n 1)
                     
                     echo "DEBUG: CE Result raw: '$ce_result'" >> "${SELECTED_DIR}/debug_post_sync.log"
 

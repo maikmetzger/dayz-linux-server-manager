@@ -666,7 +666,7 @@ scan_dayz_ce_files_python() {
     export DAYZ_SCRIPT_DIR="$SCRIPT_DIR"
     export DAYZ_MISSION_PATH="$mission_path"
     
-    python3 <<EOF
+    python3 <<PYTHON_CE_SCAN
 import os
 import json
 import sys
@@ -855,7 +855,7 @@ for folder in ce_folders:
             pass
 
 print(json.dumps(results))
-EOF
+PYTHON_CE_SCAN
 }
 
 # check_ce_file_update - Check if a linked CE file has updates from workshop
