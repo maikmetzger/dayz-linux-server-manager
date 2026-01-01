@@ -310,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument('--sort', default='trend', help='Sort order')
     parser.add_argument('--num', type=int, default=25, help='Max results per page')
     parser.add_argument('--page', type=int, default=1, help='Page number')
+    parser.add_argument('--mode', default='title', help='Search mode: title or author')
     parser.add_argument('--details', help='Comma-separated Mod IDs for direct details')
     parser.add_argument('--recursive', action='store_true', help='Resolve dependencies recursively')
     parser.add_argument('--update-rules', help='Path to workshop_rules.json to update')
@@ -324,6 +325,6 @@ if __name__ == "__main__":
         ids = args.details.split(',')
         print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
     elif args.search:
-        ids = search_workshop(args.search, args.sort, args.num, args.page)
+        ids = search_workshop(args.search, args.sort, args.num, args.page, args.mode)
         print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
     else: parser.print_help()

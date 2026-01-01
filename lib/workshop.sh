@@ -300,7 +300,15 @@ _view_mod_details() {
     # Use temp file to avoid subshell exit issues
     local tmp_json="/tmp/workshop_details_${mid}.json"
     echo "FETCHING PYTHON..." >> /tmp/workshop_crash.log
-    python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>/dev/null
+    
+    # Timeout after 30s, capture stderr for debugging
+    timeout 30s python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>> /tmp/workshop_crash.log
+    local py_exit=$?
+    echo "PYTHON EXIT CODE: $py_exit" >> /tmp/workshop_crash.log
+    
+    if [[ $py_exit -ne 0 ]]; then
+        echo "PYTHON FAILED, using defaults" >> /tmp/workshop_crash.log
+    fi
     
     # Parse Python output
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
@@ -549,6 +557,7 @@ except Exception as e:
                  # New Page Target
                  current_page=$(( (global_idx / new_v_height) + 1 ))
                  selection=0; offset=0
+                 f_clear=1 # Force clear cache on resize
                  f_changed=1
             fi
             continue
@@ -568,7 +577,8 @@ except Exception as e:
             _draw_workshop_filter_dialog f_text f_sort f_limit f_mode
             local d_res=$?
             if [[ $d_res -eq 0 ]]; then
-                current_page=1; selection=0; f_changed=1; continue
+                # Filter applied -> Force Clear Cache
+                f_clear=1; current_page=1; selection=0; f_changed=1; continue
             elif [[ $d_res -eq 2 ]]; then
                 # Reset triggered from dialog
                 f_clear=1; current_page=1; selection=0; f_changed=1; continue
