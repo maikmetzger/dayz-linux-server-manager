@@ -532,7 +532,7 @@ main_menu() {
         )
         
         if ! run_menu items "DayZ: $SELECTED_NAME [$status_text" $selection; then
-            exit 0
+            return
         fi
         
         selection=$MENU_RESULT
