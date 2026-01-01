@@ -154,7 +154,7 @@ _draw_workshop_screen() {
     
     # 6. Keyboard Hints
     move_to $((TERM_ROWS - 1)) 1
-    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Search  [o] Details  [c] Reset  [q] Back"
+    local footer_text=" [↑↓] Nav  [←→] Pag  [Enter] Inst  [f] Search  [ Space ] Details  [c] Reset  [q] Back"
     local pad_len=$((TERM_COLS - ${#footer_text}))
     [[ $pad_len -lt 0 ]] && pad_len=0
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
@@ -211,8 +211,8 @@ _draw_workshop_details_screen() {
                 local img_url="${_images_ref[$idx]}"
                 # Use OSC 8 Hyperlink with truncation for best TUI experience
                 # \033]8;;URL\033\\TEXT\033]8;;\033\\
-                local disp_url="${img_url#*://}"
-                local link_text="${disp_url:0:36}"
+                local img_url="${_images_ref[$idx]}"
+                local link_text="${img_url:0:36}"
                 printf "%s\033]8;;%s\033\\%-36s\033]8;;\033\\%s" "$style" "$img_url" "$link_text" "$RESET"
             fi
         done
@@ -276,7 +276,7 @@ _draw_workshop_details_screen() {
 
     # 5. Footer Actions
     move_to $((TERM_ROWS)) 1
-    local footer=" [Enter] Install  [b] Steam  [i] Image  [↑↓] Select Image  [←→] Turn Page  [Esc] Back "
+    local footer=" [Enter] Install  [b] Steam  [↑↓] Img  [←→] Page  [ Space ] Back "
     printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
 }
 
@@ -371,22 +371,13 @@ except Exception as e:
                 "[C") # Right - Page Down
                     scroll=$((scroll + view_height)); ;;
             esac
-        elif [[ "$k" == "q" || "$k" == "Q" ]]; then 
+        elif [[ "$k" == "q" || "$k" == "Q" || "$k" == " " ]]; then 
             set -eu; return
         elif [[ "$k" == "b" || "$k" == "B" ]]; then
             local url="https://steamcommunity.com/sharedfiles/filedetails/?id=${mid}"
             if command -v open &>/dev/null; then open "$url"
             elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
             else show_message "URL: $url" "Link"; fi
-        elif [[ "$k" == "i" || "$k" == "I" ]]; then
-            if [[ $img_sel -ge 0 ]]; then
-                local url="${mimages[$img_sel]}"
-                move_to $((TERM_ROWS)) 1
-                printf "%sOpening %s...%s" "$BG_GREEN$WHITE" "$url" "$RESET"
-                if command -v open &>/dev/null; then open "$url"
-                elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
-                fi
-            fi
         elif [[ "$k" == "" ]]; then
             set -eu; return 10 # Signal to install
         fi
@@ -530,7 +521,7 @@ except Exception as e:
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
             f_text="DayZ"; f_sort="relevance"; current_page=1; selection=0; f_changed=1
-        elif [[ "$key" == "o" || "$key" == "O" ]]; then
+        elif [[ "$key" == "o" || "$key" == "O" || "$key" == " " ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
                 _view_mod_details "$mid" "$instance_dir" "$mods_txt" "$rules_json"
