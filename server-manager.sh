@@ -13,7 +13,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # =============================================================================
 # Load Libraries
 # =============================================================================
-for lib in colors tui menu dialogs utils docker instance mods; do
+for lib in colors tui menu dialogs utils docker instance mods config; do
     source "${SCRIPT_DIR}/lib/${lib}.sh"
 done
 
@@ -520,6 +520,7 @@ main_menu() {
             "🔄 Restart Server"
             "--------------------"
             "⚒️  Mod Manager"
+            "📝 Config Editor"
             "🧹 Wipe Server Data"
             "--------------------"
             "🎮 RCON Console"
@@ -543,9 +544,10 @@ main_menu() {
             2) run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
             3) ;;
             4) mod_manager ;;
-            5) wipe_menu ;;
-            6) ;;
-            7)
+            5) config_editor_menu ;;
+            6) wipe_menu ;;
+            7) ;;
+            8)
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  set +e
                  "${SCRIPT_DIR}/rcon.sh" "$SELECTED_DIR"
@@ -557,12 +559,12 @@ main_menu() {
                      read -rsn1
                  fi
                  ;;
-            8)
+            9)
                 trap : INT
                 run_with_output "Live Logs (Ctrl+C to stop)" $DOCKER logs -f --tail=100 "$SELECTED_CONTAINER"
                 trap - INT
                 ;;
-            9)
+            10)
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running."
                 else
@@ -572,8 +574,8 @@ main_menu() {
                     printf "%s" "$HIDE_CURSOR"
                 fi
                 ;;
-            10) ;;
-            11)
+            11) ;;
+            12)
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
                 if [[ "$status" != "RUNNING" ]]; then
@@ -582,8 +584,8 @@ main_menu() {
                     run_with_output "Updating Server" $DOCKER exec "$SELECTED_CONTAINER" /dayz/run.sh update-server
                 fi
                 ;;
-            12) ;;
-            13) return ;;
+            13) ;;
+            14) return ;;
         esac
     done
 }
