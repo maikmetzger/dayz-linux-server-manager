@@ -36,7 +36,7 @@ get_rcon_details() {
     
     local rcon_pass
     # Extract RConPassword from config using simple grep/awk, removing comments if any
-    rcon_pass=$(grep -E '^\s*RConPassword' "${be_cfg}" | awk '{$1=""; print $0}' | xargs)
+    rcon_pass=$(grep "^RConPassword" "${be_cfg}" | awk '{print $2}' | tr -d '\r')
     [[ -n "${rcon_pass}" ]] || return 1
     
     echo "${rcon_port}"
@@ -80,13 +80,39 @@ run_rcon() {
         die "python3 not found inside container. Please rebuild container to include python3."
     fi
     
-    if [[ -n "${cmd}" ]]; then
-        $DOCKER exec "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}" --command "${cmd}"
-    else
-        # Interactive mode needs -it
-        $DOCKER exec -it "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}"
-    fi
-    
+    # Prepare executing command
+    while true; do
+        set +e
+        if [[ -n "${cmd}" ]]; then
+            $DOCKER exec "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}" --command "${cmd}"
+            local ret=$?
+        else
+            # Interactive mode needs -it
+            $DOCKER exec -it "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}"
+            local ret=$?
+        fi
+        set -e
+        
+        if [[ $ret -eq 0 ]]; then
+            break
+        fi
+        
+        # If command mode and failed, maybe just exit? Or offer retry?
+        # User asked for TUI dialogue box to retry.
+        
+        msg="Connection failed (Code $ret)."
+        if [[ $ret -eq 110 ]] || [[ $ret -eq 1 ]]; then
+             msg="Connection Timed Out."
+        fi
+        
+        # User requested TUI dialog
+        if confirm "${msg} Retry?" "y"; then
+            continue
+        else
+            break
+        fi
+    done
+
     # Clean up (optional, but good practice if we run often)
     $DOCKER exec "${container_name}" rm -f /tmp/rcon_client.py
 }
