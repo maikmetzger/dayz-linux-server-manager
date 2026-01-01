@@ -14,6 +14,7 @@ _DAYZ_MOD_CONFIG_LOADED=1
 # lib/mod_config.sh
 MOD_CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${MOD_CONFIG_LIB_DIR}/utils.sh"
+source "${MOD_CONFIG_LIB_DIR}/colors.sh"
 source "${MOD_CONFIG_LIB_DIR}/file_browser.sh"
 source "${MOD_CONFIG_LIB_DIR}/dialogs.sh"
 source "${MOD_CONFIG_LIB_DIR}/tui.sh"
