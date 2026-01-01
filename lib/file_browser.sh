@@ -178,16 +178,34 @@ fb_browse_dir() {
             name_w=$((${TERM_COLS:-80} - 45))
             [[ $name_w -lt 20 ]] && name_w=20
             fb_log "Mode folders. name_w=$name_w"
+            
+            fb_log "Print color"
             printf "%s" "$BOLD$CYAN"
-            printf "%-*s %-10s %-19s" "$name_w" "Folder Name" "Files" "Last Modified"
+            fb_log "Print folder name header"
+            printf "%-${name_w}s" "Folder Name"
+            fb_log "Print files header"
+            printf " %-10s" "Files"
+            fb_log "Print modified header"
+            printf " %-19s" "Last Modified"
+            fb_log "Print reset"
             printf "%s" "$RESET"
             fb_log "Folder headers printed"
         else
             name_w=$((${TERM_COLS:-80} - 65))
             [[ $name_w -lt 20 ]] && name_w=20
             fb_log "Mode all. name_w=$name_w"
+            
+            fb_log "Print color"
             printf "%s" "$BOLD$CYAN"
-            printf "%-*s %-8s %-19s %-19s" "$name_w" "File Name" "Size" "Created" "Modified"
+            fb_log "Print file name header"
+            printf "%-${name_w}s" "File Name"
+            fb_log "Print size header"
+            printf " %-8s" "Size"
+            fb_log "Print created header"
+            printf " %-19s" "Created"
+            fb_log "Print modified header"
+            printf " %-19s" "Modified"
+            fb_log "Print reset"
             printf "%s" "$RESET"
             fb_log "File headers printed"
         fi
@@ -196,6 +214,8 @@ fb_browse_dir() {
         local row=4
         local term_r=${TERM_ROWS:-24}
         local max_rows=$((term_r - 6))
+        [[ $max_rows -lt 1 ]] && max_rows=1
+        
         local start_row=0
         if [[ $selected -ge $max_rows ]]; then
             start_row=$((selected - max_rows + 1))
@@ -210,15 +230,18 @@ fb_browse_dir() {
             
             if [[ "$name" == ".." ]]; then
                 if [[ $i -eq $selected ]]; then
-                    printf "%s%s▶ 📁 %-*s %*s%s" "$BG_RED" "$WHITE$BOLD" "$((name_w-3))" ".." "$((TERM_COLS - name_w - 5))" "" "$RESET"
+                    fb_log "Drawing selected .."
+                    printf "%s%s▶ 📁 " "$BG_RED" "$WHITE$BOLD"
+                    printf "%-${name_w}s" ".."
+                    printf "%s" "$RESET"
                 else
-                    printf "  📁 %-*s" "$((name_w-3))" ".."
+                    fb_log "Drawing unselected .."
+                    printf "  📁 %-${name_w}s" ".."
                 fi
             elif [[ -d "$path" ]]; then
                 # Folder Row - Get latest modification in folder
                 local mod_time="-"
                 fb_log "Statting folder: $path"
-                # Portable way to get latest modified file's time
                 if [[ "$OSTYPE" == "darwin"* ]]; then
                     mod_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$path" 2>/dev/null || echo "-")
                 else
@@ -230,17 +253,20 @@ fb_browse_dir() {
                 fb_log "Folder file_count: $file_count"
                 
                 if [[ $i -eq $selected ]]; then
-                    printf "%s%s▶ 📁 %-*s %-10s %-19s%s" "$BG_RED" "$WHITE$BOLD" "$((name_w-3))" "${name:0:$((name_w-4))}" "$file_count" "$mod_time" "$RESET"
+                    printf "%s%s▶ 📁 " "$BG_RED" "$WHITE$BOLD"
+                    printf "%-${name_w}s" "${name:0:$((name_w-4))}"
+                    printf " %-10s %-19s" "$file_count" "$mod_time"
+                    printf "%s" "$RESET"
                 else
-                    printf "  📁 %-*s %-10s %-19s" "$((name_w-3))" "${name:0:$((name_w-4))}" "$file_count" "$mod_time"
+                    printf "  📁 %-${name_w}s %-10s %-19s" "${name:0:$((name_w-4))}" "$file_count" "$mod_time"
                 fi
             else
                 # File Row
                 fb_log "Statting file: $path"
                 local icon=$(fb_get_icon "$path")
                 local size_raw=$(stat -c%s "$path" 2>/dev/null || echo "0")
-                local mtime=$(stat -c%y "$path" 2>/dev/null | cut -d'.' -f1)
-                local btime=$(stat -c%w "$path" 2>/dev/null | cut -d'.' -f1)
+                local mtime=$(stat -c%y "$path" 2>/dev/null | cut -d'.' -f1 || echo "-")
+                local btime=$(stat -c%w "$path" 2>/dev/null | cut -d'.' -f1 || echo "-")
                 [[ "$btime" == "-" ]] && btime="-"
                 fb_log "File stats: size=$size_raw, mtime=$mtime"
                 
@@ -256,12 +282,16 @@ fb_browse_dir() {
                 
                 if [[ $i -eq $selected ]]; then
                     [[ "$name" == *.bak ]] && icon="🔄"
-                    printf "%s%s▶ %s %-*s %-8s %-19s %-19s%s" "$BG_RED" "$WHITE$BOLD" "$icon" "$((name_w-3))" "${name:0:$((name_w-4))}" "$size_str" "$btime" "$mtime" "$RESET"
+                    printf "%s%s▶ %s " "$BG_RED" "$WHITE$BOLD" "$icon"
+                    printf "%-${name_w}s" "${name:0:$((name_w-4))}"
+                    printf " %-8s %-19s %-19s" "$size_str" "$btime" "$mtime"
+                    printf "%s" "$RESET"
                 else
-                    printf "  %s %-*s %-8s %-19s %-19s" "$icon" "$((name_w-3))" "${name:0:$((name_w-4))}" "$size_str" "$btime" "$mtime"
+                    printf "  %s %-${name_w}s %-8s %-19s %-19s" "$icon" "${name:0:$((name_w-4))}" "$size_str" "$btime" "$mtime"
                 fi
             fi
             ((row++))
+            fb_log "Item $i drawn"
         done
 
         # Footer
