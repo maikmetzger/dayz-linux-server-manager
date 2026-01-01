@@ -346,13 +346,19 @@ except: pass
     while true; do
         # 1. Scan everything (calls the Python implementation)
         local ce_result
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null | tail -n 1 || echo "[]")
+        # Capture error to log
+        echo "DEBUG: inst_dir=$inst_dir SCRIPT_DIR=$SCRIPT_DIR" >> "${SCRIPT_DIR}/loot_manager_debug.log"
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>> "${SCRIPT_DIR}/loot_manager_debug.log" | tail -n 1)
         
+        if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
+        echo "DEBUG: Result raw: $ce_result" >> "${SCRIPT_DIR}/loot_manager_debug.log"
+
         # 2. Parse result into arrays
         local -a src_paths smod_names sfile_names sce_types states
         parse_scan_result "$ce_result"
         
         local count=${#src_paths[@]}
+        echo "DEBUG: Count=$count" >> "${SCRIPT_DIR}/loot_manager_debug.log"
         if [[ $count -eq 0 ]]; then
             show_message "No mod CE definitions detected." "Info"
             # Fallback to manual browse if empty
