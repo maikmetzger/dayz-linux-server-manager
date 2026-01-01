@@ -150,8 +150,8 @@ main_menu() {
             printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
             run_rcon "${chosen}"
             
-            printf "\n%s%sConnection closed. Press Enter...%s" "$DIM" "$BOLD" "$RESET"
-            read -rsn1
+            # printf "\n%s%sConnection closed. Press Enter...%s" "$DIM" "$BOLD" "$RESET"
+            # read -rsn1
         else
             exit 0
         fi
