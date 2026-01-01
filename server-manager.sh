@@ -44,13 +44,22 @@ select_instance() {
             for i in "${!INSTANCE_NAMES[@]}"; do
                 local name="${INSTANCE_NAMES[$i]}"
                 local container="${INSTANCE_CONTAINERS[$i]}"
+                local instance_dir="${INSTANCE_DIRS[$i]}"
                 local status
                 status="$(get_container_status "$container")"
                 
                 local status_icon="${RED}○${RESET}"
                 [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
                 
-                items+=("${status_icon}|${name} [${status}]")
+                # Get update summary if cache exists
+                local update_summary=""
+                update_summary=$(get_update_summary "$instance_dir" 2>/dev/null || true)
+                
+                if [[ -n "$update_summary" ]]; then
+                    items+=("${status_icon}|${name} [${status}] ${YELLOW}${update_summary}${RESET}")
+                else
+                    items+=("${status_icon}|${name} [${status}]")
+                fi
             done
             items+=("--------------------")
         else
@@ -181,7 +190,8 @@ mod_manager() {
         # Table header
         local table_start=3
         local col_status=2
-        local col_name=10
+        local col_version=10
+        local col_name=26
         local col_id=$((TERM_COLS - 25))
         local col_type=$((TERM_COLS - 10))
         
@@ -192,6 +202,8 @@ mod_manager() {
         
         move_to $((table_start + 1)) $col_status
         printf "%s%sSTATUS%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_version
+        printf "%s%sVERSION%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_name
         printf "%s%sMOD NAME%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_id
@@ -230,11 +242,21 @@ mod_manager() {
                 status_icon="⚠️"
             fi
             
+            # Get version info for this mod
+            local version_display
+            version_display=$(get_mod_version_info "$SELECTED_DIR" "$mid" 2>/dev/null || echo "-")
+            local version_color="$WHITE"
+            if get_mod_update_status "$SELECTED_DIR" "$mid" 2>/dev/null; then
+                version_color="$YELLOW"
+            fi
+            
             move_to $row 1
             if [[ $i -eq $selected ]]; then
                 printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
+                move_to $row $col_version
+                printf "%-14s" "${version_display:0:14}"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
@@ -249,6 +271,8 @@ mod_manager() {
                 else
                     printf "  %s%s%s" "$GREEN" "$status_icon" "$RESET"
                 fi
+                move_to $row $col_version
+                printf "%s%-14s%s" "$version_color" "${version_display:0:14}" "$RESET"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
@@ -416,6 +440,9 @@ mod_manager() {
                         show_message "Container must be running to sync"
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                        # Refresh update cache after sync
+                        show_message "Refreshing update cache..." "Sync"
+                        check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
                     # FixMods
@@ -444,6 +471,22 @@ mod_manager() {
                     show_message "Container must be running to sync"
                 else
                     run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                    
+                    # Refresh update cache after sync
+                    show_message "Refreshing update cache..." "Sync"
+                    check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
+                    
+                    # Scan for CE files (Phase 3-4)
+                    local ce_result
+                    ce_result=$(scan_mods_for_ce_files "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null || echo "[]")
+                    
+                    # Count new CE files
+                    local new_ce_count
+                    new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status')=='new'))" 2>/dev/null || echo "0")
+                    
+                    if [[ "$new_ce_count" -gt 0 ]]; then
+                        show_message "Found ${new_ce_count} new CE file(s) from mods. Use Modular Loot Manager to link them." "CE Detection"
+                    fi
                 fi
                 ;;
             'f'|'F')
@@ -611,12 +654,27 @@ main_menu() {
         local status_text="${WHITE}● STOPPED]${RESET}"
         [[ "$status" == "RUNNING" ]] && status_text="${GREEN}● RUNNING${WHITE}]${RESET}"
         
+        # Get update summary for header
+        local update_summary=""
+        update_summary=$(get_update_summary "$SELECTED_DIR" 2>/dev/null || true)
+        local header_suffix=""
+        if [[ -n "$update_summary" ]]; then
+            header_suffix=" ${YELLOW}${update_summary}${RESET}"
+        fi
+        
+        # Determine menu item labels (highlight if updates available)
+        local mod_label="⚒️|Mod Manager"
+        local update_label="⬆️|Update Server"
+        if [[ -n "$update_summary" ]]; then
+            mod_label="⚒️|Mod Manager ${YELLOW}${update_summary}${RESET}"
+        fi
+        
         local -a items=(
             "▶️|Start Server"
             "⏹️|Stop Server"
             "🔄|Restart Server"
             "--------------------"
-            "⚒️|Mod Manager"
+            "$mod_label"
             "📝|Config Editor"
             "🧹|Wipe Server Data"
             "--------------------"
@@ -624,12 +682,12 @@ main_menu() {
             "📜|View Logs"
             "💻|Enter Shell"
             "--------------------"
-            "⬆️|Update Server"
+            "$update_label"
             "--------------------"
             "←|Switch Instance"
         )
         
-        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text" $selection; then
+        if ! run_menu items "DayZ: $SELECTED_NAME [$status_text${header_suffix}" $selection; then
             return
         fi
         

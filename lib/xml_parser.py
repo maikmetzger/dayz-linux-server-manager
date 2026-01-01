@@ -235,6 +235,199 @@ def update(xml_path, item_name, key, value):
         print(f"Error writing XML: {e}", file=sys.stderr)
         sys.exit(1)
 
+
+# =============================================================================
+# CE File Diff and Merge Functions (Phase 3)
+# =============================================================================
+
+def _get_items_from_ce_file(xml_path: str) -> Dict[str, ET.Element]:
+    """
+    Extract all items from a CE XML file into a dict keyed by name.
+    
+    Works for types, spawnabletypes, events (uses 'name' attribute).
+    Returns empty dict if file doesn't exist or is invalid.
+    """
+    items = {}
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        
+        # Most CE files use children with 'name' attribute
+        for child in root:
+            name = child.get('name')
+            if name:
+                items[name] = child
+    except Exception:
+        pass
+    return items
+
+
+def _element_to_string(elem: ET.Element) -> str:
+    """Convert element to canonical string for comparison."""
+    return ET.tostring(elem, encoding='unicode', method='xml')
+
+
+def diff_ce_files(source_path: str, local_path: str) -> Dict[str, Any]:
+    """
+    Compare two CE XML files at the item level.
+    
+    Args:
+        source_path: Path to workshop/upstream version
+        local_path: Path to user's CustomCE version
+        
+    Returns:
+        Dict with keys:
+            - added: list of item names in source but not local
+            - removed: list of item names in local but not source
+            - modified: list of item names with different content
+            - unchanged: count of identical items
+            - source_count: total items in source
+            - local_count: total items in local
+    """
+    source_items = _get_items_from_ce_file(source_path)
+    local_items = _get_items_from_ce_file(local_path)
+    
+    added = []
+    removed = []
+    modified = []
+    unchanged = 0
+    
+    # Items in source
+    for name, source_elem in source_items.items():
+        if name not in local_items:
+            added.append(name)
+        else:
+            # Compare content
+            source_str = _element_to_string(source_elem)
+            local_str = _element_to_string(local_items[name])
+            if source_str != local_str:
+                modified.append(name)
+            else:
+                unchanged += 1
+    
+    # Items in local but not source
+    for name in local_items:
+        if name not in source_items:
+            removed.append(name)
+    
+    return {
+        "added": sorted(added),
+        "removed": sorted(removed),
+        "modified": sorted(modified),
+        "unchanged": unchanged,
+        "source_count": len(source_items),
+        "local_count": len(local_items)
+    }
+
+
+def count_ce_items(xml_path: str) -> Dict[str, Any]:
+    """
+    Count items in a CE XML file.
+    
+    Returns:
+        Dict with 'count', 'ce_type', 'valid' keys
+    """
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        
+        ce_info = CE_TYPE_REGISTRY.get(root.tag, {})
+        count = sum(1 for child in root if child.get('name'))
+        
+        return {
+            "count": count,
+            "ce_type": ce_info.get('ce_type', 'unknown'),
+            "valid": True
+        }
+    except Exception as e:
+        return {
+            "count": 0,
+            "ce_type": "unknown",
+            "valid": False,
+            "error": str(e)
+        }
+
+
+def merge_ce_files(source_path: str, local_path: str, original_path: str = None) -> Dict[str, Any]:
+    """
+    Merge CE file updates while preserving user edits.
+    
+    Strategy:
+    - Add items from source that don't exist in local (new from mod update)
+    - Keep modified items as-is in local (user's edits preserved)
+    - Flag items in local but not in source for review:
+      - If original_path provided and item was in original: mod author removed it
+      - If item wasn't in original: user added it manually, keep it
+    
+    Args:
+        source_path: Path to new workshop version
+        local_path: Path to user's working copy
+        original_path: Optional path to snapshot from original link time
+        
+    Returns:
+        Dict with merge result:
+            - added: items added from source
+            - flagged_for_removal: items possibly removed by mod author
+            - user_custom: items user added (kept)
+            - preserved: items with user modifications (kept)
+            - success: bool
+    """
+    try:
+        source_items = _get_items_from_ce_file(source_path)
+        local_items = _get_items_from_ce_file(local_path)
+        original_items = _get_items_from_ce_file(original_path) if original_path else {}
+        
+        # Parse local file for modification
+        local_tree = ET.parse(local_path)
+        local_root = local_tree.getroot()
+        
+        result = {
+            "added": [],
+            "flagged_for_removal": [],
+            "user_custom": [],
+            "preserved": [],
+            "success": True
+        }
+        
+        # Add new items from source
+        for name, source_elem in source_items.items():
+            if name not in local_items:
+                # Deep copy the element
+                new_elem = ET.fromstring(ET.tostring(source_elem))
+                local_root.append(new_elem)
+                result["added"].append(name)
+        
+        # Check for removed items
+        for name in local_items:
+            if name not in source_items:
+                if name in original_items:
+                    # Was in original, now gone from source = mod author removed it
+                    result["flagged_for_removal"].append(name)
+                else:
+                    # Not in original = user added it
+                    result["user_custom"].append(name)
+        
+        # Track preserved modifications
+        for name in local_items:
+            if name in source_items:
+                source_str = _element_to_string(source_items[name])
+                local_str = _element_to_string(local_items[name])
+                if source_str != local_str:
+                    result["preserved"].append(name)
+        
+        # Write merged file
+        if sys.version_info >= (3, 9):
+            ET.indent(local_tree, space="    ", level=0)
+        local_tree.write(local_path, encoding='utf-8', xml_declaration=True)
+        
+        return result
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DayZ types.xml Parser Backend')
     subparsers = parser.add_subparsers(dest='command')
@@ -273,6 +466,24 @@ if __name__ == "__main__":
     p_upd.add_argument('--key', required=True, help='Element tag to update')
     p_upd.add_argument('--val', required=True, help='New value')
     
+    # Diff CE Files (Phase 3)
+    p_diff = subparsers.add_parser('diff-ce',
+        help='Compare two CE XML files at item level')
+    p_diff.add_argument('source', help='Path to source/upstream file')
+    p_diff.add_argument('local', help='Path to local/user file')
+    
+    # Count Items (Phase 3)
+    p_count = subparsers.add_parser('count-items',
+        help='Count items in a CE XML file')
+    p_count.add_argument('file', help='Path to CE XML file')
+    
+    # Merge CE Files (Phase 4)
+    p_merge = subparsers.add_parser('merge-ce',
+        help='Merge CE file updates while preserving user edits')
+    p_merge.add_argument('source', help='Path to new workshop version')
+    p_merge.add_argument('local', help='Path to user working copy')
+    p_merge.add_argument('--original', help='Path to original snapshot from link time')
+    
     args = parser.parse_args()
     
     if args.command == 'metadata':
@@ -299,5 +510,15 @@ if __name__ == "__main__":
         query(args.file, args.name, args.cat, args.usage, args.tier, args.vanilla)
     elif args.command == 'update':
         update(args.file, args.item, args.key, args.val)
+    elif args.command == 'diff-ce':
+        result = diff_ce_files(args.source, args.local)
+        print(json.dumps(result))
+    elif args.command == 'count-items':
+        result = count_ce_items(args.file)
+        print(json.dumps(result))
+    elif args.command == 'merge-ce':
+        result = merge_ce_files(args.source, args.local, args.original)
+        print(json.dumps(result))
     else:
         parser.print_help()
+

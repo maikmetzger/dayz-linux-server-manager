@@ -3,9 +3,346 @@
 # DayZ Workshop Browser - TUI Library
 # =============================================================================
 # Provides high-fidelity Steam Workshop discovery and mod installation.
+# Also provides version tracking for mod update detection.
 # =============================================================================
 
-# Fetch workshop items via Python backend
+# =============================================================================
+# Version Tracking Infrastructure (Phase 1)
+# =============================================================================
+# These functions store and retrieve mod version information to detect updates.
+# Version is stored as Steam's `time_updated` timestamp from the API.
+# =============================================================================
+
+# Cache settings
+VERSION_CACHE_TTL_SECONDS=120  # 2 minutes minimum between API checks
+
+# store_mod_version - Save the timestamp of a mod version after sync
+#
+# Usage: store_mod_version "$mod_id" "$time_updated" "$workshop_dir"
+#
+# Args:
+#   mod_id       - Steam Workshop ID
+#   time_updated - Unix timestamp from Steam API (time_updated field)
+#   workshop_dir - Base workshop directory (e.g., /dayz/serverfiles/steamapps/workshop/content/221100)
+#
+# Creates: ${workshop_dir}/${mod_id}/.installed_version
+store_mod_version() {
+    local mod_id="$1"
+    local time_updated="$2"
+    local workshop_dir="$3"
+    
+    local version_file="${workshop_dir}/${mod_id}/.installed_version"
+    
+    if [[ -d "${workshop_dir}/${mod_id}" ]]; then
+        echo "$time_updated" > "$version_file"
+    fi
+}
+
+# get_mod_local_version - Retrieve the stored version timestamp for a mod
+#
+# Usage: local_version=$(get_mod_local_version "$mod_id" "$workshop_dir")
+#
+# Returns: Unix timestamp of installed version, or "0" if not found
+get_mod_local_version() {
+    local mod_id="$1"
+    local workshop_dir="$2"
+    
+    local version_file="${workshop_dir}/${mod_id}/.installed_version"
+    
+    if [[ -f "$version_file" ]]; then
+        cat "$version_file"
+    else
+        echo "0"
+    fi
+}
+
+# format_timestamp_as_date - Convert Unix timestamp to human-readable date
+#
+# Usage: date_str=$(format_timestamp_as_date "$timestamp")
+#
+# Returns: Date string like "Jan 01" or "Dec 15"
+format_timestamp_as_date() {
+    local timestamp="$1"
+    
+    if [[ "$timestamp" == "0" || -z "$timestamp" ]]; then
+        echo "-"
+        return
+    fi
+    
+    # Use date command to format (portable across Linux/macOS)
+    if date --version &>/dev/null 2>&1; then
+        # GNU date (Linux)
+        date -d "@$timestamp" "+%b %d" 2>/dev/null || echo "-"
+    else
+        # BSD date (macOS)
+        date -r "$timestamp" "+%b %d" 2>/dev/null || echo "-"
+    fi
+}
+
+# get_dayz_server_build - Get the installed DayZ server build ID
+#
+# Usage: build=$(get_dayz_server_build "$serverfiles_dir")
+#
+# Returns: Build ID string or "0" if not found
+get_dayz_server_build() {
+    local serverfiles_dir="$1"
+    local manifest="${serverfiles_dir}/steamapps/appmanifest_223350.acf"
+    
+    if [[ -f "$manifest" ]]; then
+        grep -oP 'buildid"\s+"\K[0-9]+' "$manifest" 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+# check_mod_has_update - Compare local version to remote version
+#
+# Usage: has_update=$(check_mod_has_update "$local_timestamp" "$remote_timestamp")
+#
+# Returns: "true" if update available, "false" otherwise
+check_mod_has_update() {
+    local local_timestamp="$1"
+    local remote_timestamp="$2"
+    
+    if [[ "$remote_timestamp" -gt "$local_timestamp" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# format_version_display - Format version for UI display
+#
+# Usage: display=$(format_version_display "$local_ts" "$remote_ts" "$has_update")
+#
+# Returns: "Jan 01" if up to date, "Dec 15 → Jan 01" if update available
+format_version_display() {
+    local local_timestamp="$1"
+    local remote_timestamp="$2"
+    local has_update="$3"
+    
+    local local_date
+    local_date=$(format_timestamp_as_date "$local_timestamp")
+    
+    if [[ "$has_update" == "true" ]]; then
+        local remote_date
+        remote_date=$(format_timestamp_as_date "$remote_timestamp")
+        echo "${local_date} → ${remote_date}"
+    else
+        echo "$local_date"
+    fi
+}
+
+# =============================================================================
+# Update Check Functions (Phase 1 - Caching Infrastructure)
+# =============================================================================
+
+# get_update_cache_file - Get path to update cache file for an instance
+#
+# Usage: cache_file=$(get_update_cache_file "$instance_dir")
+get_update_cache_file() {
+    local instance_dir="$1"
+    echo "${instance_dir}/data/state/update_cache.json"
+}
+
+# is_update_cache_stale - Check if cache needs refresh
+#
+# Usage: if is_update_cache_stale "$cache_file"; then refresh; fi
+#
+# Returns: 0 (true) if stale, 1 (false) if fresh
+is_update_cache_stale() {
+    local cache_file="$1"
+    
+    if [[ ! -f "$cache_file" ]]; then
+        return 0  # No cache = stale
+    fi
+    
+    local last_checked
+    last_checked=$(python3 -c "import json; print(json.load(open('$cache_file')).get('last_checked', 0))" 2>/dev/null || echo "0")
+    
+    local now
+    now=$(date +%s)
+    local age=$((now - last_checked))
+    
+    if [[ $age -gt $VERSION_CACHE_TTL_SECONDS ]]; then
+        return 0  # Stale
+    else
+        return 1  # Fresh
+    fi
+}
+
+# check_all_mod_updates - Check for updates on all mods in an instance
+#
+# Usage: check_all_mod_updates "$instance_dir" "$workshop_dir" "$mods_file" "$servermods_file"
+#
+# Writes result to cache file and outputs JSON to stdout
+check_all_mod_updates() {
+    local instance_dir="$1"
+    local workshop_dir="$2"
+    local mods_file="$3"
+    local servermods_file="$4"
+    
+    local cache_file
+    cache_file=$(get_update_cache_file "$instance_dir")
+    
+    # Ensure state directory exists
+    mkdir -p "$(dirname "$cache_file")"
+    
+    # Build JSON of {mod_id: local_version}
+    local -A local_versions=()
+    
+    # Get all mod IDs
+    local all_ids
+    all_ids=$(get_all_mod_ids "$mods_file" "$servermods_file" 2>/dev/null || true)
+    
+    if [[ -z "$all_ids" ]]; then
+        echo '{"mods": {}, "update_count": 0, "checked_at": '"$(date +%s)"'}'
+        return
+    fi
+    
+    # Build local versions map
+    local versions_json="{"
+    local first=1
+    while IFS= read -r mod_id; do
+        [[ -z "$mod_id" ]] && continue
+        local local_ver
+        local_ver=$(get_mod_local_version "$mod_id" "$workshop_dir")
+        if [[ $first -eq 1 ]]; then
+            first=0
+        else
+            versions_json+=","
+        fi
+        versions_json+="\"$mod_id\":$local_ver"
+    done <<< "$all_ids"
+    versions_json+="}"
+    
+    # Call Python backend
+    local result
+    result=$(python3 "${SCRIPT_DIR}/lib/workshop_search.py" --check-updates "$versions_json" 2>/dev/null)
+    
+    if [[ -n "$result" && "$result" != "null" ]]; then
+        echo "$result" > "$cache_file"
+        echo "$result"
+    else
+        # Return cached if API fails
+        if [[ -f "$cache_file" ]]; then
+            cat "$cache_file"
+        else
+            echo '{"mods": {}, "update_count": 0, "checked_at": 0, "error": "API failed"}'
+        fi
+    fi
+}
+
+# get_cached_update_info - Get update info from cache without API call
+#
+# Usage: info=$(get_cached_update_info "$instance_dir")
+get_cached_update_info() {
+    local instance_dir="$1"
+    local cache_file
+    cache_file=$(get_update_cache_file "$instance_dir")
+    
+    if [[ -f "$cache_file" ]]; then
+        cat "$cache_file"
+    else
+        echo '{"mods": {}, "update_count": 0, "checked_at": 0}'
+    fi
+}
+
+# get_update_summary - Get human-readable update summary for UI
+#
+# Usage: summary=$(get_update_summary "$instance_dir")
+#
+# Returns: "(3 mod updates)" or "" if no updates
+get_update_summary() {
+    local instance_dir="$1"
+    local cache_file
+    cache_file=$(get_update_cache_file "$instance_dir")
+    
+    if [[ ! -f "$cache_file" ]]; then
+        echo ""
+        return
+    fi
+    
+    local update_count
+    update_count=$(python3 -c "import json; print(json.load(open('$cache_file')).get('update_count', 0))" 2>/dev/null || echo "0")
+    
+    if [[ "$update_count" -gt 0 ]]; then
+        echo "(${update_count} mod update$([ "$update_count" -gt 1 ] && echo "s"))"
+    else
+        echo ""
+    fi
+}
+
+# get_mod_update_status - Check if a specific mod has update available
+#
+# Usage: if get_mod_update_status "$instance_dir" "$mod_id"; then echo "update!"; fi
+#
+# Returns: 0 if update available, 1 if not
+get_mod_update_status() {
+    local instance_dir="$1"
+    local mod_id="$2"
+    local cache_file
+    cache_file=$(get_update_cache_file "$instance_dir")
+    
+    if [[ ! -f "$cache_file" ]]; then
+        return 1
+    fi
+    
+    local has_update
+    has_update=$(python3 -c "
+import json
+try:
+    data = json.load(open('$cache_file'))
+    mod = data.get('mods', {}).get('$mod_id', {})
+    print('true' if mod.get('has_update', False) else 'false')
+except: print('false')
+" 2>/dev/null)
+    
+    [[ "$has_update" == "true" ]]
+}
+
+# get_mod_version_info - Get version display info for a specific mod
+#
+# Usage: version_display=$(get_mod_version_info "$instance_dir" "$mod_id")
+#
+# Returns: "Jan 01" or "Dec 15 → Jan 01" if update available
+get_mod_version_info() {
+    local instance_dir="$1"
+    local mod_id="$2"
+    local cache_file
+    cache_file=$(get_update_cache_file "$instance_dir")
+    
+    if [[ ! -f "$cache_file" ]]; then
+        echo "-"
+        return
+    fi
+    
+    python3 -c "
+import json
+import datetime
+try:
+    data = json.load(open('$cache_file'))
+    mod = data.get('mods', {}).get('$mod_id', {})
+    installed = mod.get('installed', 0)
+    latest = mod.get('latest', 0)
+    has_update = mod.get('has_update', False)
+    
+    def fmt(ts):
+        if ts == 0: return '-'
+        return datetime.datetime.fromtimestamp(ts).strftime('%b %d')
+    
+    if has_update:
+        print(f'{fmt(installed)} → {fmt(latest)}')
+    else:
+        print(fmt(installed) if installed > 0 else fmt(latest))
+except: print('-')
+" 2>/dev/null || echo "-"
+}
+
+# =============================================================================
+# Fetch Workshop Items
+# =============================================================================
+
 _fetch_workshop_items() {
     local text="$1" sort="$2" num="$3" page="$4" mode="${5:-title}" clear_flag="${6:-}"
     # Use python backend

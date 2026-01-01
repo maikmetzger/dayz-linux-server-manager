@@ -182,7 +182,63 @@ def scrape_dependencies(mod_id):
         
         return reqs, author, ratings_count
     except Exception: return [], "Unknown", 0
-    except Exception: return [], "Unknown"
+
+
+def check_mod_updates(mod_ids: list, local_versions: dict) -> dict:
+    """
+    Check for updates by comparing local versions to Steam API time_updated.
+    
+    Args:
+        mod_ids: List of mod IDs to check
+        local_versions: Dict mapping mod_id -> installed timestamp
+        
+    Returns:
+        Dict with structure:
+        {
+            "mods": {
+                "1234567": {
+                    "installed": 1735603200,
+                    "latest": 1735689600,
+                    "has_update": true,
+                    "name": "Mod Name"
+                }
+            },
+            "update_count": 3,
+            "checked_at": 1735761600
+        }
+    """
+    if not mod_ids:
+        return {"mods": {}, "update_count": 0, "checked_at": int(time.time())}
+    
+    # Fetch details from Steam API (uses existing function which caches)
+    details = get_mod_details(mod_ids)
+    
+    result = {
+        "mods": {},
+        "update_count": 0,
+        "checked_at": int(time.time())
+    }
+    
+    for mod in details:
+        mod_id = mod.get('id')
+        if not mod_id:
+            continue
+            
+        remote_updated = mod.get('updated', 0)
+        local_updated = int(local_versions.get(mod_id, 0))
+        has_update = remote_updated > local_updated and local_updated > 0
+        
+        result["mods"][mod_id] = {
+            "installed": local_updated,
+            "latest": remote_updated,
+            "has_update": has_update,
+            "name": mod.get('name', f"Mod {mod_id}")
+        }
+        
+        if has_update:
+            result["update_count"] += 1
+    
+    return result
 
 def parse_bbcode(text):
     if not text: return "", []
@@ -350,17 +406,30 @@ if __name__ == "__main__":
     parser.add_argument('--details', help='Comma-separated Mod IDs for direct details')
     parser.add_argument('--recursive', action='store_true', help='Resolve dependencies recursively')
     parser.add_argument('--update-rules', help='Path to workshop_rules.json to update')
-    parser.add_argument("--clear", "--clear-cache", action="store_true", help="Clear cache before searching")
+    parser.add_argument('--clear', '--clear-cache', action='store_true', help='Clear cache before searching')
+    parser.add_argument('--check-updates', help='JSON string of {mod_id: local_timestamp} to check for updates')
     args = parser.parse_args()
 
     if args.clear and os.path.exists(CACHE_FILE):
         try: os.remove(CACHE_FILE)
         except: pass
     
-    if args.details:
+    if args.check_updates:
+        # Parse input: expects JSON like {"1234567": 1735603200, "9876543": 1735500000}
+        try:
+            local_versions = json.loads(args.check_updates)
+            mod_ids = list(local_versions.keys())
+            result = check_mod_updates(mod_ids, local_versions)
+            print(json.dumps(result))
+        except json.JSONDecodeError as e:
+            print(json.dumps({"error": f"Invalid JSON: {e}"}), file=sys.stderr)
+            sys.exit(1)
+    elif args.details:
         ids = args.details.split(',')
         print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
     elif args.search:
         ids = search_workshop(args.search, args.sort, args.num, args.page, args.mode)
         print(json.dumps(get_mod_details(ids, args.recursive, args.update_rules)))
-    else: parser.print_help()
+    else:
+        parser.print_help()
+
