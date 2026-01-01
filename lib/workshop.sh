@@ -266,6 +266,8 @@ _draw_workshop_details_screen() {
 _view_mod_details() {
     local mid="$1" instance_dir="$2" mods_txt="$3" rules_json="$4"
     
+    echo "Step 1: Start Details" > /tmp/debug_workshop.log
+    
     # Run ENTIRE fetch/parse block in permissive mode
     set +e
     
@@ -273,8 +275,10 @@ _view_mod_details() {
     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
     printf "%s%s Fetching Full Details... %s" "$BG_BLUE" "$WHITE$BOLD" "$RESET"
     
+    echo "Step 2: Calling Python Fetch" >> /tmp/debug_workshop.log
     local json_str
     json_str=$(python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid")
+    echo "Step 3: Python Fetch Done. Length: ${#json_str}" >> /tmp/debug_workshop.log
     
     # Parse Python output
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0"
@@ -289,15 +293,11 @@ try:
         x = data[0]
         ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
         
-        # Sanitize helpers - Force ASCII to prevent TUI misalignment/crashes
         def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
         
-        # Use description_clean if available, else standard clean
         desc = x.get('description_clean', x.get('description', ''))
-        # Strip newlines for single-line Bash variable
         desc = desc.replace('\n', ' ').replace('\r', ' ')
         
-        # Use shlex for specific shell escaping, also clean high unicode
         print(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}')
         print(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}')
         print(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}')
@@ -306,17 +306,20 @@ try:
         print(f'mdesc={shlex.quote(clean(desc))}')
         print(f'mdeps={len(x.get(\"dependencies\",[]))}')
         
-        # Images array logic
         imgs = x.get('images', [])
-        # Construct bash array safely
         img_str = ' '.join([shlex.quote(i) for i in imgs])
         print(f'mimages=({img_str})')
-except Exception:
+except Exception as e:
+    print(f'# Error: {e}')
     print('mname=\"Error Parsing Data\"')
     print('mauthor=\"Unknown\"')
     print('mdesc=\"Failed to load mod details.\"')
 ")
+    echo "Step 4: Parse Out Generated. Length: ${#parse_out}" >> /tmp/debug_workshop.log
+    echo "Content: $parse_out" >> /tmp/debug_workshop.log
+    
     eval "$parse_out"
+    echo "Step 5: Eval Done" >> /tmp/debug_workshop.log
     set -e
     
     local scroll=0
@@ -324,8 +327,11 @@ except Exception:
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
+    echo "Step 6: Entering Loop" >> /tmp/debug_workshop.log
+    
     while true; do
         _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
+        echo "Step 7: Draw Done" >> /tmp/debug_workshop.log
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || { return; } # ESC
