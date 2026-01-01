@@ -622,16 +622,19 @@ except Exception as e:
                         continue
                     fi
                     
+                    echo "INSTALL: Parsing JSON..." >> /tmp/workshop_crash.log
                     local -a to_install_ids=() to_install_names=() frameworks_found=()
                     while IFS='|' read -r cid cname; do
                         if [[ -n "$cid" && -z "${installed_mods[$cid]:-}" ]]; then
                             to_install_ids+=("$cid"); to_install_names+=("$cname")
                             [[ "${workshop_rules[$cid]:-}" == "framework" ]] && frameworks_found+=("$cname")
                         fi
-                    done < <(echo "$chain_json" | python3 -c "import sys, json; [print(f\"{x['id']}|{x['name']}\") for x in json.load(sys.stdin)]")
+                    done < <(echo "$chain_json" | python3 -c "import sys, json; [print(f\"{x['id']}|{x['name']}\") for x in json.load(sys.stdin)]" 2>> /tmp/workshop_crash.log)
+                    echo "INSTALL: Found ${#to_install_ids[@]} mods to install" >> /tmp/workshop_crash.log
                     if [[ ${#to_install_ids[@]} -eq 0 ]]; then show_message "Mod and all dependencies are already installed." "Info"; continue; fi
                     local install_summary="${to_install_names[*]}"
                     [[ ${#to_install_names[@]} -gt 3 ]] && install_summary="${to_install_names[0]}, ${to_install_names[1]} and $(( ${#to_install_names[@]} - 2 )) more"
+                    echo "INSTALL: About to show_confirm" >> /tmp/workshop_crash.log
                     if show_confirm "Install ${#to_install_ids[@]} item(s)?\nChain: $install_summary" "Confirm Installation"; then
                         local auto_top=0
                         if [[ ${#frameworks_found[@]} -gt 0 ]] && show_confirm "Frameworks detected (${frameworks_found[*]}).\nMove to top of load order automatically?" "Intelligent Load Order"; then auto_top=1; fi
