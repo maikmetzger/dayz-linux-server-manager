@@ -345,12 +345,12 @@ except: pass
 
     while true; do
         # 1. Scan everything (calls the Python implementation)
-        local scan_json
-        scan_json=$(scan_mods_for_ce_files "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100")
+        local ce_result
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "${inst_dir}/serverfiles/steamapps/workshop/content/221100" 2>/dev/null | tail -n 1 || echo "[]")
         
         # 2. Parse result into arrays
         local -a src_paths smod_names sfile_names sce_types states
-        parse_scan_result "$scan_json"
+        parse_scan_result "$ce_result"
         
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
@@ -603,13 +603,8 @@ except Exception as e:
 EOF
 }
 
-# scan_mods_for_ce_files - Find all CE XML files in installed mods
-#
-# Usage: scan_mods_for_ce_files "$instance_dir" "$workshop_dir"
-#
-# Output: JSON array to stdout
-#   [{"mod_id": "123", "file": "/path/to.xml", "ce_type": "types", "status": "new|linked|changed"}]
-scan_mods_for_ce_files() {
+# Scans mods for CE files and returns structured data (Python based)
+scan_dayz_ce_files_python() {
     local instance_dir="$1"
     local workshop_dir="$2"
     
