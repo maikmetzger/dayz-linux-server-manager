@@ -259,7 +259,7 @@ _draw_workshop_details_screen() {
     # 5. Footer Actions
     move_to $((TERM_ROWS)) 1
     local footer=" [Enter] Install  [b] Open Steam Page  [i] Open Image  [Tab] Switch Focus  [Esc/q] Back "
-    printf "%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
+    printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer" $((TERM_COLS - ${#footer})) "" "$RESET"
 }
 
 # Handler for Details View
