@@ -354,7 +354,7 @@ except: pass
         local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
         if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
         
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>>"${inst_dir}/debug_tui.log" | tail -n 1)
         
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
 
@@ -752,11 +752,13 @@ for mod_id in sorted(mod_ids):
             for linked_name in linked:
                 if linked_name.startswith(f"{mod_id}_") and linked_name.endswith(f"_{fname}"):
                     is_linked = True
+                    sys.stderr.write(f"DEBUG: MATCH STRONG: {fname} matches {linked_name}\n")
                     break
                 # Check suffix match (fuzzy)
                 if linked_name.endswith(f"_{fname}"):
                     # Weak match but likely valid
                     is_linked = True
+                    sys.stderr.write(f"DEBUG: MATCH WEAK: {fname} matches {linked_name}\n")
                     break
             
             if is_linked:
