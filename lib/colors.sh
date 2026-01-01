@@ -41,6 +41,7 @@ C0="${RESET}"
 BG_BLACK="${ESC}[40m"
 BG_RED="${ESC}[48;2;178;0;0m"       # #b20000 DayZ blood red
 BG_DARKGRAY="${ESC}[100m"
+BG_WHITE="${ESC}[47m"
 
 # -----------------------------------------------------------------------------
 # Cursor Control
