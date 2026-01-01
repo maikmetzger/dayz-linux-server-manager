@@ -50,7 +50,7 @@ select_instance() {
                 local status_icon="${RED}○${RESET}"
                 [[ "$status" == "RUNNING" ]] && status_icon="${GREEN}●${RESET}"
                 
-                items+=("$status_icon $name [$status]")
+                items+=("${status_icon}|${name} [${status}]")
             done
             items+=("--------------------")
         else

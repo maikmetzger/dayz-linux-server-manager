@@ -62,13 +62,22 @@ draw_menu() {
                 # Icon at fixed column
                 move_to $((start_row + i)) $((start_col + icon_offset))
                 printf "%s" "$icon"
+                # Re-apply selection color in case icon had resets
+                printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+                
                 # Label at fixed column
                 move_to $((start_row + i)) $((start_col + label_offset))
                 printf "%s" "$label"
+                # Re-apply selection color/boldness just in case
+                printf "%s%s" "$BG_RED" "$WHITE$BOLD"
             else
                 # No icon, label right after selector
                 printf "%s" "$label"
+                # Re-apply selection color
+                printf "%s%s" "$BG_RED" "$WHITE$BOLD"
             fi
+            # Use Erase Line to fill background to the end of the menu width
+            printf "%s" "${ESC}[K"
             printf "%s" "$RESET"
         else
             # Non-selected row

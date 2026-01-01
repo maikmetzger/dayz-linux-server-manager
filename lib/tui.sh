@@ -61,17 +61,15 @@ draw_header() {
     local clean_title
     clean_title=$(printf '%s' "$title" | sed $'s/\033\\[[0-9;]*m//g')
     local title_len=${#clean_title}
-    local padding=$((TERM_COLS - title_len - 1))
-    [[ $padding -lt 0 ]] && padding=0
-    
-    # Header bar - red background full width
+    # Header bar - red background full width using Erase Line (EL)
     move_to 1 1
-    printf "%s%s %s%${padding}s%s" "$BG_RED" "$WHITE$BOLD" "$title" "" "$RESET"
+    printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$title" "${ESC}[K" "$RESET"
     
     # Footer hint
     move_to $TERM_ROWS 1
     printf "%s%s" "$BG_DARKGRAY" "$WHITE"
-    printf " ↑↓ Navigate  Enter Select  q Quit%$((TERM_COLS-38))s" ""
+    # Use EL to fill footer background
+    printf " ↑↓ Navigate  Enter Select  q Quit%s" "${ESC}[K"
     printf "%s" "$RESET"
 }
 
