@@ -15,7 +15,7 @@
 # Format: "parser|relative_path|display_name"
 declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧 Server Settings"
-    ["BEServer"]="cfg|config/BEServer_x64.cfg|🔐 RCON Settings"
+    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐 RCON Settings"
 )
 
 # =============================================================================
