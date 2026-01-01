@@ -182,6 +182,12 @@ config_category_editor() {
         local selected_cat="${SERVERDZ_CATEGORY_ORDER[$MENU_RESULT]}"
         local keys_csv="${SERVERDZ_CATEGORIES[$selected_cat]}"
         
+        # DEBUG: Check if keys_csv is empty (emoji key lookup issue?)
+        if [[ -z "$keys_csv" ]]; then
+            show_message "DEBUG: keys_csv is empty!\nCategory: '$selected_cat'\nMENU_RESULT: $MENU_RESULT" "Debug"
+            continue
+        fi
+        
         config_table_editor "$container" "$config_path" "$selected_cat" "$keys_csv"
     done
 }
@@ -237,8 +243,17 @@ config_table_editor() {
         local result
         result=$(config_parser_exec "$container" getall cfg "$container_path")
         
-        if [[ "$(json_get_status "$result")" != "ok" ]]; then
-            show_message "Failed to read config" "Error"
+        # DEBUG: Show what we got
+        if [[ -z "$result" ]]; then
+            show_message "DEBUG: Empty result from parser\nContainer: $container\nPath: $container_path" "Debug"
+            return
+        fi
+        
+        local status
+        status=$(json_get_status "$result")
+        
+        if [[ "$status" != "ok" ]]; then
+            show_message "Failed to read config.\nStatus: $status\nResult: ${result:0:200}" "Error"
             return
         fi
         
