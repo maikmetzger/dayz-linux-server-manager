@@ -267,7 +267,10 @@ _view_mod_details() {
     local mid="$1" instance_dir="$2" mods_txt="$3" rules_json="$4"
     
     # Run ENTIRE fetch/parse block in permissive mode
-    set +e
+    # Disable exit-on-error AND exit-on-unset-variable
+    set +eu
+    
+    echo "STARTING DETAILS for $mid" > /tmp/workshop_crash.log
     
     # Fetch FRESH details (recursive=0, just this mod, but get FULL info)
     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
@@ -275,6 +278,7 @@ _view_mod_details() {
     
     # Use temp file to avoid subshell exit issues
     local tmp_json="/tmp/workshop_details_${mid}.json"
+    echo "FETCHING PYTHON..." >> /tmp/workshop_crash.log
     python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>/dev/null
     
     # Parse Python output
@@ -282,6 +286,7 @@ _view_mod_details() {
     local -a mimages=()
     
     local parse_out
+    echo "PARSING PYTHON..." >> /tmp/workshop_crash.log
     # Feed temp file to parser
     parse_out=$(cat "$tmp_json" | python3 -c "
 import sys, json, datetime, shlex
@@ -314,16 +319,22 @@ except Exception as e:
 ")
     rm -f "$tmp_json"
     
+    echo "EVAL CONTENT..." >> /tmp/workshop_crash.log
     eval "$parse_out"
-    set -e
+    echo "EVAL DONE." >> /tmp/workshop_crash.log
+    
+    # Restore strict modes
+    set -eu
     
     local scroll=0
     local focus=0 # 0=Desc, 1=Images
     local img_sel=-1
     [[ ${#mimages[@]} -gt 0 ]] && img_sel=0
     
+    echo "ENTERING LOOP..." >> /tmp/workshop_crash.log
     while true; do
         _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$scroll" mimages $img_sel
+        
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || { return; } # ESC
