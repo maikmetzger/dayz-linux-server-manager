@@ -111,7 +111,8 @@ run_rcon() {
             continue
         else
             printf "%s" "$CLEAR_SCREEN"
-            break
+            # Return specific code so caller knows we cancelled
+            return 130
         fi
     done
 

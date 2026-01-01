@@ -545,8 +545,10 @@ main_menu() {
             5)
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  "${SCRIPT_DIR}/rcon.sh" "$SELECTED_DIR"
-                 printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
-                 read -rsn1
+                 if [[ $? -ne 130 ]]; then
+                     printf "\n%s%sPress Enter to return to menu...%s" "$DIM" "$BOLD" "$RESET"
+                     read -rsn1
+                 fi
                  ;;
             6) wipe_menu ;;
             7)
