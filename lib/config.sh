@@ -16,7 +16,31 @@
 declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
     ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
+    ["types"]="xml||📦|Loot Economy (types.xml)"
 )
+
+# Helper to find types.xml within mpmissions
+find_types_xml() {
+    local inst_dir="$1"
+    local cfg="${inst_dir}/data/config/serverDZ.cfg"
+    local template=""
+    
+    # 1. Try mapping via serverDZ.cfg template
+    if [[ -f "$cfg" ]]; then
+        template=$(grep -i '^template' "$cfg" | sed -E 's/template\s*=\s*"([^"]+)".*/\1/')
+    fi
+    
+    if [[ -n "$template" ]]; then
+        local p="${inst_dir}/data/mpmissions/${template}/db/types.xml"
+        if [[ -f "$p" ]]; then
+            echo "$p"
+            return
+        fi
+    fi
+    
+    # 2. Global search in mpmissions
+    find "${inst_dir}/data/mpmissions" -name "types.xml" 2>/dev/null | head -n 1
+}
 
 # =============================================================================
 # Category Definitions for serverDZ.cfg
@@ -415,17 +439,29 @@ config_editor_menu() {
         
         local selected_id="${config_ids[$MENU_RESULT]}"
         IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$selected_id]}"
-        local full_path="${inst_dir}/${rel_path}"
         
-        if [[ ! -f "${full_path}" ]]; then
-            show_message "File not found: ${rel_path}" "Error"
+        local full_path=""
+        if [[ -n "$rel_path" ]]; then
+            full_path="${inst_dir}/${rel_path}"
+        else
+            # Dynamic lookup for types.xml
+            full_path=$(find_types_xml "$inst_dir")
+        fi
+        
+        if [[ -z "${full_path}" || ! -f "${full_path}" ]]; then
+            show_message "File not found: ${selected_id}.xml" "Error"
             continue
         fi
         
-        # Route to appropriate editor based on config ID
-        case "$selected_id" in
-            "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
-            *) config_flat_editor "$container" "$full_path" "$selected_id" ;;
+        # Route to appropriate editor based on format/ID
+        case "$fmt" in
+            "xml") config_xml_editor "$container" "$full_path" "$selected_id" ;;
+            *)
+                case "$selected_id" in
+                    "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
+                    *) config_flat_editor "$container" "$full_path" "$selected_id" ;;
+                esac
+                ;;
         esac
     done
 }
@@ -787,3 +823,4 @@ config_table_editor() {
         fi
     done
 }
+

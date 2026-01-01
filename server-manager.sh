@@ -13,7 +13,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # =============================================================================
 # Load Libraries
 # =============================================================================
-for lib in colors tui menu dialogs utils docker instance mods config; do
+for lib in colors tui menu dialogs utils docker instance mods config types; do
     source "${SCRIPT_DIR}/lib/${lib}.sh"
 done
 
