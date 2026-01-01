@@ -383,12 +383,14 @@ except Exception as e:
 }
 
 # Unified Filter Dialog (Similar to types.sh)
+# Unified Filter Dialog (Similar to types.sh)
 _draw_workshop_filter_dialog() {
-    local -n _fn=$1 _fs=$2
+    local -n _fn=$1 _fs=$2 _fl=$3
     local -a _sort_opts=("trend" "mostsubscribed" "mostsubscribed_asc" "newestfirst" "lastupdated" "relevance")
     local -a _sort_names=("Standard (Trend)" "Subscribers (Desc)" "Subscribers (Asc)" "Newest First" "Last Updated" "Relevancy")
+    local -a _lim_opts=("Fill" "5" "10" "25" "50" "100")
     
-    local d_width=60 d_height=10
+    local d_width=60 d_height=12
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
     local d_sel=0
@@ -409,11 +411,16 @@ _draw_workshop_filter_dialog() {
         printf "%sSort  : < %-36s >%s" "$o_style" "$cur_sort" "$RESET"
         
         move_to $((d_row + 6)) $((d_col + 2))
+        local l_style="$WHITE"
+        [[ $d_sel -eq 2 ]] && l_style="$RED$BOLD"
+        printf "%sLimit : < %-36s >%s" "$l_style" "$_fl" "$RESET"
+        
+        move_to $((d_row + 8)) $((d_col + 2))
         local c_style="$WHITE"
-        [[ $d_sel -eq 2 ]] && c_style="$RED$BOLD"
+        [[ $d_sel -eq 3 ]] && c_style="$RED$BOLD"
         printf "%s[ Reset All Defaults ]%s" "$c_style" "$RESET"
         
-        move_to $((d_row + 9)) $((d_col + 2))
+        move_to $((d_row + 11)) $((d_col + 2))
         printf "[ Enter ] Edit Select  [ Esc ] Close Apply"
         
         IFS= read -rsn1 k
@@ -421,14 +428,15 @@ _draw_workshop_filter_dialog() {
             read -rsn2 -t 0.1 s || true
             case "$s" in
                 "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 2 ]] && ((d_sel++)) ;;
+                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
                 "") return 0 ;;
             esac
         elif [[ "$k" == "" ]]; then
             case $d_sel in
                 0) local new;_fn=$(read_input "Global Search Term" "$_fn" "Search"); return 1 ;;
                 1) if run_menu _sort_names "Select Workshop Sort"; then _fs="${_sort_opts[$MENU_RESULT]}"; return 1; fi ;;
-                2) _fn="DayZ"; _fs="trend"; return 1 ;;
+                2) if run_menu _lim_opts "Select Items Per Page"; then _fl="${_lim_opts[$MENU_RESULT]}"; return 1; fi ;;
+                3) _fn="DayZ"; _fs="trend"; _fl="Fill"; return 1 ;;
             esac
         fi
     done
@@ -440,7 +448,7 @@ workshop_browser() {
     local mods_txt="${instance_dir}/data/config/mods.txt"
     local rules_json="${SCRIPT_DIR}/data/workshop_rules.json"
     
-    local f_text="DayZ" f_sort="relevance" current_page=1
+    local f_text="DayZ" f_sort="relevance" f_limit="Fill" current_page=1
     local selection=0 offset=0 f_changed=1 count=0
     local -a items=()
     declare -A installed_mods workshop_rules
@@ -452,13 +460,19 @@ workshop_browser() {
             workshop_rules=()
             [[ -f "$rules_json" ]] && { while IFS='|' read -r mid val; do workshop_rules["$mid"]="$val"; done < <(python3 -c "import json; r=json.load(open('$rules_json')); for k,v in r.get('incompatibilities', {}).items(): print(f'{k}|conflict'); for k in r.get('frameworks', []): print(f'{k}|framework')"); }
 
+            # Calculate dynamic fetch count based on viewport or limit
+            local v_height=$((TERM_ROWS - 14))
+            [[ $v_height -lt 5 ]] && v_height=5
+            local fetch_count=$v_height
+            if [[ "$f_limit" != "Fill" ]]; then fetch_count=$f_limit; fi
+            
             # Show Non-blocking Fetching Badge
             _draw_workshop_screen "0" "$selection" "$offset" "$f_text" "$f_sort" "$current_page" items installed_mods workshop_rules
             move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
-            printf "%s%s Fetching Workshop Data... %s" "$BG_RED" "$WHITE$BOLD" "$RESET"
+            printf "%s%s Fetching Workshop Data ($fetch_count)... %s" "$BG_RED" "$WHITE$BOLD" "$RESET"
             
             local json
-            json=$(_fetch_workshop_items "$f_text" "$f_sort" "25" "$current_page")
+            json=$(_fetch_workshop_items "$f_text" "$f_sort" "$fetch_count" "$current_page")
             
             # Robust JSON conversion
             local read_items=()
@@ -496,6 +510,7 @@ except Exception as e:
             f_changed=0
         fi
 
+        # Recalculate v_height for offset logic (redundant but safe for resize)
         local v_height=$((TERM_ROWS - 14))
         [[ $v_height -lt 5 ]] && v_height=5
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
@@ -514,11 +529,11 @@ except Exception as e:
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            if _draw_workshop_filter_dialog f_text f_sort; then
+            if _draw_workshop_filter_dialog f_text f_sort f_limit; then
                 current_page=1; selection=0; f_changed=1
             fi
         elif [[ "$key" == "c" || "$key" == "C" ]]; then
-            f_text="DayZ"; f_sort="relevance"; current_page=1; selection=0; f_changed=1
+            f_text="DayZ"; f_sort="relevance"; f_limit="Fill"; current_page=1; selection=0; f_changed=1
         elif [[ "$key" == "o" || "$key" == "O" || "$key" == " " ]]; then
             if [[ $count -gt 0 ]]; then
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
