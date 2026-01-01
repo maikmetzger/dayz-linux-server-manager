@@ -1,9 +1,46 @@
 #!/usr/bin/env python3
+"""
+DayZ Central Economy XML Parser
+
+Provides detection, querying, and modification of DayZ CE XML files.
+Supports: types, spawnabletypes, events, eventspawns
+
+Extensibility: Add new file types to CE_TYPE_REGISTRY without modifying logic.
+"""
 import sys
 import os
 import xml.etree.ElementTree as ET
 import json
 import argparse
+from typing import Optional, Dict, Any
+
+# =============================================================================
+# CE Type Registry (Open/Closed Principle - extend here, not in logic)
+# =============================================================================
+# Maps XML root tags to CE configuration.
+# To add a new type: add an entry here, no other code changes needed.
+CE_TYPE_REGISTRY: Dict[str, Dict[str, str]] = {
+    'types': {
+        'ce_type': 'types',
+        'folder': 'CustomCE/types',
+        'description': 'Item spawn definitions (nominal, min, lifetime, restock)'
+    },
+    'spawnabletypes': {
+        'ce_type': 'spawnabletypes',
+        'folder': 'CustomCE/spawnabletypes',
+        'description': 'Attachments/cargo spawning on items (vehicles, weapons)'
+    },
+    'events': {
+        'ce_type': 'events',
+        'folder': 'CustomCE/events',
+        'description': 'Dynamic events (animal herds, vehicle spawns, crashes)'
+    },
+    'eventposdef': {
+        'ce_type': 'eventspawns',
+        'folder': 'CustomCE/eventspawns',
+        'description': 'Fixed spawn positions for events'
+    }
+}
 
 def get_types_root(xml_path):
     try:
@@ -42,16 +79,33 @@ def metadata(xml_path):
     }
     print(json.dumps(result))
 
-def is_types_xml(xml_path):
-    """Checks if the file is a DayZ types/loot XML file."""
+def detect_ce_type(xml_path: str) -> Optional[Dict[str, str]]:
+    """
+    Detects the Central Economy file type based on root XML element.
+    
+    Args:
+        xml_path: Path to the XML file to analyze
+        
+    Returns:
+        Dict with 'ce_type', 'folder', 'description' if recognized, else None
+    """
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
-        if root.tag == 'types' and root.find('type') is not None:
-            print("true")
-        else:
-            print("false")
-    except:
+        return CE_TYPE_REGISTRY.get(root.tag)
+    except Exception:
+        return None
+
+
+def is_types_xml(xml_path: str) -> None:
+    """
+    Legacy function: Checks if the file is a DayZ types/loot XML file.
+    Maintained for backward compatibility.
+    """
+    result = detect_ce_type(xml_path)
+    if result and result['ce_type'] == 'types':
+        print("true")
+    else:
         print("false")
 
 def query(xml_path, name=None, cat=None, usage=None, tier=None, vanilla_path=None):
@@ -189,9 +243,19 @@ if __name__ == "__main__":
     p_meta = subparsers.add_parser('metadata')
     p_meta.add_argument('file', help='Path to types.xml')
     
-    # Is-Types detection
+    # Is-Types detection (legacy, use detect-ce-type for new code)
     p_ist = subparsers.add_parser('is-types')
     p_ist.add_argument('file', help='Path to XML file')
+    
+    # CE Type Detection (new unified detection)
+    p_detect = subparsers.add_parser('detect-ce-type', 
+        help='Detect CE file type (types, spawnabletypes, events, eventspawns)')
+    p_detect.add_argument('file', help='Path to XML file')
+    p_detect.add_argument('--json', action='store_true', help='Output full JSON info')
+    
+    # List all supported CE types (for debugging/discovery)
+    p_list = subparsers.add_parser('list-ce-types',
+        help='List all supported CE file types')
 
     # Query
     p_query = subparsers.add_parser('query')
@@ -215,6 +279,22 @@ if __name__ == "__main__":
         metadata(args.file)
     elif args.command == 'is-types':
         is_types_xml(args.file)
+    elif args.command == 'detect-ce-type':
+        result = detect_ce_type(args.file)
+        if result:
+            if args.json:
+                print(json.dumps(result))
+            else:
+                print(result['ce_type'])
+        else:
+            if args.json:
+                print(json.dumps(None))
+            else:
+                print('')
+    elif args.command == 'list-ce-types':
+        # Output all supported CE types for discovery
+        for root_tag, config in CE_TYPE_REGISTRY.items():
+            print(f"{root_tag}: {config['ce_type']} -> {config['folder']}")
     elif args.command == 'query':
         query(args.file, args.name, args.cat, args.usage, args.tier, args.vanilla)
     elif args.command == 'update':

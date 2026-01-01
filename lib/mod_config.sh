@@ -36,19 +36,26 @@ get_file_handler() {
     echo "${FILE_TYPE_HANDLERS[$ext]:-raw}"
 }
 
-
 # Ensure cfgeconomycore.xml and CustomCE structure exist
 setup_modular_loot() {
     local mission_path="$1"
     [[ ! -d "$mission_path" ]] && return 1
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
-    local custom_ce="${mission_path}/CustomCE/types"
     
-    mkdir -p "$custom_ce"
+    # Create all 4 CE folders (extensible - add new folders here)
+    local -a ce_folders=(
+        "${mission_path}/CustomCE/types"
+        "${mission_path}/CustomCE/spawnabletypes"
+        "${mission_path}/CustomCE/events"
+        "${mission_path}/CustomCE/eventspawns"
+    )
+    for folder in "${ce_folders[@]}"; do
+        mkdir -p "$folder"
+    done
     
     if [[ ! -f "$core_xml" ]]; then
-        # Create a basic economycore if missing
+        # Create a complete economycore with all CE sections
         cat > "$core_xml" <<EOF
 <?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 <economycore>
@@ -67,15 +74,23 @@ setup_modular_loot() {
 	</defaults>
 	<ce folder="CustomCE/types">
 	</ce>
+	<ce folder="CustomCE/spawnabletypes">
+	</ce>
+	<ce folder="CustomCE/events">
+	</ce>
+	<ce folder="CustomCE/eventspawns">
+	</ce>
 </economycore>
 EOF
     fi
 }
 
 # Link an existing CustomCE file to cfgeconomycore.xml
+# Args: instance_dir, target_filename, ce_type (types|spawnabletypes|events|eventspawns)
 link_modular_xml() {
     local instance_dir="$1"
     local target_filename="$2"
+    local ce_type="${3:-types}"  # Default to 'types' for backward compatibility
     
     local mission_path=$(get_mission_path "$instance_dir")
     [[ -z "$mission_path" ]] && return 1
@@ -83,29 +98,45 @@ link_modular_xml() {
     setup_modular_loot "$mission_path"
     local core_xml="${mission_path}/cfgeconomycore.xml"
     
+    # Map ce_type to folder path
+    local ce_folder="CustomCE/${ce_type}"
+    
     python3 <<EOF
 import xml.etree.ElementTree as ET
 import sys
 
 core_path = "$core_xml"
 file_to_add = "$target_filename"
+ce_type = "$ce_type"
+ce_folder = "$ce_folder"
 
 try:
     tree = ET.parse(core_path)
     root = tree.getroot()
-    ce_node = root.find('ce')
-    if ce_node is None:
-        ce_node = ET.SubElement(root, 'ce', {'folder': 'CustomCE/types'})
     
-    # Check if file already exists
+    # Find the correct CE block by folder attribute
+    ce_node = None
+    for ce in root.findall('ce'):
+        if ce.get('folder') == ce_folder:
+            ce_node = ce
+            break
+    
+    # If no matching CE block, create one
+    if ce_node is None:
+        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
+    
+    # Check if file already exists in any CE block
     exists = False
-    for f in ce_node.findall('file'):
-        if f.get('name') == file_to_add:
-            exists = True
+    for ce in root.findall('ce'):
+        for f in ce.findall('file'):
+            if f.get('name') == file_to_add:
+                exists = True
+                break
+        if exists:
             break
             
     if not exists:
-        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': 'types'})
+        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
         if hasattr(ET, 'indent'):
             ET.indent(tree, space="\t", level=0)
         tree.write(core_path, encoding='UTF-8', xml_declaration=True)
@@ -113,6 +144,7 @@ except Exception as e:
     sys.exit(1)
 EOF
 }
+
 
 # Register a loot XML as a modular include
 register_modular_loot() {
@@ -129,46 +161,73 @@ register_modular_loot() {
     
     setup_modular_loot "$mission_path"
     
+    # Auto-detect CE file type (types, spawnabletypes, events, eventspawns)
+    local ce_type
+    ce_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$source_xml" 2>/dev/null)
+    
+    # Fallback to 'types' if detection fails or unknown format
+    if [[ -z "$ce_type" ]]; then
+        [[ "$silent" == "0" ]] && show_message "Could not detect CE type for '$source_xml'. Assuming 'types'." "Warning"
+        ce_type="types"
+    fi
+    
     local core_xml="${mission_path}/cfgeconomycore.xml"
     local bname=$(basename "$source_xml")
     local target_filename="${mod_name}_${bname}"
     # Clean target name for FS safety
     target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
-    local target_path="${mission_path}/CustomCE/types/${target_filename}"
+    
+    # Route to the correct CE folder based on detected type
+    local ce_folder="CustomCE/${ce_type}"
+    local target_path="${mission_path}/${ce_folder}/${target_filename}"
     
     if [[ -f "$target_path" && "$silent" == "0" ]]; then
-        if ! confirm "Loot file '$target_filename' already exists. Overwrite?" "n"; then
+        if ! confirm "File '$target_filename' already exists in $ce_folder. Overwrite?" "n"; then
             return 0
         fi
     fi
     
-    # 1. Copy file
+    # 1. Copy file to the correct CE folder
+    mkdir -p "$(dirname "$target_path")"
     cp "$source_xml" "$target_path"
     
-    # 2. Add to cfgeconomycore.xml using Python to avoid dangerous regex
+    # 2. Add to cfgeconomycore.xml using Python for correct CE block
     python3 <<EOF
 import xml.etree.ElementTree as ET
 import sys
 
 core_path = "$core_xml"
 file_to_add = "$target_filename"
+ce_type = "$ce_type"
+ce_folder = "$ce_folder"
 
 try:
     tree = ET.parse(core_path)
     root = tree.getroot()
-    ce_node = root.find('ce')
-    if ce_node is None:
-        ce_node = ET.SubElement(root, 'ce', {'folder': 'CustomCE/types'})
     
-    # Check if file already exists
+    # Find the correct CE block by folder attribute
+    ce_node = None
+    for ce in root.findall('ce'):
+        if ce.get('folder') == ce_folder:
+            ce_node = ce
+            break
+    
+    # If no matching CE block, create one
+    if ce_node is None:
+        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
+    
+    # Check if file already exists in any CE block
     exists = False
-    for f in ce_node.findall('file'):
-        if f.get('name') == file_to_add:
-            exists = True
+    for ce in root.findall('ce'):
+        for f in ce.findall('file'):
+            if f.get('name') == file_to_add:
+                exists = True
+                break
+        if exists:
             break
             
     if not exists:
-        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': 'types'})
+        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
         
         # Pretty print/indent (Python 3.9+)
         if hasattr(ET, 'indent'):
@@ -184,11 +243,11 @@ except Exception as e:
 EOF
     
     if [[ "$silent" == "0" ]]; then
-        show_message "Registered $target_filename in cfgeconomycore.xml" "Success"
+        show_message "Registered $target_filename in cfgeconomycore.xml (${ce_type})" "Success"
     fi
 }
 
-# Unregister a modular include
+# Unregister a modular include (removes from any CE block)
 unregister_modular_loot() {
     local instance_dir="$1"
     local target_filename="$2"
@@ -199,9 +258,8 @@ unregister_modular_loot() {
     echo "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename" >> "${SCRIPT_DIR}/loot_manager.log"
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
-    local target_path="${mission_path}/CustomCE/types/${target_filename}"
     
-    # 1. Remove from cfgeconomycore.xml
+    # Remove from cfgeconomycore.xml (searches ALL CE blocks)
     python3 <<EOF
 import xml.etree.ElementTree as ET
 import sys
@@ -212,19 +270,20 @@ file_to_rem = "$target_filename"
 try:
     tree = ET.parse(core_path)
     root = tree.getroot()
-    ce_node = root.find('ce')
-    if ce_node is not None:
-        rem_count = 0
+    
+    # Search all CE blocks for the file
+    rem_count = 0
+    for ce_node in root.findall('ce'):
         for f in ce_node.findall('file'):
             if f.get('name') == file_to_rem:
                 ce_node.remove(f)
                 rem_count += 1
-        
-        if rem_count > 0:
-            if hasattr(ET, 'indent'):
-                ET.indent(tree, space="\t", level=0)
-            tree.write(core_path, encoding='UTF-8', xml_declaration=True)
-            print("Success")
+    
+    if rem_count > 0:
+        if hasattr(ET, 'indent'):
+            ET.indent(tree, space="\t", level=0)
+        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
+        print("Success")
 except Exception as e:
     print(f"Error: {e}")
     sys.exit(1)
@@ -248,16 +307,16 @@ modular_loot_manager() {
         local -a mod_ids=()
         while IFS= read -r line; do [[ -n "$line" ]] && mod_ids+=("$line"); done < <(get_all_mod_ids "$mods_file" "$servermods_file")
         
-        local -a items=()     # Display string
-        local -a src_paths=() # workshop path
+        local -a items=()      # Display string
+        local -a src_paths=()  # workshop path
         local -a smod_names=()
         local -a sfile_names=()
-        local -a states=()    # 0=unlinked, 1=linked
+        local -a sce_types=()  # CE type (types, spawnabletypes, events, eventspawns)
+        local -a states=()     # 0=unlinked, 1=linked
         
         local mission_path=$(get_mission_path "$inst_dir")
-        local custom_ce="${mission_path}/CustomCE/types"
         
-        # Get currently linked files for status
+        # Get currently linked files for status (from all CE blocks)
         local linked_files=""
         if [[ -f "${mission_path}/cfgeconomycore.xml" ]]; then
             linked_files=$(grep -o '<file name="[^"]*"' "${mission_path}/cfgeconomycore.xml" | cut -d'"' -f2)
@@ -272,40 +331,47 @@ modular_loot_manager() {
             while IFS= read -r xml_file; do
                 [[ -z "$xml_file" ]] && continue
                 
-                # Check if it's a types file (no name filter, rely on content)
-                if [[ $(python3 "${SCRIPT_DIR}/lib/xml_parser.py" is-types "$xml_file" 2>/dev/null) == "true" ]]; then
-                    local bname=$(basename "$xml_file")
-                    local target_name="${mname}_${bname}"
-                    # Clean target name for FS safety
-                    target_name=$(echo "$target_name" | tr -cd '[:alnum:]_.-')
-                    
-                    src_paths+=("$xml_file")
-                    smod_names+=("$mname")
-                    sfile_names+=("$bname")
-                    
-                    echo "[$(date +%T)] MGR: Found XML: $bname -> Standard: $target_name" >> "${SCRIPT_DIR}/loot_manager.log"
-                    
-                    # Detect if ANY version of this mod's loot is linked
-                    local is_linked=0
-                    # 1. Check exact standard name
-                    if echo "$linked_files" | grep -qF "$target_name"; then
+                # Detect CE file type using unified detector (returns empty if not a CE file)
+                local detected_type
+                detected_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$xml_file" 2>/dev/null)
+                
+                # Skip non-CE files
+                [[ -z "$detected_type" ]] && continue
+                
+                local bname=$(basename "$xml_file")
+                local target_name="${mname}_${bname}"
+                # Clean target name for FS safety
+                target_name=$(echo "$target_name" | tr -cd '[:alnum:]_.-')
+                
+                src_paths+=("$xml_file")
+                smod_names+=("$mname")
+                sfile_names+=("$bname")
+                sce_types+=("$detected_type")
+                
+                echo "[$(date +%T)] MGR: Found $detected_type: $bname -> Standard: $target_name" >> "${SCRIPT_DIR}/loot_manager.log"
+                
+                # Detect if ANY version of this mod's loot is linked
+                local is_linked=0
+                # 1. Check exact standard name
+                if echo "$linked_files" | grep -qF "$target_name"; then
+                    is_linked=1
+                else
+                    # 2. Check "fuzzy" legacy name (spaces included)
+                    local legacy_name="${mname}_${bname}"
+                    if echo "$linked_files" | grep -qF "$legacy_name"; then
                         is_linked=1
-                    else
-                        # 2. Check "fuzzy" legacy name (spaces included)
-                        local legacy_name="${mname}_${bname}"
-                        if echo "$linked_files" | grep -qF "$legacy_name"; then
-                            is_linked=1
-                            echo "[$(date +%T)] MGR: Detected linked file with LEGACY naming: $legacy_name" >> "${SCRIPT_DIR}/loot_manager.log"
-                        fi
+                        echo "[$(date +%T)] MGR: Detected linked file with LEGACY naming: $legacy_name" >> "${SCRIPT_DIR}/loot_manager.log"
                     fi
-                    
-                    states+=($is_linked)
                 fi
+                
+                states+=($is_linked)
             done < <(find "$mod_path" -maxdepth 6 -name "*.xml" -type f 2>/dev/null)
         done
 
-        # 1b. Add Orphans (Files in CustomCE that don't match our scan)
-        if [[ -d "$custom_ce" ]]; then
+        # 1b. Add Orphans (Files in all CustomCE folders that don't match our scan)
+        local -a ce_folders_to_scan=("types" "spawnabletypes" "events" "eventspawns")
+        for ce_type_folder in "${ce_folders_to_scan[@]}"; do
+            [[ ! -d "${mission_path}/CustomCE/${ce_type_folder}" ]] && continue
             while IFS= read -r ce_file; do
                 [[ -z "$ce_file" ]] && continue
                 local ce_bname=$(basename "$ce_file")
@@ -337,10 +403,14 @@ modular_loot_manager() {
                         fi
                     done
                     
-                    echo "[$(date +%T)] MGR: Found local file: $ce_bname (Group: $owner)" >> "${SCRIPT_DIR}/loot_manager.log"
-                    src_paths+=("LOCAL")
+                    # Detect CE type for the orphan file
+                    local orphan_ce_type="$ce_type_folder"
+                    
+                    echo "[$(date +%T)] MGR: Found local $orphan_ce_type: $ce_bname (Group: $owner)" >> "${SCRIPT_DIR}/loot_manager.log"
+                    src_paths+=("LOCAL:${ce_type_folder}")
                     smod_names+=("$owner")
                     sfile_names+=("$ce_bname")
+                    sce_types+=("$orphan_ce_type")
                     
                     # Detect if THIS specific file is linked
                     if echo "$linked_files" | grep -qF "$ce_bname"; then
@@ -351,12 +421,12 @@ modular_loot_manager() {
                 else
                     echo "[$(date +%T)] MGR: File $ce_bname matched to active mod scan." >> "${SCRIPT_DIR}/loot_manager.log"
                 fi
-            done < <(find "$custom_ce" -name "*.xml" -type f 2>/dev/null | sort)
-        fi
+            done < <(find "${mission_path}/CustomCE/${ce_type_folder}" -name "*.xml" -type f 2>/dev/null | sort)
+        done
         
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
-            show_message "No mod loot definitions found. Ensure mods are synced." "Info"
+            show_message "No mod CE definitions found. Ensure mods are synced." "Info"
             return
         fi
 
@@ -372,7 +442,7 @@ modular_loot_manager() {
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) 1
-        printf "  %-12s %-30s %-30s" "STATUS" "SOURCE / GROUP" "FILE NAME"
+        printf "  %-12s %-12s %-24s %-30s" "STATUS" "TYPE" "SOURCE / GROUP" "FILE NAME"
         
         move_to $((table_start + 2)) 1
         printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
@@ -389,24 +459,33 @@ modular_loot_manager() {
             
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
-            local color="$WHITE"
-            local color="$WHITE"
-            local status_str="[ UNLINKED ]"
-            local color="$WHITE"
+            local status_color="$WHITE"
             if [[ ${states[$idx]} -eq 1 ]]; then
                 status_str="[  LINKED  ]"
-                color="$GRN"
+                status_color="$GRN"
             fi
+            
+            # CE Type formatting
+            local ce_type="${sce_types[$idx]:-types}"
+            local type_str
+            local type_color="$CYN"
+            case "$ce_type" in
+                types)          type_str="[TYPES]     "; type_color="$CYN" ;;
+                spawnabletypes) type_str="[SPAWNABLE] "; type_color="$MAG" ;;
+                events)         type_str="[EVENTS]    "; type_color="$YLW" ;;
+                eventspawns)   type_str="[EVENTPOS]  "; type_color="$BLU" ;;
+                *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
+            esac
             
             move_to $row 1
             if [[ $idx -eq $selection ]]; then
                 printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                 move_to $row 3
-                printf "%-12s %-30s %-30s" "$status_str" "${smod_names[$idx]}" "${sfile_names[$idx]}"
+                printf "%-12s %-12s %-24s %-30s" "$status_str" "$type_str" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:30}"
                 printf "%s" "$RESET"
             else
                 move_to $row 3
-                printf "%s%-12s%s %-30s %-30s" "$color" "$status_str" "$RESET" "${smod_names[$idx]}" "${sfile_names[$idx]}"
+                printf "%s%-12s%s %s%-12s%s %-24s %-30s" "$status_color" "$status_str" "$RESET" "$type_color" "$type_str" "$RESET" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:30}"
             fi
         done
         
@@ -429,22 +508,40 @@ modular_loot_manager() {
             local midx=$selection
             local src="${src_paths[$midx]}"
             local fn="${sfile_names[$midx]}"
+            local ct="${sce_types[$midx]:-types}"
             
-            if [[ "$src" == "LOCAL" ]]; then
-                local p="${mission_path}/CustomCE/types/${fn}"
-                [[ -f "$p" ]] && config_xml_editor "$inst_dir" "$p" "types" "$container"
+            if [[ "$src" == LOCAL:* ]]; then
+                # Extract CE type from LOCAL:folder format
+                local local_ce_type="${src#LOCAL:}"
+                local p="${mission_path}/CustomCE/${local_ce_type}/${fn}"
+                [[ -f "$p" ]] && config_xml_editor "$inst_dir" "$p" "$ct" "$container"
             else
-                [[ -f "$src" ]] && config_xml_editor "$inst_dir" "$src" "types" "N/A"
+                [[ -f "$src" ]] && config_xml_editor "$inst_dir" "$src" "$ct" "N/A"
             fi
         elif [[ "$key" == "d" || "$key" == "D" ]]; then
             local midx=$selection
+            local src="${src_paths[$midx]}"
             local fn="${sfile_names[$midx]}"
-            local p="${mission_path}/CustomCE/types/${fn}"
+            local ct="${sce_types[$midx]:-types}"
+            
+            # Determine the actual file path
+            local p
+            if [[ "$src" == LOCAL:* ]]; then
+                local local_ce_type="${src#LOCAL:}"
+                p="${mission_path}/CustomCE/${local_ce_type}/${fn}"
+            else
+                # Check if a registered copy exists in the appropriate CE folder
+                local mn="${smod_names[$midx]}"
+                local tn="${mn}_${fn}"
+                tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
+                p="${mission_path}/CustomCE/${ct}/${tn}"
+            fi
+            
             if [[ -f "$p" ]]; then
-                if confirm "Delete physical file '$fn'?" "n"; then
-                    unregister_modular_loot "$inst_dir" "$fn" # Unlink it first
+                if confirm "Delete physical file '$(basename "$p")'?" "n"; then
+                    unregister_modular_loot "$inst_dir" "$(basename "$p")" # Unlink it first
                     rm -f "$p"
-                    show_message "Deleted $fn" "Success"
+                    show_message "Deleted $(basename "$p")" "Success"
                 fi
             else
                 show_message "This is a workshop source file, cannot delete." "Warning"
@@ -454,13 +551,14 @@ modular_loot_manager() {
             local src="${src_paths[$midx]}"
             local mn="${smod_names[$midx]}"
             local fn="${sfile_names[$midx]}"
+            local ct="${sce_types[$midx]:-types}"
             local tn="${mn}_${fn}"
             tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
             
             if [[ ${states[$midx]} -eq 1 ]]; then
                 # LINKED -> Unlink (Non-destructive)
                 local target_to_unlink="$fn"
-                [[ "$src" != "LOCAL" ]] && target_to_unlink="$tn"
+                [[ "$src" != LOCAL:* ]] && target_to_unlink="$tn"
                 
                 if confirm "Unlink '$target_to_unlink' from economy? (Keeps physical file)" "y"; then
                     unregister_modular_loot "$inst_dir" "$target_to_unlink"
@@ -468,13 +566,14 @@ modular_loot_manager() {
                 fi
             else
                 # UNLINKED -> Link it!
-                if confirm "Link modular loot '$fn' to your economy?" "y"; then
-                    if [[ "$src" == "LOCAL" ]]; then
-                        link_modular_xml "$inst_dir" "$fn"
+                if confirm "Link '$fn' ($ct) to your economy?" "y"; then
+                    if [[ "$src" == LOCAL:* ]]; then
+                        local local_ce_type="${src#LOCAL:}"
+                        link_modular_xml "$inst_dir" "$fn" "$local_ce_type"
                     else
-                        register_modular_loot "$inst_dir" "$src" "$mn" 1 # Silent
+                        register_modular_loot "$inst_dir" "$src" "$mn" 1 # Silent, auto-detects type
                     fi
-                    show_message "Linked $fn" "Success"
+                    show_message "Linked $fn ($ct)" "Success"
                 fi
             fi
             # Implicitly re-loops and re-scans
