@@ -90,12 +90,10 @@ draw_box() {
         printf "%s%s %s %s" "$RED" "$BOLD" "$title" "$RESET"
     fi
     
-    # Sides
+    # Sides and background fill
     for ((i=1; i<height-1; i++)); do
         move_to $((row+i)) $col
-        printf "%s│%s" "$RED" "$RESET"
-        move_to $((row+i)) $((col+width-1))
-        printf "%s│%s" "$RED" "$RESET"
+        printf "%s│%s%*s%s│%s" "$RED" "$BOLD" $((width-2)) "" "$RED" "$BOLD"
     done
     
     # Bottom border

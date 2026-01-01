@@ -155,13 +155,13 @@ for x in data:
                 move_to $((start_row + i)) $col_name
                 printf "%s%-*s%s" "$style" $w_name "$d_name" "$RESET"
                 move_to $((start_row + i)) $col_nom
-                printf "%s%*s%s" "$style" $((w_nom-1)) "$nom" "$RESET"
+                printf "%s%-*s%s" "$style" $w_nom "$nom" "$RESET"
                 move_to $((start_row + i)) $col_min
-                printf "%s%*s%s" "$style" $((w_min-1)) "$min" "$RESET"
+                printf "%s%-*s%s" "$style" $w_min "$min" "$RESET"
                 move_to $((start_row + i)) $col_life
-                printf "%s%*s%s" "$style" $((w_life-1)) "$life" "$RESET"
+                printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
                 move_to $((start_row + i)) $col_rs
-                printf "%s%*s%s" "$style" $((w_rs-1)) "$rs" "$RESET"
+                printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
             else
                 # printf "%$((TERM_COLS))s" "" # Clear row if needed
                 :
@@ -250,6 +250,7 @@ _draw_xml_filter_dialog() {
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
     
     local d_sel=0
+    printf "%s" "$CLEAR_SCREEN"
     while true; do
         draw_box $d_row $d_col $d_height $d_width "Filter types.xml"
         
