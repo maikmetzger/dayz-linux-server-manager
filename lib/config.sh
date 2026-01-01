@@ -251,23 +251,22 @@ config_table_editor() {
     local keys_csv="$4"
     
     local container_path="/dayz/config/$(basename "$config_path")"
+    local filename
+    filename="$(basename "$config_path")"
     
     # Parse keys
     IFS=',' read -ra keys <<< "$keys_csv"
     
-    # Calculate max key length for padding (min 20, max 40)
-    local max_len=20
-    for key in "${keys[@]}"; do
-        (( ${#key} > max_len )) && max_len=${#key}
-    done
-    [[ $max_len -gt 40 ]] && max_len=40
-    
     local selection=0
+    local scroll_offset=0
     
     while true; do
-        draw_header "$title"
+        # Fetch current values every loop (or optimization: only on enter?)
+        # For now, fetch every time to be safe, or cache it?
+        # Fetching every frame is slow for TUI. Fetch once, then update locally?
+        # Better: Fetch at start of loop, but optimize if user just moved cursor?
+        # Let's fetch once per loop for now, optimize if laggy.
         
-        # Fetch current values
         local result
         result=$(config_parser_exec "$container" getall cfg "$container_path")
         
@@ -276,58 +275,122 @@ config_table_editor() {
             return
         fi
         
-        # Build menu items with current values
-        local -a items=()
+        # Parse values into array
+        local -a values=()
+        local max_key_len=10
         for key in "${keys[@]}"; do
-            local value
-            value=$(json_get "$result" "$key")
-            
-            # Truncate long values for display (adjust based on assumed terminal width)
-            local avail_width=$((TERM_COLS - max_len - 15)) # approximate
-            [[ $avail_width -lt 20 ]] && avail_width=20
-            
-            if [[ ${#value} -gt $avail_width ]]; then
-                value="${value:0:$((avail_width-3))}..."
-            fi
-            
-            # Format: key │ value
-            local item_str
-            if [[ -z "$value" ]]; then
-                 printf -v item_str "%-${max_len}s │ (empty)" "$key"
-            else
-                 printf -v item_str "%-${max_len}s │ %s" "$key" "$value"
-            fi
-            
-            items+=("$item_str")
+            local val
+            val=$(json_get "$result" "$key")
+            values+=("$val")
+            (( ${#key} > max_key_len )) && max_key_len=${#key}
         done
-        items+=("← Back")
+        [[ $max_key_len -gt 40 ]] && max_key_len=40
         
-        if ! run_menu items "$title" $selection; then
-            return
-        fi
+        # Calculate Layout
+        get_term_size
+        local table_start=3
+        local col_key=2
+        local col_val=$((col_key + max_key_len + 5))
+        local max_rows=$((TERM_ROWS - table_start - 3)) # leave space for footer
         
-        selection=$MENU_RESULT
-        
-        if [[ $MENU_RESULT -eq ${#keys[@]} ]]; then
-            return
-        fi
-        
-        # Edit selected key
-        local selected_key="${keys[$MENU_RESULT]}"
-        
-        # Get current value
-        local current_value
-        current_value=$(json_get "$result" "$selected_key")
-        
-        # Show input dialog
-        local new_value
-        new_value=$(read_input "Edit: ${selected_key}" "$current_value" "$title")
-        
-        # If value changed, save it
-        if [[ -n "$new_value" && "$new_value" != "$current_value" ]]; then
-            local set_result
-            set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_value")
+        # Input Loop (Inner loop to avoid re-fetching data just for navigation)
+        while true; do
+             # Handle scrolling
+            if [[ $selection -lt $scroll_offset ]]; then
+                scroll_offset=$selection
+            elif [[ $selection -ge $((scroll_offset + max_rows)) ]]; then
+                scroll_offset=$((selection - max_rows + 1))
+            fi
             
+            # Draw UI
+            printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+            
+            # 1. Header Bar
+            move_to 1 1
+            printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Config Editor - $filename - $title" "$RESET"
+            
+            # 2. Table Header
+            move_to $table_start 1
+            printf "%s%s" "$DIM" "$RED"
+            printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+            printf "%s" "$RESET"
+            
+            move_to $((table_start + 1)) $col_key
+            printf "%s%sKEY%s" "$DIM" "$WHITE" "$RESET"
+            move_to $((table_start + 1)) $col_val
+            printf "%s%sVALUE%s" "$DIM" "$WHITE" "$RESET"
+            
+            move_to $((table_start + 2)) 1
+            printf "%s%s" "$DIM" "$RED"
+            printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+            printf "%s" "$RESET"
+            
+            # 3. Rows
+            local row=$((table_start + 3))
+            local count=${#keys[@]}
+            
+            for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
+                local key="${keys[$i]}"
+                local val="${values[$i]}"
+                
+                # Truncate value
+                local max_val_len=$((TERM_COLS - col_val - 2))
+                [[ ${#val} -gt $max_val_len ]] && val="${val:0:$((max_val_len-3))}..."
+                [[ -z "$val" ]] && val="(empty)"
+                
+                move_to $row 1
+                if [[ $i -eq $selection ]]; then
+                    # Selected Row
+                    printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+                    move_to $row $col_key
+                    printf "▶ %s" "$key"
+                    move_to $row $col_val
+                    printf "%s" "$val"
+                    printf "%s" "$RESET"
+                else
+                    # Normal Row
+                    move_to $row $col_key
+                    printf "  %s" "$key"
+                    move_to $row $col_val
+                    printf "%s%s%s" "$DIM" "$val" "$RESET"
+                fi
+                ((row++))
+            done
+            
+            # 4. Footer
+            move_to $TERM_ROWS 1
+            printf "%s%s [Enter] Edit   [q] Back %s" "$BG_WHITE" "$BLACK" "$RESET"
+            
+            # Input Handling
+            IFS= read -rsn1 key
+            case "$key" in
+                $'\x1b')
+                    read -rsn2 -t 0.1 seq || true
+                    case "$seq" in
+                        '[A') ((selection > 0)) && ((selection--)) ;;
+                        '[B') ((selection < count - 1)) && ((selection++)) ;;
+                    esac
+                    ;;
+                '') # Enter - Edit
+                    break # Break inner loop to edit
+                    ;;
+                'q'|'Q')
+                    return # Exit function
+                    ;;
+            esac
+        done
+        
+        # Edit Action
+        local selected_key="${keys[$selection]}"
+        local current_val="${values[$selection]}"
+        [[ "$current_val" == "(empty)" ]] && current_val=""
+        
+        local new_val
+        new_val=$(read_input "Edit $selected_key" "$current_val" "$title")
+        
+        if [[ -n "$new_val" && "$new_val" != "$current_val" ]]; then
+            local set_result
+            set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_val")
             if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
                 show_message "Failed to save: $(json_get "$set_result" "message")" "Error"
             fi
