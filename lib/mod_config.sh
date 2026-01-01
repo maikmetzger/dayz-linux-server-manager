@@ -354,7 +354,7 @@ try:
     for i in data:
         st = 1 if i.get('status') == 'linked' else 0
         ln = i.get('linked_filename', '')
-        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', i['mod_id'])}|{i['filename']}|{i['ce_type']}|{st}|{ln}\")
+        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}\")
 except: pass
 ")
     }
@@ -469,24 +469,31 @@ except: pass
             local midx=$selection
             local src="${src_paths[$midx]}"
             local fn="${sfile_names[$midx]}"
-            local mn="${smod_names[$midx]}"
+            local m_id="${smod_ids[$midx]}"
             local ct="${sce_types[$midx]:-types}"
             
             # Determine target filename
-            local tn="${mn}_${fn}"
-            tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
+            local tn="${m_id}_${fn}"
+            [[ "$m_id" == "LOCAL" ]] && tn="$fn"
+            
+            # Use actual linked name if it exists (handles cleaned/legacy names)
+            if [[ -n "${slinked_names[$midx]}" ]]; then tn="${slinked_names[$midx]}"; fi
+            
+            local cleaned_tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
             local p="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${tn}"
+            
+            # Fallback checks for path robustnes
+            if [[ ! -f "$p" && -f "$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}" ]]; then p="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}"; fi
+            if [[ ! -f "$p" && -f "$(get_mission_path "$inst_dir")/CustomCE/types/${tn}" ]]; then p="$(get_mission_path "$inst_dir")/CustomCE/types/${tn}"; fi
             
             if [[ -f "$p" ]]; then
                 if confirm "Delete physical file '$(basename "$p")'?" "n"; then
-                    unregister_modular_loot "$inst_dir" "$(basename "$p")" # Unlink it first
+                    unregister_modular_loot "$inst_dir" "$(basename "$p")"
                     rm -f "$p"
-                    echo "DEBUG: New Count: $new_ce_count" >> "${SELECTED_DIR}/debug_post_sync.log"
-                    show_message "Debug: Check ${SELECTED_DIR}/debug_post_sync.log (Count: $new_ce_count)" "Debug"
                     show_message "Deleted $(basename "$p")" "Success"
                 fi
             else
-                show_message "File does not exist: $p" "Warning"
+                show_message "File does not exist: $(basename "$p")" "Warning"
             fi
         elif [[ "$key" == "l" || "$key" == "L" ]]; then
             # Toggle Link/Unlink
@@ -531,7 +538,17 @@ except: pass
                 local tn="${m_id}_${fn}"
                 if [[ "$m_id" == "LOCAL" ]]; then tn="$fn"; fi
                 if [[ -n "${slinked_names[$midx]}" ]]; then tn="${slinked_names[$midx]}"; fi
+                
+                local cleaned_tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
                 target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${tn}"
+                
+                # Check cleaned name or 'types' folder as fallback
+                if [[ ! -f "$target_edit_path" && -f "$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}" ]]; then
+                    target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}"
+                fi
+                if [[ ! -f "$target_edit_path" && -f "$(get_mission_path "$inst_dir")/CustomCE/types/${tn}" ]]; then
+                    target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/types/${tn}"
+                fi
             fi
             
             if [[ -f "$target_edit_path" ]]; then
@@ -775,46 +792,41 @@ for mod_id in sorted(mod_ids):
             
             fpath = os.path.join(root, fname)
             
-            # Detect CE type
+            # Detect CE type with expert fallback
             ce_type = ""
             if xml_parser:
                 try:
-                    ce_type = xml_parser.detect_ce_type(fpath)
+                    res = xml_parser.detect_ce_type(fpath)
+                    if res: ce_type = res['ce_type']
                 except: pass
             
             if not ce_type:
-                continue  # Not a CE file
+                lfn = fname.lower()
+                if 'spawnable' in lfn: ce_type = 'spawnabletypes'
+                elif 'eventspawns' in lfn or 'eventpos' in lfn: ce_type = 'eventspawns'
+                elif 'events' in lfn: ce_type = 'events'
+                elif 'types' in lfn: ce_type = 'types'
+                else: ce_type = 'types' # Default to types for mod files
             
             # Check status
             status = "new"
-            
-            # Simple check against linked files
-            # Logic: If any linked file matches "ModID_filename", it's linked
-            # OR if "ModName_filename" matches (fuzzy)
-            
-            # We construct the standard name we WOULD use
-            # Since we don't have mod name easily in python, we rely on fuzzy matching linked names
-            
+            linked_name = ""
             is_linked = False
-            for linked_name in linked:
-                if linked_name.startswith(f"{mod_id}_") and linked_name.endswith(f"_{fname}"):
+            for ln in linked:
+                # Strong match: ModID prefix
+                if ln.startswith(f"{mod_id}_") and ln.endswith(f"_{fname}"):
                     is_linked = True
-                    sys.stderr.write(f"DEBUG: MATCH STRONG: {fname} matches {linked_name}\n")
+                    linked_name = ln
                     break
-                # Check suffix match (fuzzy)
-                if linked_name.endswith(f"_{fname}"):
-                    # Weak match but likely valid
+                # fuzzy match: just matching filename (cleaned or raw)
+                cfn = "".join(x for x in fname if x.isalnum() or x in "._-")
+                if ln.endswith(f"_{fname}") or ln.endswith(f"_{cfn}"):
                     is_linked = True
-                    sys.stderr.write(f"DEBUG: MATCH WEAK: {fname} matches {linked_name}\n")
+                    linked_name = ln
                     break
             
             if is_linked:
                 status = "linked"
-            
-            # Add to results
-            # Note: We return mod_id. Bash side 'get_mod_name' will be needed for display?
-            # Or we can return just mod_id and let Bash wrapper fetch name.
-            # modular_loot_manager bash function calls get_mod_name.
             
             results.append({
                 "mod_id": mod_id,
@@ -823,15 +835,12 @@ for mod_id in sorted(mod_ids):
                 "filename": fname,
                 "ce_type": ce_type,
                 "status": status,
-                "linked_filename": linked_name if is_linked else ""
+                "linked_filename": linked_name
             })
             
-            # Track for orphan detection (exact relative path in CustomCE?)
-            if is_linked:
-                scanned_files.add(linked_name if is_linked else "")
-            else:
-                # We also track the potential filename it WOULD have
-                scanned_files.add(f"{mod_id}_{fname}")
+            # Track for orphan detection (cleaned to match registrations)
+            scanned_files.add(fname)
+            if linked_name: scanned_files.add(linked_name)
 
 # 2. SCAN ORPHANS (Local files in CustomCE not from mods)
 ce_folders = ["types", "spawnabletypes", "events", "eventspawns"]
