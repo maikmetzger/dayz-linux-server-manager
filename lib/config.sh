@@ -23,29 +23,186 @@ declare -A CONFIG_REGISTRY=(
 # =============================================================================
 # Use simple keys (no emojis) for reliable associative array lookup
 declare -A SERVERDZ_CATEGORIES=(
-    ["General"]="hostname,motd,motdInterval,maxPlayers,instanceId"
-    ["Security"]="password,passwordAdmin,verifySignatures,BattlEye,allowFilePatching,forceSameBuild"
+    ["General"]="hostname,description,maxPlayers,password,passwordAdmin,instanceId,motd,motdInterval"
+    ["Security"]="verifySignatures,BattlEye,forceSameBuild,allowFilePatching,disableMultiAccountMitigation,speedhackDetection"
+    ["Gameplay"]="disable3rdPerson,disableCrosshair,enableCfgGameplayFile,lightingConfig,disablePersonalLight,disableBaseDamage,disableContainerDamage,disableRespawnDialog,shotValidation"
+    ["Network"]="steamQueryPort,clientPort,guaranteedUpdates,loginQueueConcurrentPlayers,loginQueueMaxPlayers,pingWarning,pingCritical,MaxPing,serverFpsWarning,simulatedPlayersBatch,multithreadedReplication"
     ["Time"]="serverTime,serverTimeAcceleration,serverTimePersistent,serverNightTimeAcceleration"
-    ["Network"]="steamQueryPort,respawnTime,storeHouseStateDisabled,disableVoN,vonCodecQuality"
-    ["Gameplay"]="disable3rdPerson,disableCrosshair,enableCfgGameplayFile,lootHistory"
+    ["Persistence"]="storeHouseStateDisabled,storageAutoFix,lootHistory"
+    ["Voice"]="disableVoN,vonCodecQuality"
+    ["Logging"]="logFile,timeStampFormat,logAverageFps,logMemory,logPlayers,enableDebugMonitor,adminLogPlayerHitsOnly,adminLogPlacement,adminLogBuildActions,adminLogPlayerList"
+    ["NetworkRange"]="networkRangeClose,networkRangeNear,networkRangeFar,networkRangeDistantEffect,defaultVisibility,defaultObjectViewDistance"
+    ["NetworkBatch"]="networkObjectBatchLogSlow,networkObjectBatchEnforceBandwidthLimits,networkObjectBatchUseEstimatedBandwidth,networkObjectBatchUseDynamicMaximumBandwidth,networkObjectBatchBandwidthLimit,networkObjectBatchCompute,networkObjectBatchSendCreate,networkObjectBatchSendDelete"
 )
 
 # Display names with emojis (for menu display only)
 declare -A SERVERDZ_CATEGORY_DISPLAY=(
     ["General"]="🏠 General"
     ["Security"]="🔒 Security"
+    ["Gameplay"]="🎮 Gameplay"
     ["Time"]="⏱️  Time & Weather"
     ["Network"]="🌐 Network"
-    ["Gameplay"]="🎮 Gameplay"
+    ["Persistence"]="💾 Persistence"
+    ["Voice"]="🎤 Voice Chat"
+    ["Logging"]="📝 Logging"
+    ["NetworkRange"]="📡 Network Range"
+    ["NetworkBatch"]="📦 Network Batch"
 )
 
 # Order for category display (simple keys)
 SERVERDZ_CATEGORY_ORDER=(
     "General"
     "Security"
+    "Gameplay"
     "Time"
     "Network"
-    "Gameplay"
+    "Persistence"
+    "Voice"
+    "Logging"
+    "NetworkRange"
+    "NetworkBatch"
+)
+
+# Defaults for reference
+declare -A SERVERDZ_DEFAULTS=(
+    ["hostname"]="EXAMPLE NAME"
+    ["description"]="Some description"
+    ["password"]=""
+    ["passwordAdmin"]=""
+    ["enableWhitelist"]="0"
+    ["disableBanlist"]="0"
+    ["disablePrioritylist"]="0"
+    ["maxPlayers"]="60"
+    ["verifySignatures"]="2"
+    ["forceSameBuild"]="1"
+    ["disableVoN"]="0"
+    ["vonCodecQuality"]="20"
+    ["disable3rdPerson"]="0"
+    ["disableCrosshair"]="0"
+    ["serverTime"]="SystemTime"
+    ["serverTimeAcceleration"]="1"
+    ["serverNightTimeAcceleration"]="1"
+    ["serverTimePersistent"]="0"
+    ["guaranteedUpdates"]="1"
+    ["loginQueueConcurrentPlayers"]="5"
+    ["loginQueueMaxPlayers"]="500"
+    ["instanceId"]="1"
+    ["storageAutoFix"]="1"
+    ["respawnTime"]="5"
+    ["motd"]=""
+    ["motdInterval"]="1"
+    ["timeStampFormat"]="Short"
+    ["logAverageFps"]="1"
+    ["logMemory"]="1"
+    ["logPlayers"]="1"
+    ["logFile"]="server_console.log"
+    ["adminLogPlayerHitsOnly"]="0"
+    ["adminLogPlacement"]="0"
+    ["adminLogBuildActions"]="0"
+    ["adminLogPlayerList"]="0"
+    ["disableMultiAccountMitigation"]="0"
+    ["enableDebugMonitor"]="1"
+    ["steamQueryPort"]="2305"
+    ["allowFilePatching"]="1"
+    ["simulatedPlayersBatch"]="20"
+    ["multithreadedReplication"]="1"
+    ["speedhackDetection"]="1"
+    ["networkRangeClose"]="20"
+    ["networkRangeNear"]="150"
+    ["networkRangeFar"]="1000"
+    ["networkRangeDistantEffect"]="4000"
+    ["networkObjectBatchLogSlow"]="5"
+    ["networkObjectBatchEnforceBandwidthLimits"]="1"
+    ["networkObjectBatchUseEstimatedBandwidth"]="0"
+    ["networkObjectBatchUseDynamicMaximumBandwidth"]="1"
+    ["networkObjectBatchBandwidthLimit"]="0.8"
+    ["networkObjectBatchCompute"]="1000"
+    ["networkObjectBatchSendCreate"]="10"
+    ["networkObjectBatchSendDelete"]="10"
+    ["defaultVisibility"]="1375"
+    ["defaultObjectViewDistance"]="1375"
+    ["lightingConfig"]="0"
+    ["disablePersonalLight"]="1"
+    ["disableBaseDamage"]="0"
+    ["disableContainerDamage"]="0"
+    ["disableRespawnDialog"]="0"
+    ["pingWarning"]="200"
+    ["pingCritical"]="250"
+    ["MaxPing"]="300"
+    ["serverFpsWarning"]="15"
+    ["shotValidation"]="1"
+    ["clientPort"]="2304"
+)
+
+# Descriptions/Memos (Truncated for column, detail view available)
+declare -A SERVERDZ_MEMOS=(
+    ["hostname"]="Server name displayed in browser"
+    ["description"]="Displayed in browser details (max 255 chars)"
+    ["password"]="Connection password (leave empty for public)"
+    ["passwordAdmin"]="RCON/Admin password"
+    ["enableWhitelist"]="Enable whitelist (value 0-1)"
+    ["disableBanlist"]="Disable ban.txt (0=use banlist)"
+    ["disablePrioritylist"]="Disable priority.txt (0=use prioritylist)"
+    ["maxPlayers"]="Maximum concurrent players"
+    ["verifySignatures"]="Verify .pbos against .bisign (2=recommended)"
+    ["forceSameBuild"]="Allow only same .exe revision (value 0-1)"
+    ["disableVoN"]="Disable Voice over Network (value 0-1)"
+    ["vonCodecQuality"]="VoN codec quality (0-20)"
+    ["disable3rdPerson"]="Toggle 3rd person (0=enabled, 1=1st person only)"
+    ["disableCrosshair"]="Toggle crosshair (0=enabled, 1=disabled)"
+    ["serverTime"]="Initial time (SystemTime or YYYY/MM/DD/HH/MM)"
+    ["serverTimeAcceleration"]="Time multiplier (0.1-64)"
+    ["serverNightTimeAcceleration"]="Night multiplier (multiplies acceleration)"
+    ["serverTimePersistent"]="Save time state on shutdown (value 0-1)"
+    ["guaranteedUpdates"]="Communication protocol (use 1)"
+    ["loginQueueConcurrentPlayers"]="Max logins processing concurrently"
+    ["loginQueueMaxPlayers"]="Max players in waiting queue"
+    ["instanceId"]="Unique instance ID for storage folders"
+    ["storageAutoFix"]="Auto-replace corrupted persistence files (value 0-1)"
+    ["respawnTime"]="Delay before respawn (seconds)"
+    ["motd"]="Message of the Day"
+    ["motdInterval"]="Seconds between MOTD messages"
+    ["timeStampFormat"]="Log format (Full/Short)"
+    ["logAverageFps"]="Log average FPS (needs -doLogs)"
+    ["logMemory"]="Log memory usage (needs -doLogs)"
+    ["logPlayers"]="Log player count (needs -doLogs)"
+    ["logFile"]="Console log filename"
+    ["adminLogPlayerHitsOnly"]="Log only player hits (0=all hits)"
+    ["adminLogPlacement"]="Log placement actions (traps/tents)"
+    ["adminLogBuildActions"]="Log basebuilding (build/dismantle)"
+    ["adminLogPlayerList"]="Log player list every 5 min"
+    ["disableMultiAccountMitigation"]="Disable console multi-account checks"
+    ["enableDebugMonitor"]="Show debug window on client (0-1)"
+    ["steamQueryPort"]="Steam query port (fixes visibility issues)"
+    ["allowFilePatching"]="Allow clients with -filePatching"
+    ["simulatedPlayersBatch"]="Max players simulated per frame"
+    ["multithreadedReplication"]="Enable multithreaded replication (0-1)"
+    ["speedhackDetection"]="Detection level (1 strict - 10 benevolent)"
+    ["networkRangeClose"]="Bubble for close objects (meters, default 20)"
+    ["networkRangeNear"]="Bubble for near inventory items (m, default 150)"
+    ["networkRangeFar"]="Bubble for far objects (m, default 1000)"
+    ["networkRangeDistantEffect"]="Bubble for effects (m, default 4000)"
+    ["networkObjectBatchLogSlow"]="Log slow bubbles > N seconds"
+    ["networkObjectBatchEnforceBandwidthLimits"]="Enable bandwidth limiter (0-1)"
+    ["networkObjectBatchUseEstimatedBandwidth"]="Bandwidth method (0=actual, 1=estimated)"
+    ["networkObjectBatchUseDynamicMaximumBandwidth"]="Dynamic max bandwidth (0=hard limit)"
+    ["networkObjectBatchBandwidthLimit"]="Bandwidth limit value"
+    ["networkObjectBatchCompute"]="Objects checked per frame"
+    ["networkObjectBatchSendCreate"]="Max objects sent for creation"
+    ["networkObjectBatchSendDelete"]="Max objects sent for deletion"
+    ["defaultVisibility"]="Max terrain render distance (meters)"
+    ["defaultObjectViewDistance"]="Max object render distance (meters)"
+    ["lightingConfig"]="Lighting (0=bright, 1=dark, 2=Sakhal)"
+    ["disablePersonalLight"]="Disable personal light (1=disabled)"
+    ["disableBaseDamage"]="Disable fence/tower damage (1=disabled)"
+    ["disableContainerDamage"]="Disable tent/barrel damage (1=disabled)"
+    ["disableRespawnDialog"]="Disable respawn dialog (1=random spawn)"
+    ["pingWarning"]="Yellow ping warning threshold (ms)"
+    ["pingCritical"]="Red ping warning threshold (ms)"
+    ["MaxPing"]="Kick player threshold (ms)"
+    ["serverFpsWarning"]="Yellow FPS warning threshold"
+    ["shotValidation"]="Enable shot validation (0-1)"
+    ["clientPort"]="Force client connection port"
 )
 
 # =============================================================================
@@ -289,11 +446,40 @@ config_table_editor() {
         # Calculate Layout
         get_term_size
         local table_start=3
-        local col_key=2
-        local col_val=$((col_key + max_key_len + 5))
-        local max_rows=$((TERM_ROWS - table_start - 4)) # leave space for footer + 1 empty line
         
-        # Input Loop (Inner loop to avoid re-fetching data just for navigation)
+        # Column Definitions (Fixed widths for alignment)
+        local col_key=2
+        local w_key=22
+        
+        local col_val=$((col_key + w_key))
+        local w_val=20
+        
+        local col_def=$((col_val + w_val))
+        local w_def=15
+        
+        local col_memo=$((col_def + w_def))
+        # remaining width for memo
+        
+        # Layout calculation
+        # Reserve space for: Header(2) + TableHeader(3) + Rows + Description(1) + Footer(1) + Margin(1)
+        # table_start=3. Rows start at table_start+3 = 6.
+        # Bottom needs: TERM_ROWS(blank), TERM_ROWS-1(footer), TERM_ROWS-2(desc)
+        # Last data row must be at TERM_ROWS-3.
+        # Max rows = (TERM_ROWS - 3) - 6 + 1 = TERM_ROWS - 8.
+        # Let's count explicitly:
+        # 1: Header
+        # 3: Divider
+        # 4: Headers
+        # 5: Divider
+        # 6: First Row
+        # ...
+        # TR-2: Description
+        # TR-1: Footer
+        # TR: Empty
+        
+        local max_rows=$((TERM_ROWS - table_start - 5)) 
+
+        # Input Loop
         while true; do
              # Handle scrolling
             if [[ $selection -lt $scroll_offset ]]; then
@@ -316,9 +502,13 @@ config_table_editor() {
             printf "%s" "$RESET"
             
             move_to $((table_start + 1)) $col_key
-            printf "%s%sKEY%s" "$DIM" "$WHITE" "$RESET"
+            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_key" "KEY" "$RESET"
             move_to $((table_start + 1)) $col_val
-            printf "%s%sVALUE%s" "$DIM" "$WHITE" "$RESET"
+            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_val" "VALUE" "$RESET"
+            move_to $((table_start + 1)) $col_def
+            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_def" "DEFAULT" "$RESET"
+            move_to $((table_start + 1)) $col_memo
+            printf "%s%sMEMO%s" "$DIM" "$WHITE" "$RESET"
             
             move_to $((table_start + 2)) 1
             printf "%s%s" "$DIM" "$RED"
@@ -329,38 +519,75 @@ config_table_editor() {
             local row=$((table_start + 3))
             local count=${#keys[@]}
             
+            local current_memo=""
+            
             for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
                 local key="${keys[$i]}"
                 local val="${values[$i]}"
+                local default="${SERVERDZ_DEFAULTS[$key]:-}"
+                local memo="${SERVERDZ_MEMOS[$key]:-}"
                 
-                # Truncate value
-                local max_val_len=$((TERM_COLS - col_val - 2))
-                [[ ${#val} -gt $max_val_len ]] && val="${val:0:$((max_val_len-3))}..."
-                [[ -z "$val" ]] && val="(empty)"
+                # Truncate visuals
+                # Key
+                local d_key="$key"
+                [[ ${#d_key} -ge $((w_key-2)) ]] && d_key="${d_key:0:$((w_key-4))}.."
+                
+                # Value
+                local d_val="$val"
+                [[ -z "$d_val" ]] && d_val="(empty)"
+                [[ ${#d_val} -ge $((w_val-2)) ]] && d_val="${d_val:0:$((w_val-4))}.."
+                
+                # Default
+                local d_def="$default"
+                [[ ${#d_def} -ge $((w_def-2)) ]] && d_def="${d_def:0:$((w_def-4))}.."
+                
+                # Memo (Fill remaining)
+                local w_memo=$((TERM_COLS - col_memo - 1))
+                local d_memo="$memo"
+                [[ ${#d_memo} -ge $w_memo ]] && d_memo="${d_memo:0:$((w_memo-2))}.."
+                
+                # Capture current selection memo for footer
+                [[ $i -eq $selection ]] && current_memo="$memo"
                 
                 move_to $row 1
                 if [[ $i -eq $selection ]]; then
                     # Selected Row
                     printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                     move_to $row $col_key
-                    printf "▶ %s" "$key"
+                    printf "▶ %s" "$d_key"
                     move_to $row $col_val
-                    printf "%s" "$val"
+                    printf "%s" "$d_val"
+                    move_to $row $col_def
+                    printf "%s" "$d_def"
+                    move_to $row $col_memo
+                    printf "%s" "$d_memo"
                     printf "%s" "$RESET"
                 else
                     # Normal Row
                     move_to $row $col_key
-                    printf "  %s" "$key"
+                    printf "  %s" "$d_key"
                     move_to $row $col_val
-                    printf "%s%s%s" "$DIM" "$val" "$RESET"
+                    printf "%s%s" "$DIM" "$d_val"
+                    move_to $row $col_def
+                    printf "%s" "$d_def"
+                    move_to $row $col_memo
+                    printf "%s" "$d_memo"
+                    printf "%s" "$RESET"
                 fi
                 ((row++))
             done
             
-            # 4. Footer (moved up one line)
+            # 4. Description Bar
+            if [[ -n "$current_memo" ]]; then
+                move_to $((TERM_ROWS - 2)) 1
+                # Format: ℹ️  <memo>
+                printf "%s%sℹ️  %s%s" "$RESET" "$BOLD" "$current_memo" "$RESET"
+            fi
+            
+            # 5. Footer
             move_to $((TERM_ROWS - 1)) 1
             local footer_text=" [Enter] Edit   [q] Back"
-            local pad_len=$((TERM_COLS - ${#footer_text})) # can use full width now as we are not on last line
+            local pad_len=$((TERM_COLS - ${#footer_text})) # Full width safe since row < TERM_ROWS
             printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
             
             # Input Handling
