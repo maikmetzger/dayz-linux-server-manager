@@ -42,10 +42,25 @@ def metadata(xml_path):
     }
     print(json.dumps(result))
 
-def query(xml_path, name=None, cat=None, usage=None, tier=None):
+def query(xml_path, name=None, cat=None, usage=None, tier=None, vanilla_path=None):
     _, root = get_types_root(xml_path)
+    vanilla_root = None
+    if vanilla_path and os.path.exists(vanilla_path):
+        try:
+            _, vanilla_root = get_types_root(vanilla_path)
+        except:
+            pass
+            
     results = []
     
+    # Pre-index vanilla for speed if provided
+    vanilla_map = {}
+    if vanilla_root is not None:
+        for v_node in vanilla_root.findall('type'):
+            v_name = v_node.get('name', '')
+            if v_name:
+                vanilla_map[v_name] = v_node
+
     for type_node in root.findall('type'):
         item_name = type_node.get('name', '')
         
@@ -85,6 +100,13 @@ def query(xml_path, name=None, cat=None, usage=None, tier=None):
         lifetime = type_node.find('lifetime')
         restock = type_node.find('restock')
         
+        # Vanilla comparison
+        v_item = vanilla_map.get(item_name)
+        v_nominal = v_item.find('nominal').text if v_item is not None and v_item.find('nominal') is not None else "0"
+        v_min = v_item.find('min').text if v_item is not None and v_item.find('min') is not None else "0"
+        v_life = v_item.find('lifetime').text if v_item is not None and v_item.find('lifetime') is not None else "0"
+        v_rs = v_item.find('restock').text if v_item is not None and v_item.find('restock') is not None else "0"
+
         # Details for footer
         # Get all usages
         all_usages = [u.get('name', '') for u in type_node.findall('usage')]
@@ -101,9 +123,13 @@ def query(xml_path, name=None, cat=None, usage=None, tier=None):
         results.append({
             "name": item_name,
             "nominal": nominal.text if nominal is not None else "0",
+            "nominal_v": v_nominal,
             "min": min_val.text if min_val is not None else "0",
+            "min_v": v_min,
             "lifetime": lifetime.text if lifetime is not None else "0",
+            "lifetime_v": v_life,
             "restock": restock.text if restock is not None else "0",
+            "restock_v": v_rs,
             "category": type_node.find('category').get('name', '') if type_node.find('category') is not None else "",
             "usages": ",".join(all_usages),
             "tiers": ",".join(all_tiers),
@@ -158,6 +184,7 @@ if __name__ == "__main__":
     p_query.add_argument('--cat', help='Filter by category')
     p_query.add_argument('--usage', help='Filter by usage')
     p_query.add_argument('--tier', help='Filter by tier')
+    p_query.add_argument('--vanilla', help='Path to vanilla types.xml for comparison')
     
     # Update
     p_upd = subparsers.add_parser('update')
@@ -171,7 +198,7 @@ if __name__ == "__main__":
     if args.command == 'metadata':
         metadata(args.file)
     elif args.command == 'query':
-        query(args.file, args.name, args.cat, args.usage, args.tier)
+        query(args.file, args.name, args.cat, args.usage, args.tier, args.vanilla)
     elif args.command == 'update':
         update(args.file, args.item, args.key, args.val)
     else:

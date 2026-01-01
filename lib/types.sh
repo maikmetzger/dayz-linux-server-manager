@@ -12,18 +12,19 @@ _fetch_xml_items() {
     local cat="$3"
     local use="$4"
     local tier="$5"
+    local vanilla_file="$6"
     
     local cmd=("python3" "${SCRIPT_DIR}/lib/xml_parser.py" "query" "$xml_file")
     [[ -n "$name" ]] && cmd+=("--name" "$name")
     [[ -n "$cat" ]] && cmd+=("--cat" "$cat")
     [[ -n "$use" ]] && cmd+=("--usage" "$use")
     [[ -n "$tier" ]] && cmd+=("--tier" "$tier")
+    [[ -n "$vanilla_file" ]] && cmd+=("--vanilla" "$vanilla_file")
     
     "${cmd[@]}"
 }
 
 # Unified Drawing Logic for the Table View
-# Usage: _draw_xml_editor_screen "$xml_file" $count $selection $offset "$f_name" "$f_cat" "$f_use" "$f_tier" "items_array_name"
 _draw_xml_editor_screen() {
     local xml_file="$1"
     local count=$2
@@ -43,7 +44,7 @@ _draw_xml_editor_screen() {
     move_to 1 1
     printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Loot Economy Editor - $filename" "$RESET"
     
-    # 2. Filter Status (Line 2)
+    # 2. Filter Status
     local filter_str=""
     [[ -n "$f_name" ]] && filter_str+="Name: $f_name "
     [[ -n "$f_cat" ]] && filter_str+="Cat: $f_cat "
@@ -94,7 +95,8 @@ _draw_xml_editor_screen() {
         move_to $((start_row + i)) 1
         
         if [[ $idx -lt $count ]]; then
-            IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items_ref[$idx]:-}"
+            # Fields: name|nom|min|life|rs|cat|usages|tiers|flags|nom_v|min_v|life_v|rs_v
+            IFS='|' read -r name nom min life rs cat usages tiers flags nom_v min_v life_v rs_v <<< "${_items_ref[$idx]:-}"
             local style="$WHITE"
             if [[ $idx -eq $selection ]]; then
                 style="$BG_RED$WHITE$BOLD"
@@ -114,7 +116,7 @@ _draw_xml_editor_screen() {
             move_to $((start_row + i)) $col_life
             printf "%s%-*s%s" "$style" $w_life "$life" "$RESET"
             move_to $((start_row + i)) $col_rs
-            printf "%s%-*s%s" "$style" $w_life "$rs" "$RESET" # Use same width as life for RS
+            printf "%s%-*s%s" "$style" $w_rs "$rs" "$RESET"
         fi
     done
     
@@ -125,11 +127,11 @@ _draw_xml_editor_screen() {
     printf "%s" "$RESET"
     
     if [[ $count -gt 0 ]]; then
-        IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${_items_ref[$selection]:-}"
+        IFS='|' read -r name nom min life rs cat usages tiers flags nom_v min_v life_v rs_v <<< "${_items_ref[$selection]:-}"
         move_to $((footer_row + 1)) 2
         printf "%sCategory: %s%-15s %sUsage: %s%s" "$YLW" "$WHITE" "$cat" "$YLW" "$WHITE" "$usages"
         move_to $((footer_row + 2)) 2
-        printf "%sTiers:    %s%s" "$YLW" "$WHITE" "$tiers"
+        printf "%sVanilla : %sNom: %-6s Min: %-6s Life: %-8s RS: %-6s" "$YLW" "$DIM" "$nom_v" "$min_v" "$life_v" "$rs_v"
         
         # Flags
         if [[ -n "$flags" ]]; then
@@ -166,10 +168,13 @@ config_xml_editor() {
     local xml_file="$2"
     local id="$3"
     
-    local f_name=""
-    local f_cat=""
-    local f_use=""
-    local f_tier=""
+    # Create vanilla backup if needed
+    local vanilla_file="${xml_file}.vanilla"
+    if [[ ! -f "$vanilla_file" ]]; then
+        cp "$xml_file" "$vanilla_file"
+    fi
+
+    local f_name="" f_cat="" f_use="" f_tier=""
     
     # Load metadata for menus
     local meta_json
@@ -188,13 +193,13 @@ config_xml_editor() {
     while true; do
         if [[ $f_changed -eq 1 ]]; then
             local items_json
-            items_json=$(_fetch_xml_items "$xml_file" "$f_name" "$f_cat" "$f_use" "$f_tier")
+            items_json=$(_fetch_xml_items "$xml_file" "$f_name" "$f_cat" "$f_use" "$f_tier" "$vanilla_file")
             items=()
             while IFS= read -r line; do items+=("$line"); done < <(echo "$items_json" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for x in data:
-    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{json.dumps(x['flags'])}\")
+    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{json.dumps(x['flags'])}|{x['nominal_v']}|{x['min_v']}|{x['lifetime_v']}|{x['restock_v']}\")
 ")
             count=${#items[@]}
             [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
@@ -223,17 +228,13 @@ for x in data:
             f_changed=1
             selection=0
         elif [[ "$key" == "f" || "$key" == "F" ]]; then
-            # Filter Dialog (Passes scope for background redraw)
             _draw_xml_filter_dialog f_name f_cat f_use f_tier cat_list[@] use_list[@] tier_list[@] \
                 "$xml_file" "$count" "$selection" "$offset" items
             f_changed=1
             selection=0
         elif [[ "$key" == "" ]]; then
-            # Edit Item
             if [[ $count -gt 0 ]]; then
-                IFS='|' read -r name nom min life rs cat usages tiers flags <<< "${items[$selection]:-}"
-                _edit_xml_item "$xml_file" "$name" \
-                    "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items
+                _edit_xml_item "$xml_file" "$count" "$selection" "$offset" "$f_name" "$f_cat" "$f_use" "$f_tier" items
                 f_changed=1
             fi
         fi
@@ -243,7 +244,6 @@ for x in data:
 _draw_xml_filter_dialog() {
     local -n _fn=$1 _fc=$2 _fu=$3 _ft=$4
     local -a _cats=("${!5}") _uses=("${!6}") _tiers=("${!7}")
-    # Background Redraw Info
     local bg_xml="$8" bg_count="$9" bg_sel="${10}" bg_off="${11}"
     local -n _bg_items_ref=${12}
     
@@ -253,7 +253,6 @@ _draw_xml_filter_dialog() {
     local d_sel=0
 
     while true; do
-        # REDRAW BACKGROUND
         _draw_xml_editor_screen "$bg_xml" "$bg_count" "$bg_sel" "$bg_off" "$_fn" "$_fc" "$_fu" "$_ft" _bg_items_ref
         draw_box $d_row $d_col $d_height $d_width "Filter types.xml"
         
@@ -314,51 +313,42 @@ _draw_xml_filter_dialog() {
 
 _edit_xml_item() {
     local xml_file="$1"
-    local item_name="$2"
-    local bg_count="$3"
-    local bg_sel="$4"
-    local bg_off="$5"
-    local bg_fn="$6"
-    local bg_fc="$7"
-    local bg_fu="$8"
-    local bg_ft="$9"
-    local -n _bg_items_ref=${10}
+    local bg_count="$2"
+    local bg_sel="$3"
+    local bg_off="$4"
+    local bg_fn="$5"
+    local bg_fc="$6"
+    local bg_fu="$7"
+    local bg_ft="$8"
+    local -n _bg_items_ref=$9
 
-    # Initial Fetch
-    local item_json
-    item_json=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" query "$xml_file" --name "$item_name")
-    local nom min life rs
-    nom=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['nominal'] if data else '0')")
-    min=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['min'] if data else '0')")
-    life=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['lifetime'] if data else '0')")
-    rs=$(echo "$item_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data[0]['restock'] if data else '0')")
+    # Extract all data from background list
+    IFS='|' read -r item_name nom min life rs cat usages tiers flags nom_v min_v life_v rs_v <<< "${_bg_items_ref[$bg_sel]:-}"
 
-    local d_width=50
-    local d_height=12
+    local d_width=52 d_height=12
     local d_row=$(( (TERM_ROWS - d_height) / 2 ))
     local d_col=$(( (TERM_COLS - d_width) / 2 ))
     local d_sel=0
 
     while true; do
-        # REDRAW BACKGROUND
         _draw_xml_editor_screen "$xml_file" "$bg_count" "$bg_sel" "$bg_off" "$bg_fn" "$bg_fc" "$bg_fu" "$bg_ft" _bg_items_ref
-        
         draw_box $d_row $d_col $d_height $d_width "Edit: $item_name"
         
         local fields=("Nominal" "Min" "Lifetime" "Restock")
         local values=("$nom" "$min" "$life" "$rs")
+        local vanillas=("$nom_v" "$min_v" "$life_v" "$rs_v")
         
         for i in "${!fields[@]}"; do
             move_to $((d_row + 2 + i)) $((d_col + 2))
             local style="$WHITE"
             [[ $d_sel -eq $i ]] && style="$RED$BOLD"
-            printf "%s%-10s: %s%s%s" "$style" "${fields[$i]}" "$WHITE" "${values[$i]}" "$RESET"
+            printf "%s%-10s: %-8s %s(Vanilla: %s)%s" "$style" "${fields[$i]}" "${values[$i]}" "$DIM" "${vanillas[$i]}" "$RESET"
         done
         
         move_to $((d_row + d_height - 3)) $((d_col + 2))
         printf "%s─" "$(printf '%.0s─' $(seq 1 $((d_width - 4))))"
         move_to $((d_row + d_height - 2)) $((d_col + 2))
-        printf "[ Enter ] Edit     [ Esc ] Close/Save"
+        printf "[ Enter ] Edit     [ Esc ] Close"
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
@@ -366,10 +356,9 @@ _edit_xml_item() {
             case "$s" in
                 "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
                 "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
-                "") return ;; # Escape/Close
+                "") return ;;
             esac
         elif [[ "$k" == "" ]]; then
-            # Enter - Edit selected
             local field="" current_val=""
             case $d_sel in
                 0) field="nominal"; current_val="$nom" ;;
