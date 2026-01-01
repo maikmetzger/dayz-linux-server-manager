@@ -236,12 +236,10 @@ _draw_workshop_details_screen() {
         # FIX: Reduce height by 1 to avoid touching bottom border
         local view_height=$((desc_height - 3))
         local total_lines=${#lines[@]}
-        # Allow scrolling past the "full page" limit to show partial last pages
-        local max_scroll=$((total_lines - 1))
+        # Max scroll snap to page (floor division of total-1 to get max page index, times height)
+        local max_scroll=$(( ((total_lines - 1) / view_height) * view_height ))
         [[ $max_scroll -lt 0 ]] && max_scroll=0
         [[ $scroll_offset -gt $max_scroll ]] && scroll_offset=$max_scroll
-        # Align scroll to closest page (floor) to prevent "drifting" if logic changes
-        # scroll_offset=$(( (scroll_offset / view_height) * view_height ))
         
         for ((i=0; i<view_height; i++)); do
             local l_idx=$((scroll_offset + i))
