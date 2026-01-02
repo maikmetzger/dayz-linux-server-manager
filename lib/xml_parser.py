@@ -19,28 +19,81 @@ from typing import Optional, Dict, Any
 # =============================================================================
 # Maps XML root tags to CE configuration.
 # To add a new type: add an entry here, no other code changes needed.
-CE_TYPE_REGISTRY: Dict[str, Dict[str, str]] = {
+#
+# merge_only: True means file cannot be linked via cfgeconomycore.xml
+#             and must be merged into a single target file
+CE_TYPE_REGISTRY: Dict[str, Dict[str, Any]] = {
     'types': {
         'ce_type': 'types',
         'folder': 'CustomCE/types',
-        'description': 'Item spawn definitions (nominal, min, lifetime, restock)'
+        'description': 'Item spawn definitions (nominal, min, lifetime, restock)',
+        'merge_only': False
     },
     'spawnabletypes': {
         'ce_type': 'spawnabletypes',
         'folder': 'CustomCE/spawnabletypes',
-        'description': 'Attachments/cargo spawning on items (vehicles, weapons)'
+        'description': 'Attachments/cargo spawning on items (vehicles, weapons)',
+        'merge_only': False
     },
     'events': {
         'ce_type': 'events',
         'folder': 'CustomCE/events',
-        'description': 'Dynamic events (animal herds, vehicle spawns, crashes)'
+        'description': 'Dynamic events (animal herds, vehicle spawns, crashes)',
+        'merge_only': False
     },
     'eventposdef': {
         'ce_type': 'eventspawns',
         'folder': 'CustomCE/eventspawns',
-        'description': 'Fixed spawn positions for events'
-    }
+        'description': 'Fixed spawn positions for events',
+        'merge_only': False
+    },
+    # Merge-only types: Cannot be included via cfgeconomycore.xml
+    'randompresets': {
+        'ce_type': 'randompresets',
+        'folder': 'db',
+        'description': 'Random loot preset groups (themed item bundles)',
+        'merge_only': True,
+        'target_file': 'cfgrandompresets.xml'
+    },
+    'eventgroups': {
+        'ce_type': 'eventgroups',
+        'folder': 'db',
+        'description': 'Event object groups (train wrecks, helicopter crashes)',
+        'merge_only': True,
+        'target_file': 'cfgeventgroups.xml'
+    },
 }
+
+# =============================================================================
+# Fragment Detection Registry (for files without root wrapper tag)
+# =============================================================================
+# Maps first child element tag to CE type for fragment files.
+# Example: A file with just <type name="..."> tags (no <types> wrapper)
+CE_FRAGMENT_REGISTRY: Dict[str, str] = {
+    'type': 'types',          # <type name="..."> without <types> wrapper
+    'cargo': 'randompresets', # <cargo name="..."> without <randompresets>
+    'attachments': 'randompresets',  # Alternative child in randompresets
+    'event': 'events',        # <event name="..."> without <events>
+    'group': 'eventgroups',   # <group name="..."> without <eventgroups>
+}
+
+# =============================================================================
+# Filename Pattern Fallback (last resort detection)
+# =============================================================================
+# Regex patterns for filename-based CE type detection.
+# Order matters: more specific patterns first.
+import re
+CE_FILENAME_PATTERNS = [
+    (re.compile(r'(?i).*randompresets.*\.xml$'), 'randompresets'),
+    (re.compile(r'(?i).*eventgroups.*\.xml$'), 'eventgroups'),
+    (re.compile(r'(?i).*spawnabletypes.*\.xml$'), 'spawnabletypes'),
+    (re.compile(r'(?i).*eventspawns.*\.xml$'), 'eventspawns'),
+    (re.compile(r'(?i).*eventpos.*\.xml$'), 'eventspawns'),
+    (re.compile(r'(?i).*events.*\.xml$'), 'events'),
+    (re.compile(r'(?i).*types.*\.xml$'), 'types'),
+]
+
+
 
 def get_types_root(xml_path):
     try:
@@ -79,22 +132,101 @@ def metadata(xml_path):
     }
     print(json.dumps(result))
 
-def detect_ce_type(xml_path: str) -> Optional[Dict[str, str]]:
+def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optional[Dict[str, Any]]:
     """
-    Detects the Central Economy file type based on root XML element.
+    Enhanced CE file type detection with 3 fallback layers:
+    
+    1. Root tag detection - Standard XML files with proper root element
+    2. Fragment detection - Files without root wrapper (e.g., <type> without <types>)
+    3. Filename pattern - Last resort based on filename patterns
     
     Args:
         xml_path: Path to the XML file to analyze
+        use_filename_fallback: If True, use filename patterns as last resort
         
     Returns:
-        Dict with 'ce_type', 'folder', 'description' if recognized, else None
+        Dict with 'ce_type', 'folder', 'description', 'merge_only', 'detection_method'
+        or None if not recognized
     """
+    filename = os.path.basename(xml_path)
+    
+    # Layer 1: Try parsing and checking root tag
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
-        return CE_TYPE_REGISTRY.get(root.tag)
+        
+        registry_entry = CE_TYPE_REGISTRY.get(root.tag)
+        if registry_entry:
+            result = dict(registry_entry)
+            result['detection_method'] = 'root_tag'
+            return result
+        
+        # Layer 2a: Check if root tag itself is a fragment element
+        # This handles files like: <type name="...">...</type> (root IS the entry)
+        fragment_ce_type = CE_FRAGMENT_REGISTRY.get(root.tag)
+        if fragment_ce_type:
+            for entry in CE_TYPE_REGISTRY.values():
+                if entry['ce_type'] == fragment_ce_type:
+                    result = dict(entry)
+                    result['detection_method'] = 'fragment_root'
+                    result['is_fragment'] = True
+                    return result
+            
+        # Layer 2b: Check first child elements for fragment detection
+        # This handles files with unknown wrapper: <wrapper><type>...</type></wrapper>
+        first_child = next(iter(root), None)
+        if first_child is not None:
+            child_tag = first_child.tag
+            fragment_ce_type = CE_FRAGMENT_REGISTRY.get(child_tag)
+            if fragment_ce_type:
+                # Look up full info from CE_TYPE_REGISTRY using the type name
+                for entry in CE_TYPE_REGISTRY.values():
+                    if entry['ce_type'] == fragment_ce_type:
+                        result = dict(entry)
+                        result['detection_method'] = 'fragment_child'
+                        result['is_fragment'] = True
+                        return result
+                        
+    except ET.ParseError:
+        # File couldn't be parsed as valid XML - try text-based fragment detection
+        # This handles files with multiple root elements like: <type>...</type><type>...</type>
+        try:
+            with open(xml_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(2048)  # Read first 2KB to find element
+            
+            # Look for first opening tag (skip XML declaration and comments)
+            import re
+            tag_match = re.search(r'<([a-zA-Z_][a-zA-Z0-9_-]*)\s', content)
+            if tag_match:
+                first_tag = tag_match.group(1).lower()
+                fragment_ce_type = CE_FRAGMENT_REGISTRY.get(first_tag)
+                if fragment_ce_type:
+                    for entry in CE_TYPE_REGISTRY.values():
+                        if entry['ce_type'] == fragment_ce_type:
+                            result = dict(entry)
+                            result['detection_method'] = 'fragment_text'
+                            result['is_fragment'] = True
+                            return result
+        except Exception:
+            pass
     except Exception:
-        return None
+        # Other parsing errors
+        pass
+    
+    # Layer 3: Filename pattern fallback
+    if use_filename_fallback:
+        for pattern, ce_type in CE_FILENAME_PATTERNS:
+            if pattern.match(filename):
+                # Look up full info from registry
+                for entry in CE_TYPE_REGISTRY.values():
+                    if entry['ce_type'] == ce_type:
+                        result = dict(entry)
+                        result['detection_method'] = 'filename'
+                        return result
+    
+    return None
+
+
 
 
 def is_types_xml(xml_path: str) -> None:

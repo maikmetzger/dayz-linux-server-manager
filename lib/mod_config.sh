@@ -1007,7 +1007,9 @@ for mod_id in sorted(mod_ids):
                 except: pass
             
             if not ce_type:
-                if 'spawnable' in lfn: ce_type = 'spawnabletypes'
+                if 'randompresets' in lfn: ce_type = 'randompresets'
+                elif 'eventgroups' in lfn: ce_type = 'eventgroups'
+                elif 'spawnable' in lfn: ce_type = 'spawnabletypes'
                 elif 'eventspawns' in lfn or 'eventpos' in lfn: ce_type = 'eventspawns'
                 elif 'events' in lfn: ce_type = 'events'
                 elif 'types' in lfn: ce_type = 'types'
@@ -1097,7 +1099,7 @@ for mod_id in sorted(mod_ids):
 # - Files we already scanned from workshop
 # - Files that are linked (in cfgeconomycore.xml) - these are managed by us or the mod
 # - Files with mod ID prefixes that match known mod IDs
-ce_folders = ["types", "spawnabletypes", "events", "eventspawns"]
+ce_folders = ["types", "spawnabletypes", "events", "eventspawns", "randompresets", "eventgroups"]
 for folder in ce_folders:
     dir_path = os.path.join(mission_path, "CustomCE", folder)
     if not os.path.isdir(dir_path): continue
