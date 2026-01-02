@@ -7,6 +7,7 @@ debug_crash_*.json
 # Test Output
 test_output.json
 *.test
+plans/
 
 # Python Cache
 __pycache__/
