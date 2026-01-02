@@ -263,6 +263,7 @@ mod_list_apply_fixes() {
       log "Casing normalized for mod id=${id}."
 
       ln -sfn "${mod_dir}" "${DZ_SERVERFILES}/@${id}"
+      touch "${mod_dir}" # Update mtime to reflect sync status in UI
       mod_args+="${mod_args:+;}"
       mod_args+="@${id}"
 

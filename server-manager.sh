@@ -206,10 +206,6 @@ ws_path1 = os.environ.get('WS_PATH_1', '')
 ws_path2 = os.environ.get('WS_PATH_2', '')
 cache_json = os.environ.get('CACHE_JSON', '{}')
 
-ws_dir = ws_path1
-if not os.path.exists(ws_dir) and os.path.exists(ws_path2):
-    ws_dir = ws_path2
-
 try:
     data = json.loads(cache_json) if cache_json else {}
     mods_info = data.get('mods', {})
@@ -222,13 +218,19 @@ try:
     for mid in mod_ids:
         if not mid: continue
         m = mods_info.get(mid, {})
-        m_path = os.path.join(ws_dir, mid)
+        
+        # Check both potential workshop paths
+        path1 = os.path.join(ws_path1, mid)
+        path2 = os.path.join(ws_path2, mid)
+        m_path = path1 if os.path.exists(path1) else path2
+        
         local_v = 0
         install_ts = 0
         
         # Local Stats
         if os.path.exists(m_path):
-            install_ts = int(os.path.getctime(m_path))
+            # Prefer mtime for both as ctime is metadata-change on Linux
+            install_ts = int(os.path.getmtime(m_path))
             v_file = os.path.join(m_path, '.installed_version')
             if os.path.exists(v_file):
                 try: 
@@ -239,14 +241,14 @@ try:
         
         # Deployment Check
         is_deployed = False
-        if ws_dir:
+        if m_path:
             try:
                 check_roots = []
-                p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
+                p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))
                 check_roots.append(p1)
                 
-                if 'serverfiles' in ws_dir:
-                    parts = ws_dir.split(os.sep)
+                if 'serverfiles' in m_path:
+                    parts = m_path.split(os.sep)
                     if 'serverfiles' in parts:
                         idx = parts.index('serverfiles')
                         p2 = os.sep.join(parts[:idx+1])
@@ -472,7 +474,12 @@ END_PYTHON
         
         # Action bar
         local action_row=$row
+        local sys_time
+        sys_time=$(date +"%H:%M:%S")
         local actions=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[I] Info" "[Q] Back")
+        
+        move_to $action_row $((TERM_COLS - 20))
+        printf "%s%s[ %s ]%s" "$DIM" "$WHITE" "$sys_time" "$RESET"
         
         move_to $action_row 2
         for a in "${!actions[@]}"; do
