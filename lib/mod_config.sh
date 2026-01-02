@@ -456,6 +456,9 @@ modular_loot_dashboard() {
     
     echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
     
+    # Error trap for debugging - catches which line causes exit
+    trap 'echo "[CRASH] Line $LINENO: $BASH_COMMAND" >> "${SCRIPT_DIR}/loot_manager.log"' ERR
+    
     # helper to parse JSON array to bash arrays
     parse_scan_result() {
         local json="$1"
