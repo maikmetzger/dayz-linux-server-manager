@@ -432,6 +432,26 @@ types_selection_menu() {
                 local p="${mission_path}/db/${db_file}"
                 [[ -f "$p" ]] && { items+=("📄|$db_file"); paths+=("$p"); }
             done
+            
+            # Extra Configs (cfg*.xml and others)
+            local extra_cfgs=(
+                "cfgspawnabletypes.xml"
+                "cfgeventspawns.xml"
+                "cfgrandompresets.xml"
+                "cfgeventgroups.xml"
+                "cfgeffectarea.xml"
+                "cfgweather.xml"
+                "cfgplayerspawnpoints.xml"
+                "cfgignorelist.xml"
+                "cfggameplay.json"
+                "cfglimitsdefinition.xml"
+                "mapgrouppos.xml"
+                "mapgroupproto.xml"
+            )
+            for cfg_file in "${extra_cfgs[@]}"; do
+                local p="${mission_path}/${cfg_file}"
+                [[ -f "$p" ]] && { items+=("⚙️|$cfg_file"); paths+=("$p"); }
+            done
         fi
         
         # 3. Core Files (Handled in main list)
