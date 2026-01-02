@@ -135,7 +135,16 @@ mod_manager() {
     local -a mod_types=()
     local -a mod_warnings=()
     
+    local last_cols=0
+    
     while true; do
+        get_term_size
+        
+        # Trigger rebuild if terminal width changed (for name truncation)
+        if [[ $TERM_COLS -ne $last_cols ]]; then
+            needs_rebuild=1
+            last_cols=$TERM_COLS
+        fi
         
         # Only rebuild arrays when data has changed
         if [[ $needs_rebuild -eq 1 ]]; then
@@ -224,7 +233,7 @@ except:
         
         # Header bar
         move_to 1 1
-        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Mod Manager - $SELECTED_NAME" "$RESET"
+        printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "Mod Manager - $SELECTED_NAME" "${ESC}[K" "$RESET"
         
         # Table header
         local table_start=3
@@ -235,8 +244,8 @@ except:
         local col_type=$((TERM_COLS - 10))
         
         move_to $table_start 1
-        printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) $col_status
@@ -251,8 +260,8 @@ except:
         printf "%s%sTYPE%s" "$DIM" "$WHITE" "$RESET"
         
         move_to $((table_start + 2)) 1
-        printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
         
         # Mod rows
@@ -288,7 +297,7 @@ except:
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
-                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+                printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
                 move_to $row $col_version
@@ -326,8 +335,8 @@ except:
         
         # Separator
         move_to $row 1
-        printf "%s%s" "$DIM" "$RED"
-        printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
         ((row++))
         
@@ -353,14 +362,16 @@ except:
             local sel_warn
             sel_warn="$(check_mod_dependencies "$sel_mid" "${mod_ids[@]}" || true)"
             if [[ -n "$sel_warn" ]]; then
-                printf "%s%s WARN: %s %s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "$RESET"
+                printf "%s%s WARN: %s %s%s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "${ESC}[K" "$RESET"
             else
-                printf "%s" "$CLEAR_LINE"
+                printf "%s" "${ESC}[2K"
             fi
+        else
+            printf "%s" "${ESC}[2K"
         fi
 
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 80))" "" "$RESET"
+        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
