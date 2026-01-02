@@ -476,7 +476,7 @@ END_PYTHON
                     disabled) printf "[%s%s%s]" "$RED" "$type_short" "$row_color" ;;
                 esac
                 move_to $row $col_name
-                printf "%s" "$mname"
+                printf "%s%s" "$row_color" "$mname"
                 move_to $row $col_id
                 printf "%s%s%s" "$id_color" "$mid" "$row_color"
                 move_to $row $col_wsver
