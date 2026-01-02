@@ -222,7 +222,7 @@ try:
         # Check both potential workshop paths
         path1 = os.path.join(ws_path1, mid)
         path2 = os.path.join(ws_path2, mid)
-        m_path = path1 if os.path.exists(path1) else path2
+        m_path = path2 if os.path.exists(path2) else path1
         
         local_v = 0
         install_ts = 0
