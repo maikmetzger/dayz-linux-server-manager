@@ -226,7 +226,14 @@ def check_mod_updates(mod_ids: list, local_versions: dict) -> dict:
             
         remote_updated = mod.get('updated', 0)
         local_updated = int(local_versions.get(mod_id, 0))
-        has_update = remote_updated > local_updated and local_updated > 0
+        
+        # If not installed (0) OR remote is higher than local, it needs sync
+        has_update = (remote_updated > local_updated) or (local_updated == 0)
+        
+        # Exception: if BOTH are 0, we can't be sure, but usually means missing local data
+        # so we still want to flag it as needing sync if it's missing locally.
+        if local_updated == 0:
+            has_update = True
         
         result["mods"][mod_id] = {
             "installed": local_updated,

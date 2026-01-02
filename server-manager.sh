@@ -181,32 +181,47 @@ mod_manager() {
                 mod_versions+=("$v_disp")
                 mod_update_flags+=("$has_up")
             done < <(echo "$cache_data" | python3 -c "
-import json, sys, datetime
+import json, sys, datetime, os
 try:
     data = json.load(sys.stdin)
     mods_info = data.get('mods', {})
+    
     def fmt(ts):
         if not ts or ts == 0: return '-'
-        # User requested: 10. Nov 2025 13:45 (24h)
         return datetime.datetime.fromtimestamp(ts).strftime('%d. %b %Y %H:%M')
+    
+    # Check local disk for 100% accuracy
+    ws_dir = '${DZ_SERVERFILES}/steamapps/workshop/content/221100'
     
     # Process IDs passed from bash (we need to preserve order)
     target_ids = '''$(printf "%s\n" "${mod_ids[@]}")'''.strip().split('\n')
     for mid in target_ids:
         if not mid: continue
         m = mods_info.get(mid, {})
-        inst = m.get('installed', 0)
-        lat = m.get('latest', 0)
-        up = m.get('has_update', False)
         
-        v = fmt(inst)
-        if up: v = f'NEED SYNC' # User requested NEED SYNC in version column
-        elif inst == 0: v = fmt(lat)
+        # Verify local disk status
+        m_path = os.path.join(ws_dir, mid)
+        local_v = 0
+        if os.path.exists(m_path):
+            v_file = os.path.join(m_path, '.installed_version')
+            if os.path.exists(v_file):
+                try: 
+                    with open(v_file) as f: local_v = int(f.read().strip())
+                except: local_v = int(os.path.getmtime(m_path))
+            else:
+                local_v = int(os.path.getmtime(m_path))
         
-        print(f'{v}|{1 if up else 0}')
-except:
-    # Fallback for error/empty
-    for _ in range($((${#mod_ids[@]}))): print('NEED SYNC|1' if $((${#mod_ids[@]})) > 0 else '-|0')
+        remote_v = m.get('latest', 0)
+        # If not installed (local_v=0) OR remote is higher than local, it needs sync
+        has_update = (remote_v > local_v) or (local_v == 0)
+        
+        v = fmt(local_v)
+        if has_update: v = 'NEED SYNC'
+        
+        print(f'{v}|{1 if has_update else 0}')
+except Exception as e:
+    # Fallback for error
+    for _ in range($((${#mod_ids[@]}))): print('NEED SYNC|1')
 " 2>/dev/null)
             
             # Global sync flag

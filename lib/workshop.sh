@@ -46,11 +46,19 @@ store_mod_version() {
 get_mod_local_version() {
     local mod_id="$1"
     local workshop_dir="$2"
-    
-    local version_file="${workshop_dir}/${mod_id}/.installed_version"
+    local mod_path="${workshop_dir}/${mod_id}"
+    local version_file="${mod_path}/.installed_version"
     
     if [[ -f "$version_file" ]]; then
         cat "$version_file"
+    elif [[ -d "$mod_path" ]]; then
+        # Fallback to directory mtime if folder exists but no tracking file
+        # Use stat (macOS/Linux compatible if possible, otherwise use perl/python)
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            stat -f %m "$mod_path" 2>/dev/null || echo "0"
+        else
+            stat -c %Y "$mod_path" 2>/dev/null || echo "0"
+        fi
     else
         echo "0"
     fi
