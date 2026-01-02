@@ -160,6 +160,45 @@ mod_manager() {
                 mod_types+=("$mtype")
             done < <(get_all_mod_ids "$mods_file" "$servermods_file")
             
+            # Pre-calculate versions and updates (ONE Python call for all)
+            local cache_data
+            cache_data=$(get_cached_update_info "$SELECTED_DIR")
+            
+            mod_versions=()
+            mod_update_flags=()
+            
+            # Use Python to extract all info at once for speed
+            while IFS='|' read -r v_disp has_up; do
+                mod_versions+=("$v_disp")
+                mod_update_flags+=("$has_up")
+            done < <(echo "$cache_data" | python3 -c "
+import json, sys, datetime
+try:
+    data = json.load(sys.stdin)
+    mods_info = data.get('mods', {})
+    def fmt(ts):
+        if not ts or ts == 0: return '-'
+        return datetime.datetime.fromtimestamp(ts).strftime('%b %d')
+    
+    # Process IDs passed from bash (we need to preserve order)
+    target_ids = '''$(printf "%s\n" "${mod_ids[@]}")'''.strip().split('\n')
+    for mid in target_ids:
+        if not mid: continue
+        m = mods_info.get(mid, {})
+        inst = m.get('installed', 0)
+        lat = m.get('latest', 0)
+        up = m.get('has_update', False)
+        
+        v = fmt(inst)
+        if up: v = f'{fmt(inst)} → {fmt(lat)}'
+        elif inst == 0: v = fmt(lat)
+        
+        print(f'{v}|{1 if up else 0}')
+except:
+    # Fallback for error/empty
+    for _ in range($((${#mod_ids[@]}))): print('-|0')
+" 2>/dev/null)
+            
             # Pre-calculate dependency warnings
             for i in "${!mod_ids[@]}"; do
                 local mid="${mod_ids[$i]}"
@@ -242,13 +281,10 @@ mod_manager() {
                 status_icon="⚠️"
             fi
             
-            # Get version info for this mod
-            local version_display
-            version_display=$(get_mod_version_info "$SELECTED_DIR" "$mid" 2>/dev/null || echo "-")
+            # Get pre-calculated version info
+            local version_display="${mod_versions[$i]:--}"
             local version_color="$WHITE"
-            if get_mod_update_status "$SELECTED_DIR" "$mid" 2>/dev/null; then
-                version_color="$YELLOW"
-            fi
+            [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && version_color="$YELLOW"
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
