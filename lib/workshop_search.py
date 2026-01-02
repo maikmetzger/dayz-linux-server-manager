@@ -36,9 +36,6 @@ def save_cache(cache):
 
 def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     cache = load_cache()
-    # Cache key reflects query args, but we might fetch different steam pages internally
-    # We'll rely on url-based caching inside the loop if possible, or just cache per user-query
-    # Actually, simpler to just fetch needed pages and let user-query cache handle the result
     cache_key = f"search_{text}_{sort}_{num}_{page}_{mode}"
     if cache_key in cache:
         entry = cache[cache_key]
@@ -47,32 +44,22 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
 
     encoded_text = urllib.parse.quote(text)
     api_sort = SORT_MAP.get(sort, "trend")
-    
-    # Simple approach: just use browsesort for all modes
     sort_param = f"&browsesort={api_sort}" if api_sort != "relevance" else ""
-    
-    # Steam Logic: Page size is fixed at 30 for Browse
     STEAM_PAGE_SIZE = 30
     
-    # Calculate Global Item Range
     global_start = (page - 1) * num
     global_end = global_start + num
-    
-    # Calculate Required Steam Pages
     steam_start_p = (global_start // STEAM_PAGE_SIZE) + 1
     steam_end_p = ((global_end - 1) // STEAM_PAGE_SIZE) + 1
     
     all_found_ids = []
     
-    # Fetch Loop
     for p in range(steam_start_p, steam_end_p + 1):
         if text.lower() == "dayz" or not text.strip():
             url = f"https://steamcommunity.com/workshop/browse/?appid=221100{sort_param}&section=readytouseitems&p={p}"
         else:
             url = f"https://steamcommunity.com/workshop/browse/?appid=221100&searchtext={encoded_text}{sort_param}&section=readytouseitems&p={p}"
             
-        # print(f"DEBUG_URL: {url}", file=sys.stderr)
-        
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
             req = urllib.request.Request(url, headers=headers)
@@ -80,63 +67,40 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
                 html = response.read().decode('utf-8')
             
             page_ids = []
-            
-            if mode == "author" and text.strip() and text.lower() != "dayz":
-                # Strict Author Filter
-                items = html.split('class="workshopItem"')
-                for item in items[1:]:
-                    try:
-                        fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
-                        if not fid_m: continue
-                        fid = fid_m.group(1)
-                        if fid in page_ids: continue 
-                        
-                        author_m = re.search(r'class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>', item)
-                        if author_m:
-                            author_name = author_m.group(1).strip()
-                            if text.lower() in author_name.lower():
-                                page_ids.append(fid)
-                    except: pass
-            else:
-                # Standard Search
-                # We need to split by item to associate rating with ID
-                items = html.split('class="workshopItem"')
-                for item in items[1:]:
-                    fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
-                    if not fid_m: continue
-                    fid = fid_m.group(1)
+            items = html.split('class="workshopItem"')
+            for item in items[1:]:
+                fid_m = re.search(r'data-publishedfileid="([0-9]+)"', item)
+                if not fid_m: continue
+                fid = fid_m.group(1)
+                
+                if mode == "author" and text.strip() and text.lower() != "dayz":
+                    author_m = re.search(r'class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>', item)
+                    if author_m:
+                        author_name = author_m.group(1).strip()
+                        if text.lower() in author_name.lower():
+                            if fid not in page_ids: page_ids.append(fid)
+                else:
                     if fid not in page_ids: page_ids.append(fid)
-                    
-                    # Extract Rating (0-5 stars)
-                    # src=".../5-star.png"
-                    rating = 0
-                    star_m = re.search(r'src=".*?([0-9])-star\.png', item)
-                    if star_m:
-                        rating = int(star_m.group(1))
-                    
-                    # Update Cache with Rating immediately
-                    d_key = f"details_{fid}"
-                    if d_key not in cache:
-                        cache[d_key] = {'timestamp': 0, 'data': {'id': fid}} # Timestamp 0 forces refresh but keeps data
-                    
-                    cache[d_key]['data']['rating_stars'] = rating
+                
+                # Extract Rating (0-5 stars)
+                rating = 0
+                star_m = re.search(r'src=".*?([0-9])-star\.png', item)
+                if star_m:
+                    rating = int(star_m.group(1))
+                
+                d_key = f"details_{fid}"
+                if d_key not in cache:
+                    cache[d_key] = {'timestamp': 0, 'data': {'id': fid}}
+                cache[d_key]['data']['rating_stars'] = rating
             
             all_found_ids.extend(page_ids)
-            
         except Exception as e:
             print(f"Fetch Error Page {p}: {e}", file=sys.stderr)
             break
             
-    # Slice the result to match user request
-    # Indices relative to the first fetched page's start
-    # We fetched starting at steam_start_p.
-    # The first item in all_found_ids corresponds to global index: (steam_start_p - 1) * 30
-    
     base_index = (steam_start_p - 1) * STEAM_PAGE_SIZE
     local_start = global_start - base_index
     local_end = local_start + num
-    
-    # Safety slice
     final_ids = all_found_ids[local_start:local_end]
     
     cache[cache_key] = {'timestamp': time.time(), 'data': final_ids}
@@ -144,10 +108,6 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     return final_ids
 
 def scrape_dependencies(mod_id):
-    """
-    Scrapes the Steam Workshop page for a given mod ID to find required items (dependencies),
-    author, and rating count.
-    """
     url = f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod_id}"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -156,8 +116,6 @@ def scrape_dependencies(mod_id):
             html = response.read().decode('utf-8', errors='ignore')
         
         reqs = []
-        
-        # Robust container finding
         container = ""
         if 'id="RequiredItems"' in html:
             container = html.split('id="RequiredItems"')[1]
@@ -167,45 +125,32 @@ def scrape_dependencies(mod_id):
             container = html.split("Required items")[1]
             
         if container:
-            # Stop at next major section to avoid false positives
-            # "class=panel" is common start of next block
             end_markers = ['class="panel"', '<div class="panel"', 'class="rightSectionTopTitle"']
             limit_idx = len(container)
             for m in end_markers:
                 idx = container.find(m)
                 if idx != -1 and idx < limit_idx:
                     limit_idx = idx
-            
             container = container[:limit_idx]
-            # Extract IDs from hrefs
             reqs = re.findall(r'href="[^"]*[?&]id=([0-9]+)', container)
-            # Unique
             reqs = list(set(reqs))
         
         author = "Unknown"
-        # Robust Author Regex
         try:
-            # Find all authors (Creators)
             found_authors = re.findall(r'class="friendBlockContent"[^>]*>[\s\r\n]*?(?:<a[^>]*>)?([^<]+)(?:</a>)?', html)
             if found_authors:
-                # Clean up whitespace and join
                 clean_authors = [a.strip() for a in found_authors if a.strip()]
-                if clean_authors:
-                    author = ", ".join(clean_authors)
+                if clean_authors: author = ", ".join(clean_authors)
         except: pass
 
-        # Scrape Rating Count
         ratings_count = 0
         try:
             rc_m = re.search(r'(\d{1,3}(?:,\d{3})*) ratings', html)
-            if rc_m:
-                ratings_count = int(rc_m.group(1).replace(',', ''))
+            if rc_m: ratings_count = int(rc_m.group(1).replace(',', ''))
         except: pass
         
-        # Scrape Rating Stars
         stars = 0
         if "fileRatingDetails" in html:
-            # <img src=".../5-star_large.png?v=2" />
             try:
                 rating_section = html.split('class="fileRatingDetails"')[1].split('</div>')[0]
                 if "5-star" in rating_section: stars = 5
@@ -214,63 +159,25 @@ def scrape_dependencies(mod_id):
                 elif "2-star" in rating_section: stars = 2
                 elif "1-star" in rating_section: stars = 1
                 elif "0-star" in rating_section: stars = 0
-            except:
-                pass
+            except: pass
         
         return reqs, author, ratings_count, stars
     except Exception: return [], "Unknown", 0, 0
 
-
 def check_mod_updates(mod_ids: list, local_versions: dict) -> dict:
-    """
-    Check for updates by comparing local versions to Steam API time_updated.
-    
-    Args:
-        mod_ids: List of mod IDs to check
-        local_versions: Dict mapping mod_id -> installed timestamp
-        
-    Returns:
-        Dict with structure:
-        {
-            "mods": {
-                "1234567": {
-                    "installed": 1735603200,
-                    "latest": 1735689600,
-                    "has_update": true,
-                    "name": "Mod Name"
-                }
-            },
-            "update_count": 3,
-            "checked_at": 1735761600
-        }
-    """
     if not mod_ids:
         return {"mods": {}, "update_count": 0, "checked_at": int(time.time())}
     
-    # Fetch details from Steam API (uses existing function which caches)
     details = get_mod_details(mod_ids)
-    
-    result = {
-        "mods": {},
-        "update_count": 0,
-        "checked_at": int(time.time())
-    }
+    result = {"mods": {}, "update_count": 0, "checked_at": int(time.time())}
     
     for mod in details:
         mod_id = mod.get('id')
-        if not mod_id:
-            continue
+        if not mod_id: continue
             
         remote_updated = mod.get('updated', 0)
         local_updated = int(local_versions.get(mod_id, 0))
-        
-        # If not installed (0) OR remote is higher than local, it needs sync
         has_update = (remote_updated > local_updated) or (local_updated == 0)
-        
-        # Exception: if BOTH are 0, we can't be sure, but usually means missing local data
-        # so we still want to flag it as needing sync if it's missing locally.
-        if local_updated == 0:
-            has_update = True
         
         result["mods"][mod_id] = {
             "installed": local_updated,
@@ -278,43 +185,32 @@ def check_mod_updates(mod_ids: list, local_versions: dict) -> dict:
             "has_update": has_update,
             "name": mod.get('name', f"Mod {mod_id}")
         }
-        
-        if has_update:
-            result["update_count"] += 1
-    
+        if has_update: result["update_count"] += 1
     return result
 
 def parse_bbcode(text):
     if not text: return "", []
     images = []
-    # Extract images
     img_tags = re.findall(r'\[img\](.*?)\[/img\]', text, re.IGNORECASE)
     images.extend(img_tags)
     
-    # Clean text
     clean = text
-    clean = re.sub(r'\[img\].*?\[/img\]', '', clean, flags=re.IGNORECASE) # Remove images from text
+    clean = re.sub(r'\[img\].*?\[/img\]', '', clean, flags=re.IGNORECASE)
     clean = re.sub(r'\[url=.*?\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
     clean = re.sub(r'\[url\](.*?)\[/url\]', r'\1', clean, flags=re.IGNORECASE)
     
-    # Visual markers for Headers
     def header_rep(m): return f"\n\n>> {m.group(1).upper()} <<\n"
     clean = re.sub(r'\[h[123]\](.*?)\[/h[123]\]', header_rep, clean, flags=re.IGNORECASE)
-    
-    # Other Formatting
     clean = re.sub(r'\[b\](.*?)\[/b\]', r'*\1*', clean, flags=re.IGNORECASE)
     clean = re.sub(r'\[i\](.*?)\[/i\]', r'_\1_', clean, flags=re.IGNORECASE)
     clean = re.sub(r'\[/*(list|olist|\*|hr|code|quote|box)\]', '', clean, flags=re.IGNORECASE)
-    
     clean = re.sub(r'\r\n', '\n', clean)
-    clean = re.sub(r'\n\n+', '\n\n', clean)  # Keep paragraphs distinct
-    
+    clean = re.sub(r'\n\n+', '\n\n', clean)
     return clean.strip(), images
 
 def get_mod_details(mod_ids, recursive=False, update_rules=None):
     if not mod_ids: return []
     cache = load_cache()
-    
     results = []
     to_fetch = []
     
@@ -322,13 +218,8 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
         cache_key = f"details_{mid}"
         if cache_key in cache:
             entry = cache[cache_key]
-            # If we need author/images/rating_count and it's missing (legacy cache) or Unknown, re-fetch
-            # Also re-fetch if rating_count is missing or 0 (likely legacy cache), unless it's genuinely 0 (rare for top mods)
-            # We can use a heuristic: if we have rating_stars > 0 but rating_count is 0, RE-FETCH.
             data = entry['data']
             needs_refetch = False
-            
-            # Cache Invalidation Rules
             if 'author' not in data or 'images' not in data or data['author'] == "Unknown": needs_refetch = True
             elif 'rating_count' not in data: needs_refetch = True
             elif 'rating_stars' not in data: needs_refetch = True
@@ -357,6 +248,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                 req = urllib.request.Request(api_url, data=encoded_data)
                 with urllib.request.urlopen(req) as response:
                     res_data = json.loads(response.read().decode('utf-8'))
+                
                 details = res_data.get('response', {}).get('publishedfiledetails', [])
                 for d in details:
                     mid = d.get('publishedfileid')
@@ -389,7 +281,6 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                         "rating_stars": stars
                     }
                     
-                    # Preserve scraped rating if exists in cache (optional override, mostly for search)
                     d_key = f"details_{mid}"
                     if d_key in cache and 'rating_stars' in cache[d_key]['data'] and stars == 0:
                         details_obj['rating_stars'] = cache[d_key]['data']['rating_stars']
@@ -405,19 +296,16 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                 break
         
         save_cache(cache)
-        # Combine and preserve order
         for mid in mod_ids:
             if mid in fetched_details: results.append(fetched_details[mid])
             elif f"details_{mid}" in cache: results.append(cache[f"details_{mid}"]['data'])
 
-    # Recursive resolver for results
     final_results = []
     seen = set()
     def resolve(obj):
         if obj['id'] in seen: return
         if recursive:
             for dep_id in obj.get('dependencies', []):
-                # Ensure we have details for dependency (might be in cache)
                 d_key = f"details_{dep_id}"
                 if d_key in cache: resolve(cache[d_key]['data'])
         if obj['id'] not in seen:
