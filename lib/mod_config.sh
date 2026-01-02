@@ -557,7 +557,9 @@ except: pass
         fi
 
         # 3. Draw TUI
+        echo "[DEBUG] 7. Drawing TUI, count=$count" >> "${SCRIPT_DIR}/loot_manager.log"
         get_term_size
+        echo "[DEBUG] 8. Term size: ${TERM_ROWS}x${TERM_COLS}" >> "${SCRIPT_DIR}/loot_manager.log"
         printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
         move_to 1 1
         printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Modular Loot Manager - $SELECTED_NAME" "$RESET"
@@ -579,6 +581,7 @@ except: pass
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
+        echo "[DEBUG] 9. Starting row loop, v_height=$v_height, offset=$offset" >> "${SCRIPT_DIR}/loot_manager.log"
         for ((i=0; i<v_height; i++)); do
             local idx=$((offset + i))
             [[ $idx -ge $count ]] && break
