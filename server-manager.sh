@@ -175,7 +175,7 @@ mod_manager() {
         fi
         
         local mod_count=${#mod_ids[@]}
-        local total_items=$((mod_count + 6))
+        local total_items=$((mod_count + 5))
         
         [[ $selected -lt 0 ]] && selected=0
         [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
@@ -297,7 +297,7 @@ mod_manager() {
         
         # Action bar
         local action_row=$row
-        local actions=("[A] Add" "[R] Remove" "[W] Workshop" "[S] Sync" "[F] FixMods" "[Q] Back")
+        local actions=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[Q] Back")
         
         move_to $action_row 2
         for a in "${!actions[@]}"; do
@@ -324,7 +324,7 @@ mod_manager() {
         fi
 
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 90))" "" "$RESET"
+        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%*s%s" "$BG_DARKGRAY" "$WHITE" "$((TERM_COLS - 80))" "" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
@@ -355,10 +355,7 @@ mod_manager() {
                 fi
                 continue
                 ;;
-            'w'|'W')
-                workshop_browser "$SELECTED_DIR"
-                needs_rebuild=1
-                ;;
+
             'a'|'A')
                 local new_id
                 new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
@@ -429,10 +426,6 @@ mod_manager() {
                         show_message "Select a mod to remove first" "Info"
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
-                    # Workshop
-                    workshop_browser "$SELECTED_DIR"
-                    needs_rebuild=1
-                elif [[ $selected -eq $((mod_count + 3)) ]]; then
                     # Sync
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -446,7 +439,7 @@ mod_manager() {
                         check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
                         show_progress_end "Sync complete!" 300
                     fi
-                elif [[ $selected -eq $((mod_count + 4)) ]]; then
+                elif [[ $selected -eq $((mod_count + 3)) ]]; then
                     # FixMods
                     local status
                     status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -455,17 +448,14 @@ mod_manager() {
                     else
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
-                elif [[ $selected -eq $((mod_count + 5)) ]]; then
+                elif [[ $selected -eq $((mod_count + 4)) ]]; then
                     return
                 fi
                 ;;
             'q'|'Q')
                 return 0
                 ;;
-            'w'|'W')
-                workshop_browser "$SELECTED_DIR"
-                needs_rebuild=1
-                ;;
+
             's'|'S')
                 local status
                 status="$(get_container_status "$SELECTED_CONTAINER")"
@@ -807,6 +797,7 @@ main_menu() {
             "🔄|Restart Server"
             "--------------------"
             "$mod_label"
+            "🌐|Workshop"
             "🧹|Wipe Server Data"
             "--------------------"
             "📦|Loot Economy"
@@ -835,6 +826,7 @@ main_menu() {
             "⏹️|Stop Server") run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
             "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
             "⚒️|Mod Manager") mod_manager || true ;;
+            "🌐|Workshop") workshop_browser "$SELECTED_DIR" || true ;;
             "🧹|Wipe Server Data") wipe_menu || true ;;
             "📦|Loot Economy") types_selection_menu "$SELECTED_DIR" "$SELECTED_CONTAINER" || true ;;
             "🔧|Server Settings")
