@@ -538,13 +538,12 @@ except: pass
                             while true; do
                                 draw_header "Link CE Files - $SELECTED_NAME"
                                 
-                                # Build menu items with checkboxes
+                                # Build menu items with checkboxes (column-aligned)
                                 local -a items=()
                                 for ((i=0; i<ce_count; i++)); do
                                     local check=" "
                                     [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
-                                    # Full names displayed
-                                    items+=("[$check] ${ce_filenames[$i]}|(${ce_mod_names[$i]})")
+                                    items+=("[$check] ${ce_filenames[$i]} - ${ce_mod_names[$i]}")
                                 done
                                 
                                 items+=("--------------------")
