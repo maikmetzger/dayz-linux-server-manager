@@ -358,8 +358,9 @@ modular_loot_dashboard() {
         sce_types=()
         states=()
         slinked_names=()
+        smodified=()
         
-        while IFS='|' read -r sp mid mn fn ct st ln; do
+        while IFS='|' read -r sp mid mn fn ct st ln md; do
             [[ -z "$sp" ]] && continue
             src_paths+=("$sp")
             smod_ids+=("$mid")
@@ -368,6 +369,7 @@ modular_loot_dashboard() {
             sce_types+=("$ct")
             states+=("$st")
             slinked_names+=("$ln")
+            smodified+=("$md")
         done < <(echo "$json" | python3 -c "
 import json, sys
 try:
@@ -375,7 +377,8 @@ try:
     for i in data:
         st = 1 if i.get('status') == 'linked' else 0
         ln = i.get('linked_filename', '')
-        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}\")
+        md = 1 if i.get('modified', False) else 0
+        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
 except: pass
 ")
     }
@@ -414,7 +417,7 @@ except: pass
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) 1
-        printf "  %-12s %-12s %-24s %-30s" "STATUS" "TYPE" "SOURCE / GROUP" "FILE NAME"
+        printf "  %-12s %-3s %-10s %-24s %-28s" "STATUS" "MOD" "TYPE" "SOURCE / GROUP" "FILE NAME"
         
         move_to $((table_start + 2)) 1
         printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
@@ -449,15 +452,23 @@ except: pass
                 *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
             esac
             
+            # Modified indicator
+            local mod_str="   "
+            local mod_color="$WHITE"
+            if [[ ${smodified[$idx]:-0} -eq 1 ]]; then
+                mod_str="[*]"
+                mod_color="$YLW"
+            fi
+            
             move_to $row 1
             if [[ $idx -eq $selection ]]; then
                 printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                 move_to $row 3
-                printf "%-12s %-12s %-24s %-30s" "$status_str" "$type_str" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:30}"
+                printf "%-12s %3s %-10s %-24s %-28s" "$status_str" "$mod_str" "$type_str" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
                 printf "%s" "$RESET"
             else
                 move_to $row 3
-                printf "%s%-12s%s %s%-12s%s %-24s %-30s" "$status_color" "$status_str" "$RESET" "$type_color" "$type_str" "$RESET" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:30}"
+                printf "%s%-12s%s %s%3s%s %s%-10s%s %-24s %-28s" "$status_color" "$status_str" "$RESET" "$mod_color" "$mod_str" "$RESET" "$type_color" "$type_str" "$RESET" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
             fi
         done
         
@@ -857,14 +868,30 @@ for mod_id in sorted(mod_ids):
                 # B: Standard prefix match (ID_file.xml or Name_file.xml)
                 if ln.endswith("_" + search_name) or ln.endswith("_" + search_name_cfn):
                     is_linked = True; linked_name = ln_orig; break
-                # C: Fuzzy substring (for mods that link legacy names)
-                if search_name_cfn in ln or ln in search_name_cfn:
-                    # Only accept if it's a significant match (at least 50% length)
-                    if len(set(ln) & set(search_name_cfn)) > (max(len(ln), len(search_name_cfn)) / 2):
-                        is_linked = True; linked_name = ln_orig; break
+                # C: Check if linked name contains the workshop filename (for legacy mods)
+                # Must be at least 80% of workshop name length to avoid false positives
+                if search_name_cfn in ln and len(search_name_cfn) >= len(ln) * 0.8:
+                    is_linked = True; linked_name = ln_orig; break
             
             if is_linked:
                 status = "linked"
+            
+            # Check if file is modified (compare against original snapshot)
+            is_modified = False
+            if is_linked and linked_name:
+                # Get linked file info from linked dict
+                li = linked.get(linked_name, {})
+                linked_path = li.get('path', '')
+                original_path = li.get('original_path', '')
+                if linked_path and original_path and os.path.exists(linked_path) and os.path.exists(original_path):
+                    try:
+                        import hashlib
+                        def file_hash(fp):
+                            with open(fp, 'rb') as f:
+                                return hashlib.md5(f.read()).hexdigest()
+                        if file_hash(linked_path) != file_hash(original_path):
+                            is_modified = True
+                    except: pass
             
             results.append({
                 "mod_id": mod_id,
@@ -873,7 +900,8 @@ for mod_id in sorted(mod_ids):
                 "filename": fname,
                 "ce_type": ce_type,
                 "status": status,
-                "linked_filename": linked_name
+                "linked_filename": linked_name,
+                "modified": is_modified
             })
             
             # Track for orphan detection
@@ -881,6 +909,10 @@ for mod_id in sorted(mod_ids):
             if linked_name: scanned_files.add(linked_name)
 
 # 2. SCAN ORPHANS (Local files in CustomCE not from mods)
+# We need to skip:
+# - Files we already scanned from workshop
+# - Files that are linked (in cfgeconomycore.xml) - these are managed by us or the mod
+# - Files with mod ID prefixes that match known mod IDs
 ce_folders = ["types", "spawnabletypes", "events", "eventspawns"]
 for folder in ce_folders:
     dir_path = os.path.join(mission_path, "CustomCE", folder)
@@ -895,16 +927,27 @@ for folder in ce_folders:
             # If we already saw this file in mod scan, skip
             if fname in scanned_files: continue
             
-            # This is a local file not mapped to any active mod
-            is_linked = fname in linked
+            # If file is already in cfgeconomycore.xml (linked), skip it
+            if fname in linked: continue
+            
+            # Check if this file looks like one we registered (ModID_filename pattern)
+            # Skip if it starts with a known mod ID prefix
+            is_registered = False
+            for mid in mod_ids:
+                if fname.startswith(f"{mid}_"):
+                    is_registered = True
+                    break
+            if is_registered: continue
+            
+            # This is a truly local/orphan file not mapped to any active mod
             results.append({
                 "mod_id": "LOCAL",
                 "mod_name": "[ Manual / Local ]",
                 "file_path": os.path.join(root, fname),
                 "filename": fname,
                 "ce_type": folder,
-                "status": "linked" if is_linked else "unlinked",
-                "linked_filename": fname if is_linked else ""
+                "status": "unlinked",
+                "linked_filename": ""
             })
 
 print(json.dumps(results))
