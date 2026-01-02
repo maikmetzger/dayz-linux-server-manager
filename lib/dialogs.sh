@@ -258,9 +258,9 @@ show_progress_update() {
     move_to $((_PROGRESS_BOX_ROW + 2)) $((_PROGRESS_BOX_COL + 3))
     printf "%s%-$((_PROGRESS_BOX_WIDTH - 6))s%s" "$WHITE" "${message:0:$((_PROGRESS_BOX_WIDTH - 6))}" "$RESET"
     
-    # Update progress bar
+    # Update progress bar - use ASCII chars for Docker/SSH compatibility
     move_to $((_PROGRESS_BOX_ROW + 4)) $((_PROGRESS_BOX_COL + 3))
-    printf "%s[%s%s%s%s]%s %3d%%" "$CYN" "$GRN" "$(printf '%*s' $filled '' | tr ' ' '█')" "$RESET$DIM" "$(printf '%*s' $empty '')" "$RESET" "$percent"
+    printf "[%s%s] %3d%%      " "$(printf '%*s' $filled '' | tr ' ' '#')" "$(printf '%*s' $empty '')" "$percent"
 }
 
 # End progress bar (auto-closes, no keypress)
