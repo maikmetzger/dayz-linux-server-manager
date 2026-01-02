@@ -641,36 +641,7 @@ _draw_workshop_details_screen() {
     move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
     ((a_row++))
 
-    # 3. Images Box (Left, below Metadata) - Fixed height calculation
-    local img_box_start=$((3 + meta_height))
-    local img_height=$((TERM_ROWS - img_box_start - 3))
-    if [[ $img_height -gt 4 ]]; then
-        local img_color="$RED"
-        draw_box $img_box_start 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
-        
-        local start_img_row=$((img_box_start + 2))
-        local max_imgs=$((img_height - 2))
-        local display_offset=0
-        
-        # Simple scroll for images if selected index is deep
-        if [[ $img_sel -ge $max_imgs ]]; then 
-             display_offset=$((img_sel - max_imgs + 1))
-        fi
-        
-        for ((i=0; i<max_imgs; i++)); do
-            local idx=$((display_offset + i))
-            if [[ $idx -lt ${#_images_ref[@]} ]]; then
-                move_to $((start_img_row + i)) 4
-                local style="$DIM"
-                [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_RED$WHITE$BOLD"
-                local img_url="${_images_ref[$idx]}"
-                # Full URL in OSC 8 hyperlink, display shows index + truncated URL
-                local display_width=$((meta_width - 6))
-                local display_text="$(printf "[%02d] %s" "$((idx+1))" "${img_url:0:$((display_width-6))}")"
-                printf "%s\033]8;;%s\033\\%-${display_width}s\033]8;;\033\\%s" "$style" "$img_url" "$display_text" "$RESET"
-            fi
-        done
-    fi
+    # Images now accessible via 'i' key sub-pane (see input handling below)
 
     # 4. Description Box (Right)
     local desc_col=$((meta_width + 4))
@@ -888,14 +859,10 @@ except: pass
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || { set -eu; return; } # ESC - restore strict
             case "$s" in
-                "[A") # Up - Images
-                    [[ $img_sel -gt 0 ]] && ((img_sel--)); ;;
-                "[B") # Down - Images
-                    [[ $img_sel -lt $((${#mimages[@]} - 1)) ]] && ((img_sel++)); ;;
-                "[D") # Left - Page Up
+                "[D") # Left - Page Up Description
                     scroll=$((scroll - view_height))
                     [[ $scroll -lt 0 ]] && scroll=0; ;;
-                "[C") # Right - Page Down
+                "[C") # Right - Page Down Description
                     scroll=$((scroll + view_height)); ;;
             esac
         elif [[ "$k" == "q" || "$k" == "Q" || "$k" == " " ]]; then 
@@ -905,6 +872,20 @@ except: pass
             if command -v open &>/dev/null; then open "$url"
             elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
             else show_message "URL: $url" "Link"; fi
+        elif [[ "$k" == "i" || "$k" == "I" ]]; then
+            # Show image list sub-pane with full URLs (wrapping naturally)
+            if [[ ${#mimages[@]} -gt 0 ]]; then
+                printf "%s%s" "$CLEAR_SCREEN" "$RESET"
+                move_to 1 1
+                printf "%s%s Images (%d) - Press any key to return %s%s" "$BG_RED" "$WHITE$BOLD" "${#mimages[@]}" "${ESC}[K" "$RESET"
+                move_to 3 1
+                for ((i=0; i<${#mimages[@]}; i++)); do
+                    printf "[%02d] %s\n" "$((i+1))" "${mimages[$i]}"
+                done
+                read -rsn1
+            else
+                show_message "No images available" "Info"
+            fi
         elif [[ "$k" == "" ]]; then
             set -eu; return 10 # Signal to install
         fi
