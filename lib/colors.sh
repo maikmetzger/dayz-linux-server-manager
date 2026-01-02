@@ -29,6 +29,10 @@ WHITE="${ESC}[37m"
 GRAY="${ESC}[90m"
 DARKGRAY="${ESC}[38;2;55;55;55m"
 
+# High Intensity / Light Colors
+LIGHT_RED="${ESC}[91m"
+LIGHT_CYAN="${ESC}[96m"
+
 # Legacy color aliases (used by installer)
 CYN="${ESC}[36m"
 CYAN="${CYN}"

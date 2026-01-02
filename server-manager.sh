@@ -402,9 +402,9 @@ END_PYTHON
                 
                 # Selected row color logic for Types
                 case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]" "$CYN" "$WHITE$BOLD" "$RED" "$WHITE$BOLD" ;;
-                    client)   printf "[%s%s%s]" "$CYN" "$type_short" "$WHITE$BOLD" ;;
-                    server)   printf "[%s%s%s]" "$RED" "$type_short" "$WHITE$BOLD" ;;
+                    both)     printf "[%sC%s+%sS%s]" "$LIGHT_CYAN" "$WHITE$BOLD" "$LIGHT_RED" "$WHITE$BOLD" ;;
+                    client)   printf "[%s%s%s]" "$LIGHT_CYAN" "$type_short" "$WHITE$BOLD" ;;
+                    server)   printf "[%s%s%s]" "$LIGHT_RED" "$type_short" "$WHITE$BOLD" ;;
                     disabled) printf "[%s]" "$type_short" ;;
                 esac
                 move_to $row $col_name
@@ -429,9 +429,9 @@ END_PYTHON
                 fi
                 move_to $row $col_type
                 case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]%s" "$CYN" "$row_color" "$RED" "$row_color" "$RESET" ;;
-                    client)   printf "[%s%s%s]%s" "$CYN" "$type_short" "$row_color" "$RESET" ;;
-                    server)   printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
+                    both)     printf "[%sC%s+%sS%s]%s" "$LIGHT_CYAN" "$row_color" "$LIGHT_RED" "$row_color" "$RESET" ;;
+                    client)   printf "[%s%s%s]%s" "$LIGHT_CYAN" "$type_short" "$row_color" "$RESET" ;;
+                    server)   printf "[%s%s%s]%s" "$LIGHT_RED" "$type_short" "$row_color" "$RESET" ;;
                     disabled) printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
                 esac
                 move_to $row $col_name
