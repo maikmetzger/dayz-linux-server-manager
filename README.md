@@ -11,13 +11,15 @@ The mod manager does more than just download files; it helps keep your server st
 - **Refined Selection**: Use the Workshop Browser [W] to search and install mods directly from Steam, or add them manually by ID.
 - **Load Order Checks**: The script warns you [⚠️] if dependencies are missing or in the wrong order.
 - **Client/Server Sorting**: Mark mods as "Client", "Server", or "Both" to keep your load list optimized.
+- **Sync Status**: Mods with pending changes appear **yellow** until synced. A `[SYNC NEEDED]` indicator shows in both the header and main menu.
 - **Automation**: Fixes mod casing (lowercase) and handles your `.bikey` and `.bisign` keys automatically.
 
 ### Steam Workshop Browser
 A fully integrated TUI browser for the Steam Workshop.
 - **Search**: Find mods by name, author, or relevance directly in the terminal.
 - **Install**: Automatically resolves and installs dependencies.
-- **Details**: View mod descriptions, subscriber counts, and last update dates.
+- **Details**: View mod descriptions, subscriber counts, ratings, release/update dates, and Steam links.
+- **Images**: Press [I] in the details view to browse all mod images with scrolling support.
 
 ### Configuration Editor
 Edit server settings without touching raw files.
@@ -30,12 +32,14 @@ Take control of your loot without manually editing giant XML files.
 - **Loot Editor**: Search for items in a table view and edit spawn rates (nominal, lifetime, etc.) instantly.
 - **Modular Loot**: Register workshop loot as modular includes. This keeps your main `types.xml` clean and makes it easy to add or remove mods.
 - **Link Toggle**: Enable or disable specific loot files with a single keypress.
+- **CE Detection**: Mods with Central Economy files are auto-detected and flagged for easy management.
 
 ### Maintenance & Reliability
 - **Selective Wipe**: Choose exactly what to reset. You can refresh the loot on the ground (CLE) without destroying player bases, or wipe vehicles and players individually.
 - **Backups**: Quickly tar your mission and profile data for safe keeping.
 - **Crash Guard**: Includes a dummy crash reporter to prevent the server from hanging on error dialogs.
 - **Health Checks**: Containers monitor the server process and report its status back to the manager.
+- **Exit Warning**: Get prompted if you try to quit with unsync'd mod changes.
 
 ### Logs & Console
 - **Log Browser**: View RPT and ADM logs directly in the terminal with live tailing (`tail -f`).
@@ -69,13 +73,17 @@ Launch the TUI to manage your servers:
 ## Navigation & Keys
 
 - **[↑/↓]**: Move selection
-- **[Enter]**: Confirm / Select / Toggle
+- **[←/→]**: Page up/down (in description views)
+- **[Enter]**: Confirm / Select / Toggle mod type
 - **[/]**: Search / Filter lists
 - **[L]**: Live Tail (when viewing logs)
 - **[W]**: Open Workshop Browser
+- **[I]**: Browse mod images (in Workshop details)
+- **[B]**: Open Steam Workshop page in browser
 - **[M]**: Register as Modular Loot (in the editor)
-- **[S]**: Sync All Mods (Download -> Casing -> Keys)
+- **[S]**: Sync All Mods (Download → Casing → Keys)
 - **[F]**: Fast Fix (Fixes casing/keys without a slow Steam update)
+- **[Q]**: Quit / Back (with confirmation if sync needed)
 
 ---
 
