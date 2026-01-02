@@ -194,17 +194,20 @@ uninstall_mod() {
     delete_mod_from_file "$mod_id" "$mods_file"
     delete_mod_from_file "$mod_id" "$servermods_file"
     
-    # 2. Get and delete .bikey files
+    # 2. Get and delete .bikey files (if mod folder exists)
     local key_count=0
-    while IFS= read -r key; do
-        if [[ -n "$key" ]]; then
-            local global_key="${server_keys_dir}/${key}"
-            if [[ -f "$global_key" ]]; then
-                rm -f "$global_key"
-                ((key_count++))
+    local mod_keys_dir="${workshop_base}/${mod_id}/keys"
+    if [[ -d "$mod_keys_dir" ]]; then
+        while IFS= read -r key; do
+            if [[ -n "$key" ]]; then
+                local global_key="${server_keys_dir}/${key}"
+                if [[ -f "$global_key" ]]; then
+                    rm -f "$global_key"
+                    key_count=$((key_count + 1))
+                fi
             fi
-        fi
-    done < <(get_mod_bikeys "$mod_id" "$workshop_base")
+        done < <(get_mod_bikeys "$mod_id" "$workshop_base")
+    fi
     
     echo "$key_count"
 }

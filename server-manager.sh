@@ -129,9 +129,14 @@ mod_manager() {
     local selected=0
     local dirty=0
     local needs_sync_file="${SELECTED_DIR}/data/config/.needs_sync"
+    local pending_mods_file="${SELECTED_DIR}/data/config/.pending_sync_mods"
     
     # Load persisted dirty state
     [[ -f "$needs_sync_file" ]] && dirty=1
+    
+    # Load pending sync mods (for yellow highlighting)
+    local pending_sync_mods=""
+    [[ -f "$pending_mods_file" ]] && pending_sync_mods="$(cat "$pending_mods_file")"
     
     local needs_rebuild=1
     local -a mod_ids=()
@@ -442,6 +447,10 @@ END_PYTHON
                 
                 [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
                 [[ -n "${mod_warnings[$i]:-}" ]] && row_color="$YELLOW"
+                # Non-synced mods (missing files) should be yellow
+                [[ "$sync_ver" == *"MISSING"* ]] && row_color="$YELLOW"
+                # Mods with pending type changes should be yellow
+                [[ "$pending_sync_mods" == *"$mid"* ]] && row_color="$YELLOW"
                 
                 if [[ "$mtype" == "disabled" ]]; then
                     row_color="$DARKGRAY"
@@ -621,6 +630,7 @@ END_PYTHON
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
                     dirty=1; needs_rebuild=1; touch "$needs_sync_file"
+                    echo "$mid" >> "${SELECTED_DIR}/data/config/.pending_sync_mods"
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
                     local new_id
@@ -659,7 +669,7 @@ END_PYTHON
                         show_message "Container must be running to sync"
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
-                        dirty=0; rm -f "$needs_sync_file"
+                        dirty=0; rm -f "$needs_sync_file" "$pending_mods_file"; pending_sync_mods=""
                         needs_rebuild=1
                         # Refresh update cache after sync with progress bar
                         show_progress_start "Sync" "Refreshing update cache..."
@@ -711,7 +721,7 @@ END_PYTHON
                     show_message "Container must be running to sync"
                 else
                     run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
-                    dirty=0; rm -f "$needs_sync_file"
+                    dirty=0; rm -f "$needs_sync_file" "$pending_mods_file"; pending_sync_mods=""
                     needs_rebuild=1
                     
                     # Progress bar for post-sync operations
@@ -1037,7 +1047,11 @@ main_menu() {
         # Determine menu item labels (highlight if updates available)
         local mod_label="⚒️|Mod Manager"
         local update_label="⬆️|Update Server"
-        if [[ -n "$update_summary" ]]; then
+        local needs_sync_file="${SELECTED_DIR}/data/config/.needs_sync"
+        
+        if [[ -f "$needs_sync_file" ]]; then
+            mod_label="⚒️|Mod Manager ${YELLOW}[ SYNC NEEDED ]${RESET}"
+        elif [[ -n "$update_summary" ]]; then
             mod_label="⚒️|Mod Manager ${YELLOW}${update_summary}${RESET}"
         fi
         
