@@ -1089,7 +1089,7 @@ main_menu() {
             "▶️|Start Server") run_with_output "Starting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose up -d" ;;
             "⏹️|Stop Server") run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
             "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
-            "⚒️|Mod Manager") mod_manager || true ;;
+            "⚒️|Mod Manager"*) mod_manager || true ;;
             "🌐|Workshop") workshop_browser "$SELECTED_DIR" || true ;;
             "🧹|Wipe Server Data") wipe_menu || true ;;
             "📦|Loot Economy") types_selection_menu "$SELECTED_DIR" "$SELECTED_CONTAINER" || true ;;
