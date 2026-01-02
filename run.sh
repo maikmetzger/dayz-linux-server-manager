@@ -240,14 +240,15 @@ mod_list_apply_fixes() {
 
   mkdir -p "${KEYS_DIR}"
   local mod_args=""
-
-  # Cleanup: Remove old automated workshop symlinks (@<id>)
-  # This ensures that removed mods are actually unlinked from the server files
-  log "Pruning old workshop symlinks..."
-  find "${DZ_SERVERFILES}" -maxdepth 1 -name "@[0-9]*" -type l -delete
-
+  
+  # Track valid mods for garbage collection
+  # We use an associative array to store "valid" IDs
+  declare -A VALID_MODS
+  
   while IFS= read -r id; do
     [[ -n "${id}" ]] || continue
+    VALID_MODS["$id"]=1
+    
     local mod_dir="${WORKSHOP_DIR}/${id}"
     if [[ -d "${mod_dir}" ]]; then
       # Fix casing recursively (required for Linux compatibility)
@@ -279,6 +280,23 @@ mod_list_apply_fixes() {
       warn "Workshop content missing for id=${id} (expected ${mod_dir})"
     fi
   done <<< "${ids}"
+
+  # Garbage Collection: Remove symlinks for mods that are NOT in the valid list
+  log "Performing garbage collection on old mod links..."
+  while IFS= read -r link; do
+    local link_name
+    link_name="$(basename "$link")"      # e.g., @123456
+    local link_id="${link_name#@}"       # e.g., 123456
+    
+    # Check if this ID is in our valid list
+    if [[ -z "${VALID_MODS[$link_id]}" ]]; then
+        # Double check it is a numeric ID (safety)
+        if [[ "$link_id" =~ ^[0-9]+$ ]]; then
+            log "Pruning removed mod: $link_name"
+            rm -f "$link"
+        fi
+    fi
+  done < <(find "${DZ_SERVERFILES}" -maxdepth 1 -name "@[0-9]*" -type l)
 
   echo -n "${mod_args}" > "${out_args_file}"
   chmod 600 "${out_args_file}" || true
