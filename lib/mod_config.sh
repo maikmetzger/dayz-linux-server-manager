@@ -1449,6 +1449,67 @@ print(json.dumps(results))
 PYTHON_CE_SCAN
 }
 
+# -----------------------------------------------------------------------------
+# Auto-Cleanup Helper
+# -----------------------------------------------------------------------------
+
+# Unlink/Unmerge all CE files for a specific mod
+# Usage: cleanup_mod_ce_files "$instance_dir" "$mod_id"
+cleanup_mod_ce_files() {
+    local inst_dir=$1
+    local target_mod_id=$2
+    local workshop_path="${3:-}"
+    
+    if [[ -z "$workshop_path" ]]; then
+        workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+        [[ ! -d "$workshop_path" ]] && workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
+    fi
+    
+    # 1. Scan for current status
+    local ce_result
+    ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
+    
+    # 2. Parse into global arrays (smod_ids, states, etc)
+    parse_scan_result "$ce_result"
+    
+    local count=0
+    
+    # 3. Iterate and process matches
+    for i in "${!smod_ids[@]}"; do
+        local mid="${smod_ids[$i]}"
+        local st="${states[$i]}"
+        
+        # Only process files for this mod that are LINKED/MERGED (st=1)
+        if [[ "$mid" == "$target_mod_id" && "$st" -eq 1 ]]; then
+            local fn="${sfile_names[$i]}"
+            local ct="${sce_types[$i]:-types}"
+            local ln="${slinked_names[$i]}"
+            
+            # Check for merge-only types
+            if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
+                local target_file="db/cfgrandompresets.xml"
+                if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
+                local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                
+                unmerge_ce_file_python "$inst_dir" "$target_xml" "$mid"
+                count=$((count + 1))
+            else
+                # Standard Unlink
+                local target_to_unlink="${mid}_${fn}"
+                if [[ -n "$ln" ]]; then target_to_unlink="$ln"; fi
+                
+                unregister_modular_loot "$inst_dir" "$target_to_unlink"
+                count=$((count + 1))
+            fi
+        fi
+    done
+    
+    if [[ $count -gt 0 ]]; then
+        echo "Auto-cleaned $count CE files for mod $target_mod_id"
+    fi
+}
+
+
 # =============================================================================
 # Merge Tracking Wrappers (Phase 2)
 # =============================================================================

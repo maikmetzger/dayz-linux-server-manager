@@ -606,6 +606,9 @@ END_PYTHON
                     local mname=$(get_mod_name "$mid")
                     
                     if confirm "Remove mod '$mname' from list?" "n"; then
+                        # Auto-Cleanup CE (unlink/unmerge)
+                        cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
+                        
                         # Paths for key cleanup
                         local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
                         local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
@@ -655,6 +658,8 @@ END_PYTHON
                         local mid="${mod_ids[$selected]}"
                         local mname=$(get_mod_name "$mid")
                         if confirm "Remove mod '$mname' from list?" "n"; then
+                            # Auto-Cleanup CE (unlink/unmerge)
+                            cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
                             removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
                             show_message "Removed: $mname" "Success"
                             dirty=1; needs_rebuild=1; touch "$needs_sync_file"
