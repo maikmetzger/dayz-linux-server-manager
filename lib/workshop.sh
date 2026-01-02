@@ -567,15 +567,14 @@ _draw_workshop_details_screen() {
     
     local num_authors=${#authors_list[@]}
     local display_authors=$num_authors
-    # Fixed fields: ID, Size, Subs, Type, Inst, Sync, Upd, Rel, Rate, Deps = 10 lines
+    # Fixed fields: ID, Size, Subs, Type, Upd, Rel, Rate, Deps, Inst, Sync = 10 lines
     # Padding: 1 top line (empty row 4)
     # Box Borders: 2 lines
     # Total Base: 10 + 1 + 2 = 13
     local meta_height=$((13 + num_authors))
     
-    # Cap height and authors
-    # Allow slightly taller box for more authors
-    local max_meta_height=20
+    # Full height mode: use all available space
+    local max_meta_height=$((TERM_ROWS - 5))
     if [[ $meta_height -gt $max_meta_height ]]; then
         meta_height=$max_meta_height
         # display_authors = height - 13
@@ -873,16 +872,35 @@ except: pass
             elif command -v xdg-open &>/dev/null; then xdg-open "$url" &>/dev/null &
             else show_message "URL: $url" "Link"; fi
         elif [[ "$k" == "i" || "$k" == "I" ]]; then
-            # Show image list sub-pane with full URLs (wrapping naturally)
+            # Show image list sub-pane with bordered box layout (like description)
             if [[ ${#mimages[@]} -gt 0 ]]; then
-                printf "%s%s" "$CLEAR_SCREEN" "$RESET"
-                move_to 1 1
-                printf "%s%s Images (%d) - Press any key to return %s%s" "$BG_RED" "$WHITE$BOLD" "${#mimages[@]}" "${ESC}[K" "$RESET"
-                move_to 3 1
-                for ((i=0; i<${#mimages[@]}; i++)); do
-                    printf "[%02d] %s\n" "$((i+1))" "${mimages[$i]}"
+                local img_scroll=0
+                local img_view_height=$((TERM_ROWS - 6))
+                while true; do
+                    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+                    move_to 1 1
+                    printf "%s%s Images (%d) - [↑/↓] Scroll  [Q/Space] Return %s%s" "$BG_RED" "$WHITE$BOLD" "${#mimages[@]}" "${ESC}[K" "$RESET"
+                    
+                    draw_box 3 2 $((TERM_ROWS - 4)) $((TERM_COLS - 3)) "Image URLs" "$RED"
+                    
+                    local row=5
+                    for ((i=img_scroll; i<${#mimages[@]} && row < TERM_ROWS - 2; i++)); do
+                        move_to $row 4
+                        printf "%s[%02d] %s%s" "$WHITE" "$((i+1))" "${mimages[$i]}" "$RESET"
+                        ((row++))
+                    done
+                    
+                    IFS= read -rsn1 ik
+                    if [[ "$ik" == $'\x1b' ]]; then
+                        read -rsn2 -t 0.1 is || break
+                        case "$is" in
+                            "[A") [[ $img_scroll -gt 0 ]] && ((img_scroll--)) ;;
+                            "[B") [[ $img_scroll -lt $((${#mimages[@]} - img_view_height)) ]] && ((img_scroll++)) ;;
+                        esac
+                    elif [[ "$ik" == "q" || "$ik" == "Q" || "$ik" == " " ]]; then
+                        break
+                    fi
                 done
-                read -rsn1
             else
                 show_message "No images available" "Info"
             fi
