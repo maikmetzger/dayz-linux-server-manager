@@ -516,15 +516,20 @@ mod_manager() {
                             ce_filenames+=("$fname")
                             ce_types+=("$cetype")
                             ce_selected+=(1)  # Pre-selected by default
-                        done < <(echo "$ce_result" | python3 -c "
+                        done < <(echo "$ce_result" | python3 -c '
 import json, sys
 try:
     data = json.load(sys.stdin)
     for x in data:
-        if x.get('status') in ['new', 'unlinked']:
-            print(f\"{x['mod_id']}|{x.get('mod_name', x['mod_id'])}|{x['file_path']}|{x['filename']}|{x['ce_type']}\")
+        if x.get("status") in ["new", "unlinked"]:
+            mid = x["mod_id"]
+            mname = x.get("mod_name", mid)
+            fpath = x["file_path"]
+            fname = x["filename"]
+            cetype = x["ce_type"]
+            print(f"{mid}|{mname}|{fpath}|{fname}|{cetype}")
 except: pass
-" 2>/dev/null)
+' 2>/dev/null)
                         
                         local ce_count=${#ce_filenames[@]}
                         if [[ $ce_count -gt 0 ]]; then
@@ -538,10 +543,8 @@ except: pass
                                 for ((i=0; i<ce_count; i++)); do
                                     local check=" "
                                     [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
-                                    # Truncate long names
-                                    local short_name="${ce_filenames[$i]:0:25}"
-                                    local short_mod="${ce_mod_names[$i]:0:20}"
-                                    items+=("[$check] $short_name|($short_mod)")
+                                    # Full names displayed
+                                    items+=("[$check] ${ce_filenames[$i]}|(${ce_mod_names[$i]})")
                                 done
                                 
                                 items+=("--------------------")
