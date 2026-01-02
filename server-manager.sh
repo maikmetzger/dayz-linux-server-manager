@@ -551,7 +551,7 @@ except:
         # Determine prompt based on file existence
         # (We assume register_modular_loot handles the 'Overwrite' prompt if needed)
         
-        if confirm "Link this file to cfgeconomycore.xml?" "y"; then
+        if confirm "Link '$filename' to cfgeconomycore.xml?" "y"; then
             register_modular_loot "$SELECTED_DIR" "$file_path" "$mod_id" 0 "$ce_type"
         else
             echo "Skipped."
