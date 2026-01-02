@@ -193,11 +193,6 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
         tree = ET.parse(xml_path)
         root = tree.getroot()
         
-    # Layer 1: Try parsing and checking root tag
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-        
         registry_entry = CE_TYPE_REGISTRY.get(root.tag)
         if registry_entry:
             result = dict(registry_entry)
