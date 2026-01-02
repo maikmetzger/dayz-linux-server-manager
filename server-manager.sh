@@ -189,6 +189,7 @@ mod_manager() {
                 export WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"
                 export WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
                 export MOD_IDS_STR="${mod_ids[*]}"
+                export CACHE_JSON="$cache_data"
                 
                 python3 -c "
 import json, sys, datetime, os
@@ -196,13 +197,14 @@ import json, sys, datetime, os
 mod_ids = os.environ.get('MOD_IDS_STR', '').split()
 ws_path1 = os.environ.get('WS_PATH_1', '')
 ws_path2 = os.environ.get('WS_PATH_2', '')
+cache_json = os.environ.get('CACHE_JSON', '{}')
 
 ws_dir = ws_path1
 if not os.path.exists(ws_dir) and os.path.exists(ws_path2):
     ws_dir = ws_path2
 
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(cache_json) if cache_json else {}
     mods_info = data.get('mods', {})
     
     def fmt(ts):
@@ -223,21 +225,18 @@ try:
             else:
                 local_v = int(os.path.getmtime(m_path))
         
-        # Deployment Check: Verify mod is linked in server root
+        # Deployment Check: Verify mod link in server root
         is_deployed = False
-        try:
-            # Workshop dir is: .../serverfiles/steamapps/workshop/content/221100
-            # Root is 4 levels up: .../serverfiles/
-            s_root = os.path.abspath(os.path.join(ws_dir, "../../../../"))
-            is_deployed = os.path.exists(os.path.join(s_root, f"@{mid}"))
-        except:
-            pass
+        if ws_dir:
+            try:
+                # serverfiles/steamapps/workshop/content/221100 -> serverfiles/
+                s_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
+                is_deployed = os.path.exists(os.path.join(s_root, f'@{mid}'))
+            except: pass
 
-        remote_v = m.get('latest', 0)
-        # Needs sync if:
-        # 1. Remote is newer than workshop cache
-        # 2. Workshop cache is missing (local_v == 0)
-        # 3. Not deployed to server instance root (@id symlink missing)
+        remote_v = m.get('updated', 0)
+        if remote_v == 0: remote_v = m.get('latest', 0)
+        
         has_update = (remote_v > local_v) or (local_v == 0) or (not is_deployed)
         
         v = fmt(local_v)
@@ -245,9 +244,7 @@ try:
         print(f'{v}|{1 if has_update else 0}')
 except Exception as e:
     for _ in mod_ids: print('NEED SYNC|1')
-" <<EOF
-$cache_data
-EOF
+"
             )
             
             # Global sync flag
