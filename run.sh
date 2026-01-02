@@ -240,6 +240,12 @@ mod_list_apply_fixes() {
 
   mkdir -p "${KEYS_DIR}"
   local mod_args=""
+
+  # Cleanup: Remove old automated workshop symlinks (@<id>)
+  # This ensures that removed mods are actually unlinked from the server files
+  log "Pruning old workshop symlinks..."
+  find "${DZ_SERVERFILES}" -maxdepth 1 -name "@[0-9]*" -type l -delete
+
   while IFS= read -r id; do
     [[ -n "${id}" ]] || continue
     local mod_dir="${WORKSHOP_DIR}/${id}"

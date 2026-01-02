@@ -223,8 +223,22 @@ try:
             else:
                 local_v = int(os.path.getmtime(m_path))
         
+        # Deployment Check: Verify mod is linked in server root
+        is_deployed = False
+        try:
+            # Workshop dir is: .../serverfiles/steamapps/workshop/content/221100
+            # Root is 4 levels up: .../serverfiles/
+            s_root = os.path.abspath(os.path.join(ws_dir, "../../../../"))
+            is_deployed = os.path.exists(os.path.join(s_root, f"@{mid}"))
+        except:
+            pass
+
         remote_v = m.get('latest', 0)
-        has_update = (remote_v > local_v) or (local_v == 0)
+        # Needs sync if:
+        # 1. Remote is newer than workshop cache
+        # 2. Workshop cache is missing (local_v == 0)
+        # 3. Not deployed to server instance root (@id symlink missing)
+        has_update = (remote_v > local_v) or (local_v == 0) or (not is_deployed)
         
         v = fmt(local_v)
         if has_update: v = 'NEED SYNC'
