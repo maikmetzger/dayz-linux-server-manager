@@ -1224,6 +1224,7 @@ scan_dayz_ce_files_python() {
     export DAYZ_LINKED_JSON="$linked_json"
     export DAYZ_SCRIPT_DIR="$SCRIPT_DIR"
     export DAYZ_MISSION_PATH="$mission_path"
+    export DAYZ_INSTANCE_DIR="$instance_dir"
     
     python3 <<'PYTHON_CE_SCAN'
 import os
@@ -1237,6 +1238,7 @@ servermods_file = os.environ.get('DAYZ_SERVERMODS_FILE')
 linked_json = os.environ.get('DAYZ_LINKED_JSON')
 script_dir = os.environ.get('DAYZ_SCRIPT_DIR')
 mission_path = os.environ.get('DAYZ_MISSION_PATH')
+instance_dir = os.environ.get('DAYZ_INSTANCE_DIR')
 # Import xml_parser for fast detection
 sys.path.append(os.path.join(script_dir, 'lib'))
 try:
@@ -1322,39 +1324,49 @@ for mod_id in sorted(mod_ids):
             linked_name = ""
             is_linked = False
             
-            search_name = fname.lower().strip()
-            # Cleaned version of workshop filename
-            search_name_cfn = "".join(x for x in search_name if x.isalnum() or x in "._-")
-            # Expected linked name pattern: ModID_filename
-            expected_linked = f"{mod_id}_{search_name_cfn}".lower()
-            
-            for ln in linked:
-                ln_orig = ln
-                lnl = ln.lower().strip()
-                # A: BEST MATCH - ModID prefix matches exactly
-                if lnl == expected_linked or lnl == f"{mod_id}_{search_name}".lower():
-                    is_linked = True; linked_name = ln_orig; break
-                # B: Exact filename match (for mods that link directly without prefix)
-                if lnl == search_name or lnl == search_name_cfn:
-                    is_linked = True; linked_name = ln_orig; break
-            
-            # Only if no mod-specific match, check if there's a generic prefix match
-            # This catches legacy files where a different prefix was used
-            if not is_linked:
-                for ln in linked:
-                    ln_orig = ln
-                    lnl = ln.lower().strip()
-                    if "_" in lnl:
-                        parts = lnl.split("_", 1)
-                        prefix = parts[0]
-                        suffix = parts[1]
-                        # Only match if suffix equals our filename AND prefix looks like a mod ID or known name
-                        if (suffix == search_name or suffix == search_name_cfn):
-                            # Check if this linked file is already claimed by its own mod
-                            # Skip if the prefix is a different mod ID
-                            if prefix.isdigit() and prefix != mod_id:
-                                continue  # This linked file belongs to a different mod
-                            is_linked = True; linked_name = ln_orig; break
+            # MERGED STATUS CHECK (Override for merge-only types)
+            if ce_type in ['randompresets', 'eventgroups']:
+                target_file = 'cfgrandompresets' if ce_type == 'randompresets' else 'cfgeventgroups'
+                tracking_path = os.path.join(instance_dir, 'data', 'state', 'ce_merge_tracking', f'{target_file}.json')
+                
+                is_merged = False
+                if os.path.exists(tracking_path):
+                    try:
+                        with open(tracking_path, 'r') as f:
+                            tdata = json.load(f)
+                            if mod_id in tdata.get('entries', {}):
+                                is_merged = True
+                    except: pass
+                
+                if is_merged:
+                    status = "linked" # Reuse linked status for TUI to show MERGED
+                    is_linked = True
+                    linked_name = f"{mod_id}_{ce_type}" # Fake name
+                else:
+                    status = "new"
+                    is_linked = False
+            else:
+                # STANDARD LINK CHECK
+                search_name = fname.lower().strip()
+                # Cleaned version of workshop filename
+                search_name_cfn = "".join(x for x in search_name if x.isalnum() or x in "._-")
+                # Expected linked name pattern: ModID_filename
+                expected_linked = f"{mod_id}_{search_name_cfn}".lower()
+                
+                if not is_linked:
+                    for ln in linked:
+                        ln_orig = ln
+                        lnl = ln.lower().strip()
+                        if "_" in lnl:
+                            parts = lnl.split("_", 1)
+                            prefix = parts[0]
+                            suffix = parts[1]
+                            # Only match if suffix equals our filename AND prefix looks like a mod ID or known name
+                            if (suffix == search_name or suffix == search_name_cfn):
+                                # Check if this linked file is already claimed by its own mod
+                                if prefix.isdigit() and prefix != mod_id:
+                                    continue  # This linked file belongs to a different mod
+                                is_linked = True; linked_name = ln_orig; break
             
             if is_linked:
                 status = "linked"
