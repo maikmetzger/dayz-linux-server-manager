@@ -500,66 +500,78 @@ mod_manager() {
                     show_progress_end "Sync complete!" 300
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
-                        # Build list of new file names for the confirm dialog
-                        local file_list
-                        file_list=$(echo "$ce_result" | python3 -c "
+                        # Build arrays of new CE files for checklist
+                        local -a ce_mod_ids=()
+                        local -a ce_mod_names=()
+                        local -a ce_file_paths=()
+                        local -a ce_filenames=()
+                        local -a ce_types=()
+                        local -a ce_selected=()
+                        
+                        while IFS='|' read -r mid mname fpath fname cetype; do
+                            [[ -z "$mid" ]] && continue
+                            ce_mod_ids+=("$mid")
+                            ce_mod_names+=("$mname")
+                            ce_file_paths+=("$fpath")
+                            ce_filenames+=("$fname")
+                            ce_types+=("$cetype")
+                            ce_selected+=(1)  # Pre-selected by default
+                        done < <(echo "$ce_result" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
     for x in data:
         if x.get('status') in ['new', 'unlinked']:
-            print(f\" - {x['filename']} ({x.get('mod_name', x['mod_id'])})\")
+            print(f\"{x['mod_id']}|{x.get('mod_name', x['mod_id'])}|{x['file_path']}|{x['filename']}|{x['ce_type']}\")
 except: pass
 " 2>/dev/null)
                         
-                        # Ask user if they want to link new CE files
-                        local confirm_msg="Found ${new_ce_count} new/unlinked CE file(s):
-${file_list}
-
-Link them now?"
-                        if confirm "$confirm_msg" "y"; then
-                            # Process each new/unlinked CE file
-                            local mission_path
-                            mission_path=$(get_mission_path "$SELECTED_DIR" 2>/dev/null)
-                               # Prepare python script to run
-    local py_script="
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    for item in data:
-        if item.get('status') in ['new', 'unlinked']:
-            print(f\"{item['mod_id']}|{item['file_path']}|{item['filename']}|{item['ce_type']}\")
-except:
-    pass
-"
+                        local ce_count=${#ce_filenames[@]}
+                        if [[ $ce_count -gt 0 ]]; then
+                            local selection=0
                             
-    # Use FD 3 for reading data so FD 0 keypresses work for confirm()
-    while IFS='|' read -u 3 -r mod_id file_path filename ce_type; do
-        [[ -z "$mod_id" ]] && continue
-        
-        # Ask for each file
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        move_to 1 1
-        printf "%s%s New CE File Found %s\n" "$BG_RED" "$WHITE$BOLD" "$RESET"
-        echo ""
-        echo "  Mod ID:   $mod_id"
-        echo "  File:     $filename"
-        echo "  Type:     $ce_type"
-        echo "  Path:     $file_path"
-        echo ""
-        
-        # Determine prompt based on file existence
-        # (We assume register_modular_loot handles the 'Overwrite' prompt if needed)
-        
-        if confirm "Link '$filename' to cfgeconomycore.xml?" "y"; then
-            register_modular_loot "$SELECTED_DIR" "$file_path" "$mod_id" 0 "$ce_type"
-        else
-            echo "Skipped."
-            sleep 0.5
-        fi
-    done 3< <(echo "$ce_result" | python3 -c "$py_script")
-                            
-                            show_message "CE file linking complete!" "CE Detection"
+                            while true; do
+                                draw_header "Link CE Files - $SELECTED_NAME"
+                                
+                                # Build menu items with checkboxes
+                                local -a items=()
+                                for ((i=0; i<ce_count; i++)); do
+                                    local check=" "
+                                    [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
+                                    # Truncate long names
+                                    local short_name="${ce_filenames[$i]:0:25}"
+                                    local short_mod="${ce_mod_names[$i]:0:20}"
+                                    items+=("[$check] $short_name|($short_mod)")
+                                done
+                                
+                                items+=("--------------------")
+                                items+=("✅|LINK SELECTED FILES")
+                                items+=("❌|Cancel / Skip All")
+                                
+                                if run_menu items "Toggle files with Enter, then Execute" $selection; then
+                                    selection=$MENU_RESULT
+                                    if [[ $selection -lt $ce_count ]]; then
+                                        # Toggle selection
+                                        ce_selected[$selection]=$((1 - ce_selected[$selection]))
+                                    elif [[ $selection -eq $((ce_count + 1)) ]]; then
+                                        # Execute linking
+                                        local link_count=0
+                                        for ((i=0; i<ce_count; i++)); do
+                                            if [[ ${ce_selected[$i]} -eq 1 ]]; then
+                                                register_modular_loot "$SELECTED_DIR" "${ce_file_paths[$i]}" "${ce_mod_ids[$i]}" 1 "${ce_types[$i]}"
+                                                ((link_count++))
+                                            fi
+                                        done
+                                        [[ $link_count -gt 0 ]] && show_message "Linked $link_count CE file(s)!" "Success"
+                                        break
+                                    elif [[ $selection -eq $((ce_count + 2)) ]]; then
+                                        # Cancel
+                                        break
+                                    fi
+                                else
+                                    break
+                                fi
+                            done
                         fi
                     fi
                 fi
