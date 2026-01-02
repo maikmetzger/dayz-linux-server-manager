@@ -817,6 +817,9 @@ except Exception as e:
     # Calculate Local Details
     local minstalled="-" msynced="-" mtype="-"
     local workshop_content_path="$instance_dir/serverfiles/steamapps/workshop/content/221100/$mid"
+    if [[ ! -d "$workshop_content_path" ]] && [[ -d "$instance_dir/data/serverfiles/steamapps/workshop/content/221100/$mid" ]]; then
+        workshop_content_path="$instance_dir/data/serverfiles/steamapps/workshop/content/221100/$mid"
+    fi
     local sm_txt="$(dirname "$mods_txt")/servermods.txt"
     
     # 1. Timestamps
