@@ -254,6 +254,8 @@ try:
                         check_roots.append(p2)
                 
                 for r in check_roots:
+                    # DEBUG: Print what we are checking to stderr so it shows up
+                    sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
                     if os.path.exists(os.path.join(r, f'@{mid}')):
                         is_deployed = True
                         break
@@ -264,10 +266,14 @@ try:
         
         has_update = (remote_v > local_v) or (local_v == 0) or (not is_deployed)
         
+        # If it needs sync solely because of deployment, let's allow it but maybe warn?
+        # No, strict is better. If it says NEED SYNC, user hits sync, and run.sh fixes it.
+        
         v = fmt(local_v)
         if has_update: v = 'NEED SYNC'
         print(f'{v}|{1 if has_update else 0}')
 except Exception as e:
+    # DEBUG: sys.stderr.write(f"ERROR: {e}\n")
     for _ in mod_ids: print('NEED SYNC|1')
 "
             )
