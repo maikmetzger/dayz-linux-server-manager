@@ -597,7 +597,9 @@ except: pass
                 types)          type_str="[TYPES]     "; type_color="$CYN" ;;
                 spawnabletypes) type_str="[SPAWNABLE] "; type_color="$MAG" ;;
                 events)         type_str="[EVENTS]    "; type_color="$YLW" ;;
-                eventspawns)   type_str="[EVENTPOS]  "; type_color="$BLU" ;;
+                eventspawns)    type_str="[EVENTPOS]  "; type_color="$BLU" ;;
+                randompresets)  type_str="[PRESETS]   "; type_color="$GRN" ;;
+                eventgroups)    type_str="[GROUPS]    "; type_color="$RED" ;;
                 *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
             esac
             
@@ -703,7 +705,25 @@ except: pass
                 if [[ ${signored[$midx]:-0} -eq 1 ]]; then
                     remove_ce_ignore "$inst_dir" "${smod_ids[$midx]}" "$fn"
                 fi
-                if confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
+                
+                # Check for merge-only types that can't be linked via cfgeconomycore
+                if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
+                    show_message "$(cat <<EOF
+$fn cannot be linked automatically.
+
+cfgrandompresets.xml and cfgeventgroups.xml must be 
+MERGED into the existing file at:
+  db/cfgrandompresets.xml
+  db/cfgeventgroups.xml
+
+This is a DayZ limitation - these files cannot be 
+included via cfgeconomycore.xml like types.xml.
+
+Manual merge required for now.
+(Automatic merge support coming in Phase 2)
+EOF
+)" "Merge Required"
+                elif confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                 fi
             fi
