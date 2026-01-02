@@ -177,14 +177,21 @@ mod_manager() {
             mod_update_flags=()
             
             # Use Python to extract all info at once for speed
-            # Pass IDs on a separate line or via env to avoid quoting hell
-            mod_versions=()
+            # Pass IDs on a separate line or via env
+            mod_ws_dates=()
+            mod_sync_dates=()
+            mod_install_dates=()
             mod_update_flags=()
+            mod_update_reasons=()
             
-            while IFS='|' read -r v_disp has_up; do
-                [[ -z "$v_disp" ]] && continue
-                mod_versions+=("$v_disp")
+            while IFS='|' read -r ws_d sync_d inst_d has_up reason; do
+                # If script fails/prints garbage, safeguard
+                [[ -z "$ws_d" ]] && continue
+                mod_ws_dates+=("$ws_d")
+                mod_sync_dates+=("$sync_d")
+                mod_install_dates+=("$inst_d")
                 mod_update_flags+=("$has_up")
+                mod_update_reasons+=("$reason")
             done < <(
                 export WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"
                 export WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
@@ -209,14 +216,19 @@ try:
     
     def fmt(ts):
         if not ts or ts == 0: return '-'
-        return datetime.datetime.fromtimestamp(ts).strftime('%d. %b %Y %H:%M')
+        # Compact format: 02.01.26 14:00
+        return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
     
     for mid in mod_ids:
         if not mid: continue
         m = mods_info.get(mid, {})
         m_path = os.path.join(ws_dir, mid)
         local_v = 0
+        install_ts = 0
+        
+        # Local Stats
         if os.path.exists(m_path):
+            install_ts = int(os.path.getctime(m_path))
             v_file = os.path.join(m_path, '.installed_version')
             if os.path.exists(v_file):
                 try: 
@@ -225,17 +237,14 @@ try:
             else:
                 local_v = int(os.path.getmtime(m_path))
         
-        # Deployment Check: Verify mod link in server root
+        # Deployment Check
         is_deployed = False
         if ws_dir:
             try:
-                # serverfiles/steamapps/workshop/content/221100 -> serverfiles/
-                # Check 1: Standard relative path
                 check_roots = []
                 p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
                 check_roots.append(p1)
                 
-                # Check 2: Explicit 'serverfiles' heuristic for odd layouts
                 if 'serverfiles' in ws_dir:
                     parts = ws_dir.split(os.sep)
                     if 'serverfiles' in parts:
@@ -244,18 +253,16 @@ try:
                         check_roots.append(p2)
                 
                 for r in check_roots:
-                    # DEBUG: sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
-                    # Use lexists because symlinks might be absolute paths valid only inside container
-                    # and thus 'broken' on the host, but the link itself EXISTS.
+                    # Use lexists for Docker symlinks
                     if os.path.lexists(os.path.join(r, f'@{mid}')):
                         is_deployed = True
                         break
             except: pass
 
+        # Remote Stats
         remote_v = m.get('updated', 0)
         if remote_v == 0: remote_v = m.get('latest', 0)
         
-        # DEBUG: Add specific codes to know WHY
         reason = ''
         if (remote_v > local_v): reason += 'U'
         if (local_v == 0): reason += 'M'
@@ -263,12 +270,11 @@ try:
         
         has_update = (len(reason) > 0)
         
-        v = fmt(local_v)
-        if has_update: v = f'NEED SYNC ({reason})'
-        print(f'{v}|{1 if has_update else 0}')
+        # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
+        print(f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{1 if has_update else 0}|{reason}')
 except Exception as e:
-    # DEBUG: sys.stderr.write(f"ERROR: {e}\n")
-    for _ in mod_ids: print('NEED SYNC (Err)|1')
+    # Fallback for ALL mods if crash
+    for _ in mod_ids: print('-|-|-|1|Err')
 END_PYTHON
             )
             
@@ -310,8 +316,9 @@ END_PYTHON
         # Table header
         local table_start=3
         local col_status=2
-        local col_version=10
-        local col_name=33
+        local col_wsver=6
+        local col_synced=22
+        local col_name=38
         local col_id=$((TERM_COLS - 25))
         local col_type=$((TERM_COLS - 10))
         
@@ -322,8 +329,10 @@ END_PYTHON
         
         move_to $((table_start + 1)) $col_status
         printf "%s%sSTATUS%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_version
-        printf "%s%sVERSION%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_wsver
+        printf "%s%sWS VER%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_synced
+        printf "%s%sSYNCED%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_name
         printf "%s%sMOD NAME%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_id
@@ -362,18 +371,30 @@ END_PYTHON
                 status_icon="⚠️"
             fi
             
+            
             # Get pre-calculated version info
-            local version_display="${mod_versions[$i]:--}"
-            local version_color="$WHITE"
-            [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && version_color="$YELLOW"
+            local ws_ver="${mod_ws_dates[$i]:--}"
+            local sync_ver="${mod_sync_dates[$i]:--}"
+            
+            # Highlight Logic
+            local ws_color="$WHITE"
+            local sync_color="$DIM"
+            [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && ws_color="$YELLOW" && sync_color="$YELLOW"
+            
+            # Check for specific reasons
+            local reason="${mod_update_reasons[$i]}"
+            if [[ "$reason" == *"D"* ]]; then sync_color="$RED"; sync_ver="MISSING LINK"; fi
+            if [[ "$reason" == *"M"* ]]; then sync_color="$RED"; sync_ver="MISSING FILE"; fi
             
             move_to $row 1
             if [[ $i -eq $selected ]]; then
                 printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
-                move_to $row $col_version
-                printf "%-22s" "${version_display:0:22}"
+                move_to $row $col_wsver
+                printf "%-14s" "${ws_ver:0:14}"
+                move_to $row $col_synced
+                printf "%-14s" "${sync_ver:0:14}"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
@@ -392,8 +413,10 @@ END_PYTHON
                 else
                     printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
                 fi
-                move_to $row $col_version
-                printf "%-22s" "${version_display:0:22}"
+                move_to $row $col_wsver
+                printf "%s%-14s%s" "$ws_color" "${ws_ver:0:14}" "$row_color"
+                move_to $row $col_synced
+                printf "%s%-14s%s" "$sync_color" "${sync_ver:0:14}" "$row_color"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
@@ -419,7 +442,7 @@ END_PYTHON
         
         # Action bar
         local action_row=$row
-        local actions=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[Q] Back")
+        local actions=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[I] Info" "[Q] Back")
         
         move_to $action_row 2
         for a in "${!actions[@]}"; do
@@ -429,7 +452,7 @@ END_PYTHON
             else
                 printf "  %s " "${actions[$a]}"
             fi
-            printf "  "
+            printf " "
         done
         
         # Footer warning
@@ -448,7 +471,8 @@ END_PYTHON
         fi
 
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [F] FixMods  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
+        move_to $TERM_ROWS 1
+        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [Space] Info%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
@@ -565,6 +589,7 @@ END_PYTHON
                         show_message "Container must be running to sync"
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                        needs_rebuild=1
                         # Refresh update cache after sync with progress bar
                         show_progress_start "Sync" "Refreshing update cache..."
                         show_progress_update "Checking mod versions..." 50
@@ -581,7 +606,20 @@ END_PYTHON
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
-                    return
+                     # Info
+                    if [[ $selected -lt $mod_count ]]; then
+                        local mid="${mod_ids[$selected]}"
+                         _view_mod_details "$mid" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                         needs_rebuild=1
+                    fi
+                elif [[ $selected -eq $((mod_count + 5)) ]]; then
+                    return 0
+                ;;
+            'i'|'I'|' ')
+                if [[ $selected -lt $mod_count ]]; then
+                    local mid="${mod_ids[$selected]}"
+                    _view_mod_details "$mid" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                    needs_rebuild=1
                 fi
                 ;;
             'q'|'Q')
@@ -595,6 +633,7 @@ END_PYTHON
                     show_message "Container must be running to sync"
                 else
                     run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                    needs_rebuild=1
                     
                     # Progress bar for post-sync operations
                     show_progress_start "Sync" "Refreshing update cache..."

@@ -531,6 +531,9 @@ _draw_workshop_details_screen() {
     local mid="$1" mname="$2" mauthor="$3" msize="$4" msubs="$5" mupdated="$6" mdesc="$7" mdeps="$8" mrating_stars="$9" mrating_count="${10}" scroll_offset="${11}"
     local -n _images_ref=${12}
     local img_sel=${13}
+    local minstalled="${14:-n/a}"
+    local msynced="${15:-n/a}"
+    local mtype="${16:-Unknown}"
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -558,7 +561,8 @@ _draw_workshop_details_screen() {
     
     local num_authors=${#authors_list[@]}
     local display_authors=$num_authors
-    local meta_height=$((6 + num_authors + 2))
+    # 9 fixed fields: ID, Auth, Size, Subs, Type, Inst, Sync, Upd, Rate, Deps
+    local meta_height=$((9 + num_authors + 2))
     
     # Cap height and authors
     if [[ $meta_height -gt 15 ]]; then
@@ -598,6 +602,20 @@ _draw_workshop_details_screen() {
     
     # Continue after authors (Fixed fields)
     move_to $a_row 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
+    ((a_row++))
+    move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
+    ((a_row++))
+    move_to $a_row 4; printf "%sType     :%s %s" "$DIM" "$RESET" "$mtype"
+    ((a_row++))
+    move_to $a_row 4; printf "%sInstalled:%s %s" "$DIM" "$RESET" "$minstalled"
+    ((a_row++))
+    move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
+    ((a_row++))
+    move_to $a_row 4; printf "%sWorkshop :%s %s" "$DIM" "$RESET" "$mupdated"
+    ((a_row++))
+    move_to $a_row 4; printf "%sRating   :%s %s (%s)" "$DIM" "$RESET" "$mrating_stars" "$mrating_count"
+    ((a_row++))
+    move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "$mdeps"
     ((a_row++))
     move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
     ((a_row++))
@@ -788,6 +806,44 @@ except Exception as e:
     fi
     rm -f "$tmp_json"
     
+    # Calculate Local Details
+    local minstalled="-" msynced="-" mtype="-"
+    local workshop_content_path="$instance_dir/serverfiles/steamapps/workshop/content/221100/$mid"
+    local sm_txt="$(dirname "$mods_txt")/servermods.txt"
+    
+    # 1. Timestamps
+    if [[ -d "$workshop_content_path" ]]; then
+       # Use python because stat syntax varies (BSD vs GNU) and handles large ints better
+       eval $(python3 -c "
+import os, datetime
+try:
+    p = '$workshop_content_path'
+    ct = os.path.getctime(p)
+    mt = os.path.getmtime(p)
+    # Check if .installed_version exists for better MT
+    v_file = os.path.join(p, '.installed_version')
+    if os.path.exists(v_file):
+        with open(v_file) as f: mt = int(f.read().strip())
+    
+    print(f'minstalled=\"{datetime.datetime.fromtimestamp(ct).strftime(\"%d. %b %Y %H:%M\")}\"')
+    print(f'msynced=\"{datetime.datetime.fromtimestamp(mt).strftime(\"%d. %b %Y %H:%M\")}\"')
+except: pass
+")
+    fi
+    
+    # 2. Mod Type
+    if grep -q "^$mid" "$sm_txt" 2>/dev/null; then
+        if grep -q "^$mid" "$mods_txt" 2>/dev/null; then
+            mtype="Client+Server"
+        else
+            mtype="Server Mod"
+        fi
+    elif grep -q "^$mid" "$mods_txt" 2>/dev/null; then
+        mtype="Client Mod"
+    else
+        mtype="Not Installed"
+    fi
+    
     echo "ENTERING UI LOOP..." >> /tmp/workshop_crash.log
     
     # Run UI loop in permissive mode to prevent crashes from fold/printf
@@ -802,7 +858,7 @@ except Exception as e:
         local desc_height=$((TERM_ROWS - 6))
         local view_height=$((desc_height - 3))
         
-        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$mrating_stars" "$mrating_count" "$scroll" mimages $img_sel
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$mrating_stars" "$mrating_count" "$scroll" mimages $img_sel "$minstalled" "$msynced" "$mtype"
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
