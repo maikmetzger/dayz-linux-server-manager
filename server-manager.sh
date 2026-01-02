@@ -402,9 +402,9 @@ END_PYTHON
                 
                 # Selected row color logic for Types
                 case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]" "$LIGHT_CYAN" "$WHITE$BOLD" "$LIGHT_RED" "$WHITE$BOLD" ;;
-                    client)   printf "[%s%s%s]" "$LIGHT_CYAN" "$type_short" "$WHITE$BOLD" ;;
-                    server)   printf "[%s%s%s]" "$LIGHT_RED" "$type_short" "$WHITE$BOLD" ;;
+                    both)     printf "[%sC%s+%sS%s]" "$MOD_CL" "$WHITE$BOLD" "$MOD_SV" "$WHITE$BOLD" ;;
+                    client)   printf "[%s%s%s]" "$MOD_CL" "$type_short" "$WHITE$BOLD" ;;
+                    server)   printf "[%s%s%s]" "$MOD_SV" "$type_short" "$WHITE$BOLD" ;;
                     disabled) printf "[%s]" "$type_short" ;;
                 esac
                 move_to $row $col_name
@@ -419,6 +419,7 @@ END_PYTHON
             else
                 local row_color="$RESET"
                 [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
+                [[ "$mtype" == "disabled" ]] && row_color="$DARKGRAY"
                 
                 printf "%s" "$row_color"
                 move_to $row $col_status
@@ -429,9 +430,9 @@ END_PYTHON
                 fi
                 move_to $row $col_type
                 case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]%s" "$LIGHT_CYAN" "$row_color" "$LIGHT_RED" "$row_color" "$RESET" ;;
-                    client)   printf "[%s%s%s]%s" "$LIGHT_CYAN" "$type_short" "$row_color" "$RESET" ;;
-                    server)   printf "[%s%s%s]%s" "$LIGHT_RED" "$type_short" "$row_color" "$RESET" ;;
+                    both)     printf "[%sC%s+%sS%s]%s" "$MOD_CL" "$row_color" "$MOD_SV" "$row_color" "$RESET" ;;
+                    client)   printf "[%s%s%s]%s" "$MOD_CL" "$type_short" "$row_color" "$RESET" ;;
+                    server)   printf "[%s%s%s]%s" "$MOD_SV" "$type_short" "$row_color" "$RESET" ;;
                     disabled) printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
                 esac
                 move_to $row $col_name

@@ -33,6 +33,10 @@ DARKGRAY="${ESC}[38;2;55;55;55m"
 LIGHT_RED="${ESC}[91m"
 LIGHT_CYAN="${ESC}[96m"
 
+# Custom Mod Colors
+MOD_CL="${ESC}[38;2;71;188;255m"   # #47bcff
+MOD_SV="${ESC}[38;2;255;82;77m"    # #ff524d
+
 # Legacy color aliases (used by installer)
 CYN="${ESC}[36m"
 CYAN="${CYN}"
