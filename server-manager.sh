@@ -255,7 +255,7 @@ try:
                 
                 for r in check_roots:
                     # DEBUG: Print what we are checking to stderr so it shows up
-                    sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
+                    # sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
                     if os.path.exists(os.path.join(r, f'@{mid}')):
                         is_deployed = True
                         break

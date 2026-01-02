@@ -272,7 +272,9 @@ get_update_summary() {
     update_count=$(python3 -c "import json; print(json.load(open('$cache_file')).get('update_count', 0))" 2>/dev/null || echo "0")
     
     if [[ "$update_count" -gt 0 ]]; then
-        echo "[NEED SYNC] (${update_count} mod update$([ "$update_count" -gt 1 ] && echo "s"))"
+        local s=""
+        [[ "$update_count" -gt 1 ]] && s="s"
+        echo "[NEED SYNC] (${update_count} mod update${s})"
     fi
 }
 
