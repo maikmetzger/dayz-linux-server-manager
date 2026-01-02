@@ -1149,6 +1149,8 @@ except Exception as e:
                             local cid="${to_install_ids[$i]}"
                             if [[ $auto_top -eq 1 ]]; then sed -i "1i$cid" "$mods_txt"; else echo "$cid" >> "$mods_txt"; fi
                         done
+                        # Flag sync needed for Mod Manager
+                        touch "${instance_dir}/data/config/.needs_sync"
                         f_changed=1; show_message "Mod(s) added to your list. Run 'Sync' to download." "Added"
                     fi
                 else show_message "This mod is already in your list." "Info"; fi

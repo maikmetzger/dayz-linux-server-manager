@@ -328,7 +328,9 @@ END_PYTHON
         # Header bar
         move_to 1 1
         local header_title="Mod Manager - $SELECTED_NAME"
-        [[ ${global_sync_needed:-0} -eq 1 ]] && header_title="$header_title ${YELLOW}[ SYNC NEEDED ]${RESET}${BG_RED}${WHITE}${BOLD}"
+        if [[ $dirty -eq 1 ]]; then
+            header_title="Mod Manager - $SELECTED_NAME ${YELLOW}[ SYNC NEEDED ]${RESET}${BG_RED}${WHITE}${BOLD}"
+        fi
         printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
         
         # Table header
@@ -693,7 +695,13 @@ END_PYTHON
                 fi
                 ;;
             'q'|'Q')
-                return 0
+                if [[ $dirty -eq 1 ]]; then
+                    if confirm "Sync is pending! Leave without syncing?" "n"; then
+                        return 0
+                    fi
+                else
+                    return 0
+                fi
                 ;;
 
             's'|'S')
