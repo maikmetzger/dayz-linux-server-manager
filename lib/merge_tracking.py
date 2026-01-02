@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import xml.etree.ElementTree as ET
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
@@ -74,10 +75,15 @@ def parse_xml_robust(path: str) -> tuple[Optional[ET.Element], bool]:
         tree = ET.parse(path)
         return tree.getroot(), False
     except ET.ParseError:
-        # Try wrapping in fake root
+        # Try wrapping in fake root AND sanitizing
         try:
             with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
+            
+            # Sanitize: Escape unescaped &
+            # Matches & that is NOT followed by (entity;)
+            content = re.sub(r'&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)', '&amp;', content)
+            
             # wrapped_content = f"<root>{content}</root>" # f-string might be unsafe if content has weird bytes?
             # Use format or concatenation
             root = ET.fromstring(f"<root>{content}</root>")
