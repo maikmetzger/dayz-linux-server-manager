@@ -195,14 +195,15 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
         
         registry_entry = CE_TYPE_REGISTRY.get(root.tag)
         if registry_entry:
+            # print(f"DEBUG: {filename} -> root_tag '{root.tag}'", file=sys.stderr)
             result = dict(registry_entry)
             result['detection_method'] = 'root_tag'
             return result
         
         # Layer 2a: Check if root tag itself is a fragment element
-        # This handles files like: <type name="...">...</type> (root IS the entry)
         fragment_ce_type = CE_FRAGMENT_REGISTRY.get(root.tag)
         if fragment_ce_type:
+            # print(f"DEBUG: {filename} -> fragment_root '{root.tag}'", file=sys.stderr)
             for entry in CE_TYPE_REGISTRY.values():
                 if entry['ce_type'] == fragment_ce_type:
                     result = dict(entry)
@@ -210,13 +211,13 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
                     result['is_fragment'] = True
                     return result
             
-        # Layer 2b: Check first child elements for fragment detection
-        # This handles files with unknown wrapper: <wrapper><type>...</type></wrapper>
+        # Layer 2b: Check first child elements
         first_child = next(iter(root), None)
         if first_child is not None:
             child_tag = first_child.tag
             fragment_ce_type = CE_FRAGMENT_REGISTRY.get(child_tag)
             if fragment_ce_type:
+                # print(f"DEBUG: {filename} -> fragment_child '{child_tag}'", file=sys.stderr)
                 # Look up full info from CE_TYPE_REGISTRY using the type name
                 for entry in CE_TYPE_REGISTRY.values():
                     if entry['ce_type'] == fragment_ce_type:
@@ -226,17 +227,21 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
                         return result
                         
     except ET.ParseError:
-        # File couldn't be parsed as valid XML - try text-based fragment detection
-        # This handles files with multiple root elements like: <type>...</type><type>...</type>
+        # Layer 2.5: Text-based fragment detection
         try:
             with open(xml_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read(2048)  # Read first 2KB to find element
+                content = f.read(2048)  # Read first 2KB
             
-            # Look for first opening tag (skip XML declaration and comments)
+            # Look for first opening tag
             import re
             tag_match = re.search(r'<([a-zA-Z_][a-zA-Z0-9_-]*)\s', content)
             if tag_match:
                 first_tag = tag_match.group(1).lower()
+                
+                # Debug specific file
+                if 'trader_config' in filename:
+                    print(f"DEBUG: {filename} matched tag '{first_tag}'", file=sys.stderr)
+                
                 fragment_ce_type = CE_FRAGMENT_REGISTRY.get(first_tag)
                 if fragment_ce_type:
                     for entry in CE_TYPE_REGISTRY.values():
@@ -248,13 +253,13 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
         except Exception:
             pass
     except Exception:
-        # Other parsing errors
         pass
     
     # Layer 3: Filename pattern fallback
     if use_filename_fallback:
         for pattern, ce_type in CE_FILENAME_PATTERNS:
             if pattern.match(filename):
+                # print(f"DEBUG: {filename} -> filename pattern", file=sys.stderr)
                 # Look up full info from registry
                 for entry in CE_TYPE_REGISTRY.values():
                     if entry['ce_type'] == ce_type:
