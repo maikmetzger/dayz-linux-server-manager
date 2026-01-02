@@ -123,23 +123,31 @@ confirm() {
     local box_width=60
     local max_text_width=$((box_width - 6))
     
-    # Word-wrap message into lines
+    # Split by newlines first, then word-wrap each line
     local -a lines=()
-    local current_line=""
-    for word in $message; do
-        if [[ ${#current_line} -eq 0 ]]; then
-            current_line="$word"
-        elif [[ $((${#current_line} + 1 + ${#word})) -le $max_text_width ]]; then
-            current_line="$current_line $word"
+    while IFS= read -r input_line; do
+        if [[ -z "$input_line" ]]; then
+            lines+=("")  # Preserve empty lines
         else
-            lines+=("$current_line")
-            current_line="$word"
+            # Word-wrap this line
+            local current_line=""
+            for word in $input_line; do
+                if [[ ${#current_line} -eq 0 ]]; then
+                    current_line="$word"
+                elif [[ $((${#current_line} + 1 + ${#word})) -le $max_text_width ]]; then
+                    current_line="$current_line $word"
+                else
+                    lines+=("$current_line")
+                    current_line="$word"
+                fi
+            done
+            [[ -n "$current_line" ]] && lines+=("$current_line")
         fi
-    done
-    [[ -n "$current_line" ]] && lines+=("$current_line")
+    done <<< "$message"
     
     local line_count=${#lines[@]}
     [[ $line_count -lt 1 ]] && line_count=1
+    [[ $line_count -gt 15 ]] && line_count=15  # Cap height
     local box_height=$((line_count + 5))
     
     local box_row=$(( (TERM_ROWS - box_height) / 2 ))
@@ -147,10 +155,11 @@ confirm() {
     
     draw_box $box_row $box_col $box_height $box_width
     
-    # Print each line
-    for ((i=0; i<${#lines[@]}; i++)); do
+    # Print each line (capped at visible area)
+    local max_lines=$((box_height - 4))
+    for ((i=0; i<${#lines[@]} && i<max_lines; i++)); do
         move_to $((box_row + 2 + i)) $((box_col + 3))
-        printf "%s%s%s" "$WHITE" "${lines[$i]}" "$RESET"
+        printf "%s%-${max_text_width}s%s" "$WHITE" "${lines[$i]:0:$max_text_width}" "$RESET"
     done
     
     move_to $((box_row + box_height - 2)) $((box_col + 3))
