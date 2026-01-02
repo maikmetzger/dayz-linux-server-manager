@@ -229,9 +229,34 @@ try:
         is_deployed = False
         if ws_dir:
             try:
-                # serverfiles/steamapps/workshop/content/221100 -> serverfiles/
-                s_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
-                is_deployed = os.path.exists(os.path.join(s_root, f'@{mid}'))
+                # ws_dir is .../steamapps/workshop/content/221100
+                # We need to find the 'root' where @mods are typically linked.
+                # Usually this is the 'serverfiles' directory itself.
+                
+                # Go up until we hit 'serverfiles' or 'dayz-server' root?
+                # Actually, simpler: go 4 levels up from content/221100
+                # .../serverfiles/steamapps/workshop/content/221100 -> .../serverfiles
+                
+                # Check 1: Standard
+                check_roots = []
+                p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
+                check_roots.append(p1)
+                
+                # Check 2: Just in case logic is slightly off, explicit path construction
+                # from the known 'serverfiles' in the path
+                if 'serverfiles' in ws_dir:
+                    # Split path and rebuild up to serverfiles
+                    parts = ws_dir.split(os.sep)
+                    if 'serverfiles' in parts:
+                        idx = parts.index('serverfiles')
+                        # Rejoin up to serverfiles (inclusive)
+                        p2 = os.sep.join(parts[:idx+1])
+                        check_roots.append(p2)
+                
+                for r in check_roots:
+                    if os.path.exists(os.path.join(r, f'@{mid}')):
+                        is_deployed = True
+                        break
             except: pass
 
         remote_v = m.get('updated', 0)
