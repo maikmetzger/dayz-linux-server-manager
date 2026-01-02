@@ -494,8 +494,24 @@ mod_manager() {
                     fi
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
+                        # Build list of new file names for the confirm dialog
+                        local file_list
+                        file_list=$(echo "$ce_result" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    for x in data:
+        if x.get('status') in ['new', 'unlinked']:
+            print(f\" - {x['filename']} ({x.get('mod_name', x['mod_id'])})\")
+except: pass
+" 2>/dev/null)
+                        
                         # Ask user if they want to link new CE files
-                        if confirm "Found ${new_ce_count} new/unlinked CE file(s). Link them now?" "y"; then
+                        local confirm_msg="Found ${new_ce_count} new/unlinked CE file(s):
+${file_list}
+
+Link them now?"
+                        if confirm "$confirm_msg" "y"; then
                             # Process each new/unlinked CE file
                             local mission_path
                             mission_path=$(get_mission_path "$SELECTED_DIR" 2>/dev/null)
