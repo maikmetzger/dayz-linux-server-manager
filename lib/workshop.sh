@@ -617,10 +617,6 @@ _draw_workshop_details_screen() {
     ((a_row++))
     move_to $a_row 4; printf "%sType     :%s %s" "$DIM" "$RESET" "$mtype"
     ((a_row++))
-    move_to $a_row 4; printf "%sInstalled:%s %s" "$DIM" "$RESET" "$minstalled"
-    ((a_row++))
-    move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
-    ((a_row++))
     move_to $a_row 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
     ((a_row++))
     move_to $a_row 4; printf "%sReleased :%s %s" "$DIM" "$RESET" "$mreleased"
@@ -638,19 +634,25 @@ _draw_workshop_details_screen() {
     
     move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "$mdeps"
     ((a_row++))
+    
+    # Installed/Synced at bottom (local data)
+    move_to $a_row 4; printf "%sInstalled:%s %s" "$DIM" "$RESET" "$minstalled"
+    ((a_row++))
+    move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
+    ((a_row++))
 
-    # 3. Images Box (Left, below Metadata)
-    local img_height=$((TERM_ROWS - meta_height - 6))
+    # 3. Images Box (Left, below Metadata) - Fixed height calculation
+    local img_box_start=$((3 + meta_height))
+    local img_height=$((TERM_ROWS - img_box_start - 3))
     if [[ $img_height -gt 4 ]]; then
         local img_color="$RED"
-        draw_box $((3 + meta_height)) 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
+        draw_box $img_box_start 2 $img_height $meta_width "Images (${#_images_ref[@]})" "$img_color"
         
-        local start_img_row=$((5 + meta_height))
+        local start_img_row=$((img_box_start + 2))
         local max_imgs=$((img_height - 2))
         local display_offset=0
         
         # Simple scroll for images if selected index is deep
-        # FIX: Ensure it handles scrolling UP as well by clamping display_offset
         if [[ $img_sel -ge $max_imgs ]]; then 
              display_offset=$((img_sel - max_imgs + 1))
         fi
@@ -662,11 +664,10 @@ _draw_workshop_details_screen() {
                 local style="$DIM"
                 [[ $idx -eq $img_sel && $img_sel -ge 0 ]] && style="$BG_RED$WHITE$BOLD"
                 local img_url="${_images_ref[$idx]}"
-                # Use OSC 8 Hyperlink with truncation for best TUI experience
-                # \033]8;;URL\033\\TEXT\033]8;;\033\\
-                local img_url="${_images_ref[$idx]}"
-                local link_text="${img_url:0:36}"
-                printf "%s\033]8;;%s\033\\%-36s\033]8;;\033\\%s" "$style" "$img_url" "$link_text" "$RESET"
+                # Full URL in OSC 8 hyperlink, display shows index + truncated URL
+                local display_width=$((meta_width - 6))
+                local display_text="$(printf "[%02d] %s" "$((idx+1))" "${img_url:0:$((display_width-6))}")"
+                printf "%s\033]8;;%s\033\\%-${display_width}s\033]8;;\033\\%s" "$style" "$img_url" "$display_text" "$RESET"
             fi
         done
     fi
