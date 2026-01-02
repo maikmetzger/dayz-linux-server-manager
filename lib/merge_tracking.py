@@ -1,598 +1,360 @@
 #!/usr/bin/env python3
-"""
-DayZ CE Merge Tracking System
-
-Tracks which mod contributed which entries to shared CE files
-(cfgrandompresets.xml, cfgeventgroups.xml) that cannot be linked
-via cfgeconomycore.xml.
-
-Features:
-- Track mod contributions with JSON + XML comment fallback
-- Detect name collisions and offer prefixing
-- Clean uninstall with cross-file reference checking
-- Rebuild tracking from XML comments if JSON lost
-"""
+import json
 import os
 import sys
-import json
-import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
-import hashlib
-
+from typing import Dict, List, Optional, Any
 
 # =============================================================================
-# Constants
+# CE Merge Tracking Module
 # =============================================================================
-TRACKING_SUBDIR = "data/state/ce_merge_tracking"
-MERGE_COMMENT_BEGIN = "===== BEGIN MOD:"
-MERGE_COMMENT_END = "===== END MOD:"
-
-
+# Manages the state of merged CE entries to allow clean uninstalls and 
+# collision detection.
+#
+# Tracking File Schema:
+# {
+#   "target_file": "db/cfgrandompresets.xml",
+#   "last_updated": "ISO8601",
+#   "entries": {
+#     "ModID_123": [
+#       {
+#         "xpath": "cargo[@name='MedicalPreset']",
+#         "original_name": "MedicalPreset",
+#         "current_name": "TF_MedicalPreset",
+#         "was_renamed": true
+#       }
+#     ]
+#   }
+# }
 # =============================================================================
-# Tracking File I/O
-# =============================================================================
-
-def get_tracking_dir(instance_dir: str) -> str:
-    """Get the tracking directory for an instance."""
-    return os.path.join(instance_dir, TRACKING_SUBDIR)
-
 
 def get_tracking_path(instance_dir: str, target_file: str) -> str:
     """
-    Get path to tracking JSON for a target file.
-    
-    Args:
-        instance_dir: Path to server instance (e.g., ~/servers/dayz-server1)
-        target_file: Target file basename (e.g., cfgrandompresets.xml)
-    
-    Returns:
-        Path like: instance_dir/data/state/ce_merge_tracking/cfgrandompresets.xml.json
+    Returns the absolute path to the tracking JSON for a given target file.
+    Example: target_file='db/cfgrandompresets.xml' -> '.../state/ce_merge_tracking/cfgrandompresets.json'
     """
-    return os.path.join(get_tracking_dir(instance_dir), f"{target_file}.json")
+    state_dir = os.path.join(instance_dir, 'data', 'state', 'ce_merge_tracking')
+    if not os.path.exists(state_dir):
+        os.makedirs(state_dir, exist_ok=True)
+    
+    # Flatten filename for storage (db/cfgrandompresets.xml -> cfgrandompresets.json)
+    basename = os.path.basename(target_file)
+    name_only = os.path.splitext(basename)[0]
+    return os.path.join(state_dir, f"{name_only}.json")
+
+def indent(elem, level=0):
+    """
+    Format XML with indentation in-place.
+    """
+    i = "\n" + level * "    "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "    "
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for child in elem:
+            indent(child, level + 1)
+        if not child.tail or not child.tail.strip():
+            child.tail = i
+            child.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
+
+def parse_xml_robust(path: str) -> tuple[Optional[ET.Element], bool]:
+    """
+    Parses XML file, handling fragments (missing root) by wrapping them.
+    Returns (root_element, was_wrapped_boolean).
+    """
+    if not os.path.exists(path):
+        return None, False
+        
+    try:
+        tree = ET.parse(path)
+        return tree.getroot(), False
+    except ET.ParseError:
+        # Try wrapping in fake root
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            # wrapped_content = f"<root>{content}</root>" # f-string might be unsafe if content has weird bytes?
+            # Use format or concatenation
+            root = ET.fromstring(f"<root>{content}</root>")
+            return root, True
+        except Exception as e:
+            # print(f"DEBUG: Failed to parse fragment {path}: {e}", file=sys.stderr)
+            return None, False
+
+def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: str) -> List[Dict[str, Any]]:
+    """
+    Merges entries from source_file into target_file.
+    Returns list of added entries for tracking.
+    """
+    added_entries = []
+    
+    # Load or create target
+    target_root = None
+    target_tree = None
+    
+    if os.path.exists(target_file):
+        try:
+            target_tree = ET.parse(target_file)
+            target_root = target_tree.getroot()
+        except ET.ParseError:
+            pass # Handle corrupt later
+            
+    # Parse Source Robustly
+    src_root, is_wrapped = parse_xml_robust(source_file)
+    if src_root is None:
+        return []
+
+    # Initialize target if needed
+    if target_root is None:
+        # Infer tag
+        tag_name = "types" # Default
+        base = os.path.basename(target_file).lower()
+        if 'randompresets' in base: tag_name = 'randompresets'
+        elif 'eventgroups' in base: tag_name = 'eventgroups'
+        elif not is_wrapped: tag_name = src_root.tag
+            
+        target_root = ET.Element(tag_name)
+        target_tree = ET.ElementTree(target_root)
+    
+    # Identify items to merge
+    items_to_merge = []
+    
+    # 1. If wrapped, all children are items
+    if is_wrapped:
+        for child in src_root:
+            items_to_merge.append(child)
+    else:
+        # 2. If not wrapped, check if root itself is an item
+        if src_root.get('name'): 
+            items_to_merge.append(src_root)
+        # 3. And check children (standard Types.xml structure)
+        for child in src_root:
+             if child.get('name'):
+                 items_to_merge.append(child)
+
+    if not items_to_merge:
+        return []
+
+    # Adding items
+    for item in items_to_merge:
+        # Deep copy item to avoid weirdness
+        import copy
+        new_item = copy.deepcopy(item)
+        
+        target_root.append(new_item)
+        
+        added_entries.append({
+            "name": item.get('name'),
+            "type": item.tag,
+            "original_name": item.get('name')
+        })
+
+    # Format
+    indent(target_root)
+    
+    # Write
+    target_tree.write(target_file, encoding='utf-8', xml_declaration=True)
+    
+    return added_entries
+
+def remove_entries(target_file: str, entries_to_remove: List[Dict[str, Any]]) -> bool:
+    """
+    Removes specific entries from target file.
+    """
+    if not os.path.exists(target_file):
+        return False
+        
+    try:
+        tree = ET.parse(target_file)
+        root = tree.getroot()
+    except:
+        return False
+        
+    removed_count = 0
+    
+    # Build lookup for removal
+    # (tag, name) tuple
+    targets = set()
+    for e in entries_to_remove:
+        targets.add((e['type'], e['name']))
+        
+    # Iterate copy of children to modify list safely
+    for child in list(root):
+        name = child.get('name')
+        tag = child.tag
+        if name and (tag, name) in targets:
+            root.remove(child)
+            removed_count += 1
+            
+    if removed_count > 0:
+        indent(root)
+        tree.write(target_file, encoding='utf-8', xml_declaration=True)
+        return True
+        
+    return False
 
 
 def load_tracking(instance_dir: str, target_file: str) -> Dict[str, Any]:
-    """
-    Load tracking data for a target file.
-    
-    Returns empty structure if file doesn't exist.
-    """
-    tracking_path = get_tracking_path(instance_dir, target_file)
-    
-    if os.path.exists(tracking_path):
-        try:
-            with open(tracking_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    
-    # Return empty tracking structure
-    return {
-        "target_file": target_file,
-        "last_updated": None,
-        "mods": {}
-    }
-
-
-def save_tracking(instance_dir: str, target_file: str, data: Dict[str, Any]) -> bool:
-    """
-    Save tracking data for a target file.
-    
-    Creates directory if needed. Returns True on success.
-    """
-    tracking_dir = get_tracking_dir(instance_dir)
-    tracking_path = get_tracking_path(instance_dir, target_file)
+    """Loads tracking data or returns empty structure if new."""
+    path = get_tracking_path(instance_dir, target_file)
+    if not os.path.exists(path):
+        return {
+            "target_file": target_file,
+            "last_updated": None,
+            "entries": {}
+        }
     
     try:
-        os.makedirs(tracking_dir, exist_ok=True)
-        data["last_updated"] = datetime.now().isoformat()
-        
-        with open(tracking_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except IOError as e:
-        print(f"Error saving tracking: {e}", file=sys.stderr)
-        return False
+        with open(path, 'r') as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        print(f"WARN: Corrupt tracking file {path}, resetting.", file=sys.stderr)
+        return {
+            "target_file": target_file,
+            "last_updated": None,
+            "entries": {}
+        }
 
+def save_tracking(instance_dir: str, target_file: str, data: Dict[str, Any]):
+    """Saves tracking data to disk."""
+    path = get_tracking_path(instance_dir, target_file)
+    data["last_updated"] = datetime.now().isoformat()
+    
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
 
-# =============================================================================
-# Source Entry Parsing
-# =============================================================================
-
-def parse_source_entries(xml_path: str) -> List[Dict[str, Any]]:
+def check_collisions(source_xml_path: str, target_xml_path: str) -> List[Dict[str, str]]:
     """
-    Parse entries from a source CE file (mod's randompresets/eventgroups).
-    
-    Returns list of entry dicts with: name, type (cargo/attachments/group), content_hash
+    Checks if entries in source XML already exist in target XML.
+    Returns list of collisions: [{'name': 'Preset1', 'type': 'cargo'}]
     """
-    entries = []
-    
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-        
-        # Handle both wrapped and fragment files
-        # Wrapped: <randompresets><cargo>...</cargo></randompresets>
-        # Fragment: <cargo>...</cargo> (root IS the entry)
-        
-        if root.tag in ('randompresets', 'eventgroups'):
-            # Wrapped file - iterate children
-            elements = list(root)
-        elif root.tag in ('cargo', 'attachments', 'group', 'event', 'type'):
-            # Fragment file - root is the first entry, might have siblings
-            # Actually for fragments we treat the whole file as content
-            elements = [root]
-            # Check for siblings not possible in single-root XML
-        else:
-            # Unknown structure - try children
-            elements = list(root)
-        
-        for elem in elements:
-            entry_name = elem.get('name', '')
-            if not entry_name:
-                continue
-                
-            # Calculate content hash for change detection
-            content = ET.tostring(elem, encoding='unicode', method='xml')
-            content_hash = hashlib.md5(content.encode()).hexdigest()[:12]
-            
-            entries.append({
-                "name": entry_name,
-                "type": elem.tag,
-                "content_hash": content_hash,
-                "element": elem  # Keep for later merging
-            })
-            
-    except Exception as e:
-        print(f"Error parsing {xml_path}: {e}", file=sys.stderr)
-    
-    return entries
-
-
-# =============================================================================
-# Collision Detection
-# =============================================================================
-
-def get_existing_entry_names(target_path: str) -> set:
-    """Get all entry names currently in the target file."""
-    names = set()
-    
-    if not os.path.exists(target_path):
-        return names
-        
-    try:
-        tree = ET.parse(target_path)
-        root = tree.getroot()
-        
-        for elem in root:
-            name = elem.get('name', '')
-            if name:
-                names.add(name)
-    except Exception:
-        pass
-        
-    return names
-
-
-def check_collisions(
-    source_entries: List[Dict[str, Any]], 
-    target_path: str,
-    mod_id: str
-) -> List[Dict[str, Any]]:
-    """
-    Check for name collisions between source entries and target file.
-    
-    Returns list of collision dicts with: name, suggested_name (with prefix)
-    """
-    existing_names = get_existing_entry_names(target_path)
     collisions = []
     
-    for entry in source_entries:
-        name = entry['name']
-        if name in existing_names:
-            # Suggest prefixed name
-            suggested = f"{mod_id}_{name}"
-            collisions.append({
-                "original_name": name,
-                "suggested_name": suggested,
-                "type": entry['type']
-            })
+    # 1. Parse Target (if exists)
+    existing_names = set()
+    if os.path.exists(target_xml_path):
+        try:
+            tree = ET.parse(target_xml_path)
+            root = tree.getroot()
+            # Capture names of all children (cargo, attachments, etc.)
+            for child in root:
+                name = child.get('name')
+                if name:
+                    existing_names.add(name)
+        except ET.ParseError:
+            pass # Target might be empty or valid fragment, proceed
+            
+    # 2. Parse Source
+    # 2. Parse Source Robustly
+    src_root, is_wrapped = parse_xml_robust(source_xml_path)
+    if src_root is None:
+        return []
+
+    items_to_check = []
     
+    if is_wrapped:
+        for child in src_root:
+            items_to_check.append(child)
+    else:
+        if src_root.get('name'):
+            items_to_check.append(src_root)
+        for child in src_root:
+            if child.get('name'):
+                items_to_check.append(child)
+                
+    for item in items_to_check:
+        name = item.get('name')
+        tag = item.tag
+        if name and name in existing_names:
+            collisions.append({
+                'name': name,
+                'type': tag
+            })
+            
+    return collisions
+        
     return collisions
 
-
-# =============================================================================
-# Merge Operations
-# =============================================================================
-
-def merge_entries(
-    target_path: str,
-    entries: List[Dict[str, Any]],
-    mod_id: str,
-    mod_name: str,
-    rename_map: Optional[Dict[str, str]] = None
-) -> Dict[str, Any]:
-    """
-    Merge entries into target file with XML comment markers.
-    
-    Args:
-        target_path: Path to target file (e.g., db/cfgrandompresets.xml)
-        entries: List of entry dicts from parse_source_entries()
-        mod_id: Steam Workshop mod ID
-        mod_name: Human-readable mod name
-        rename_map: Optional dict mapping original names to new names (for collision fixes)
-    
-    Returns:
-        Dict with 'success', 'added_count', 'entries_added'
-    """
-    rename_map = rename_map or {}
-    added_entries = []
-    
-    try:
-        # Load or create target file
-        if os.path.exists(target_path):
-            tree = ET.parse(target_path)
-            root = tree.getroot()
-        else:
-            # Determine root tag based on file type
-            if 'randompresets' in target_path.lower():
-                root = ET.Element('randompresets')
-            elif 'eventgroups' in target_path.lower():
-                root = ET.Element('eventgroups')
-            else:
-                root = ET.Element('root')
-            tree = ET.ElementTree(root)
-        
-        # Add comment marker before new entries
-        # Note: ElementTree doesn't support comments well, we'll add them via string manipulation
-        
-        for entry in entries:
-            elem = entry.get('element')
-            if elem is None:
-                continue
-                
-            original_name = entry['name']
-            final_name = rename_map.get(original_name, original_name)
-            
-            # Create a copy of the element with potentially new name
-            new_elem = ET.fromstring(ET.tostring(elem))
-            if final_name != original_name:
-                new_elem.set('name', final_name)
-            
-            root.append(new_elem)
-            added_entries.append({
-                "name": final_name,
-                "original_name": original_name if final_name != original_name else None,
-                "type": entry['type'],
-                "content_hash": entry['content_hash']
-            })
-        
-        # Write file
-        if sys.version_info >= (3, 9):
-            ET.indent(tree, space="    ", level=0)
-        tree.write(target_path, encoding='utf-8', xml_declaration=True)
-        
-        # Now add XML comments via string manipulation
-        _add_mod_comments(target_path, mod_id, mod_name, [e['name'] for e in added_entries])
-        
-        return {
-            "success": True,
-            "added_count": len(added_entries),
-            "entries_added": added_entries
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "added_count": 0,
-            "entries_added": []
-        }
-
-
-def _add_mod_comments(target_path: str, mod_id: str, mod_name: str, entry_names: List[str]) -> None:
-    """
-    Add XML comments around mod entries for visual tracking.
-    
-    This is done via string manipulation since ElementTree doesn't handle comments well.
-    """
-    try:
-        with open(target_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Find and wrap each entry with comments
-        begin_comment = f"<!-- {MERGE_COMMENT_BEGIN} {mod_id} ({mod_name}) -->\n"
-        end_comment = f"\n<!-- {MERGE_COMMENT_END} {mod_id} -->"
-        
-        for name in entry_names:
-            # Find the entry by name attribute
-            # Match pattern like: <cargo name="EntryName"
-            pattern = rf'(<(?:cargo|attachments|group|event|type)[^>]*name\s*=\s*["\']' + re.escape(name) + rf'["\'][^>]*>)'
-            
-            # Find the full element including closing tag
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
-                start_pos = match.start()
-                # Find the closing tag
-                tag_match = re.match(r'<(\w+)', match.group(1))
-                if tag_match:
-                    tag_name = tag_match.group(1)
-                    # Find closing tag or self-closing
-                    if '/>' in match.group(1):
-                        # Self-closing
-                        end_pos = match.end()
-                    else:
-                        close_pattern = rf'</{tag_name}>'
-                        close_match = re.search(close_pattern, content[match.end():], re.IGNORECASE)
-                        if close_match:
-                            end_pos = match.end() + close_match.end()
-                        else:
-                            end_pos = match.end()
-                    
-                    # Check if already wrapped
-                    if MERGE_COMMENT_BEGIN not in content[max(0, start_pos-100):start_pos]:
-                        # Insert comments
-                        content = (
-                            content[:start_pos] + 
-                            begin_comment + 
-                            content[start_pos:end_pos] + 
-                            end_comment + 
-                            content[end_pos:]
-                        )
-        
-        with open(target_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-            
-    except Exception as e:
-        print(f"Warning: Could not add mod comments: {e}", file=sys.stderr)
-
-
-# =============================================================================
-# Unmerge Operations  
-# =============================================================================
-
-def unmerge_entries(
-    target_path: str,
-    mod_id: str,
-    entry_names: List[str],
-    comment_out: bool = True
-) -> Dict[str, Any]:
-    """
-    Remove or comment-out entries belonging to a mod.
-    
-    Args:
-        target_path: Path to target file
-        mod_id: Mod ID to remove entries for
-        entry_names: List of entry names to remove
-        comment_out: If True, comment out instead of delete (safer)
-    
-    Returns:
-        Dict with 'success', 'removed_count', 'not_found'
-    """
-    removed = []
-    not_found = []
-    
-    try:
-        with open(target_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        for name in entry_names:
-            # Find the entry block including comments
-            # Look for BEGIN comment...entry...END comment
-            begin_pattern = rf'<!--\s*{re.escape(MERGE_COMMENT_BEGIN)}\s*{mod_id}[^>]*-->\s*'
-            entry_pattern = rf'<(?:cargo|attachments|group|event|type)[^>]*name\s*=\s*["\']' + re.escape(name) + rf'["\'][^>]*>.*?</\w+>'
-            end_pattern = rf'\s*<!--\s*{re.escape(MERGE_COMMENT_END)}\s*{mod_id}\s*-->'
-            
-            full_pattern = begin_pattern + rf'(' + entry_pattern + rf')' + end_pattern
-            
-            match = re.search(full_pattern, content, re.IGNORECASE | re.DOTALL)
-            
-            if not match:
-                # Try finding just the entry without comments
-                simple_pattern = rf'<(?:cargo|attachments|group|event|type)[^>]*name\s*=\s*["\']' + re.escape(name) + rf'["\'][^>]*>.*?</\w+>'
-                match = re.search(simple_pattern, content, re.IGNORECASE | re.DOTALL)
-            
-            if match:
-                if comment_out:
-                    # Comment out the entry
-                    commented = f"<!-- REMOVED (uninstall {mod_id}):\n{match.group(0)}\n-->"
-                    content = content[:match.start()] + commented + content[match.end():]
-                else:
-                    # Delete the entry
-                    content = content[:match.start()] + content[match.end():]
-                removed.append(name)
-            else:
-                not_found.append(name)
-        
-        with open(target_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
-        return {
-            "success": True,
-            "removed_count": len(removed),
-            "removed": removed,
-            "not_found": not_found
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "removed_count": 0,
-            "removed": [],
-            "not_found": entry_names
-        }
-
-
-# =============================================================================
-# Cross-File Reference Detection
-# =============================================================================
-
-def find_references(entry_name: str, search_dirs: List[str], exclude_files: Optional[List[str]] = None) -> List[Dict[str, str]]:
-    """
-    Search for references to an entry name in other CE files.
-    
-    Args:
-        entry_name: Name of entry to search for
-        search_dirs: List of directories to search
-        exclude_files: Optional list of filenames to exclude
-    
-    Returns:
-        List of dicts with 'file', 'line', 'context'
-    """
-    exclude_files = exclude_files or []
-    references = []
-    
-    # Pattern to find references (in attributes like preset="name" or preset='name')
-    pattern = re.compile(
-        rf'(preset|group|cargo|type)\s*=\s*["\']' + re.escape(entry_name) + rf'["\']',
-        re.IGNORECASE
-    )
-    
-    for search_dir in search_dirs:
-        if not os.path.isdir(search_dir):
-            continue
-            
-        for root, dirs, files in os.walk(search_dir):
-            # Skip backup/original folders
-            dirs[:] = [d for d in dirs if d not in ('.backups', '.originals')]
-            
-            for filename in files:
-                if not filename.endswith('.xml'):
-                    continue
-                if filename in exclude_files:
-                    continue
-                    
-                filepath = os.path.join(root, filename)
-                try:
-                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                        for line_num, line in enumerate(f, 1):
-                            if pattern.search(line):
-                                references.append({
-                                    "file": filepath,
-                                    "filename": filename,
-                                    "line": line_num,
-                                    "context": line.strip()[:100]
-                                })
-                except IOError:
-                    pass
-    
-    return references
-
-
-# =============================================================================
-# Tracking Rebuild from XML Comments
-# =============================================================================
-
-def rebuild_tracking_from_comments(target_path: str) -> Dict[str, Any]:
-    """
-    Rebuild tracking data by parsing XML comments in target file.
-    
-    Returns tracking structure for all mods found in comments.
-    """
-    tracking = {
-        "target_file": os.path.basename(target_path),
-        "last_updated": datetime.now().isoformat(),
-        "mods": {},
-        "rebuilt_from_comments": True
-    }
-    
-    try:
-        with open(target_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Find all BEGIN...END blocks
-        pattern = rf'<!--\s*{re.escape(MERGE_COMMENT_BEGIN)}\s*(\d+)\s*\(([^)]+)\)\s*-->(.*?)<!--\s*{re.escape(MERGE_COMMENT_END)}\s*\1\s*-->'
-        
-        for match in re.finditer(pattern, content, re.DOTALL):
-            mod_id = match.group(1)
-            mod_name = match.group(2)
-            block_content = match.group(3)
-            
-            if mod_id not in tracking["mods"]:
-                tracking["mods"][mod_id] = {
-                    "mod_name": mod_name,
-                    "entries": [],
-                    "rebuilt": True
-                }
-            
-            # Extract entry names from the block
-            entry_pattern = rf'<(?:cargo|attachments|group|event|type)[^>]*name\s*=\s*["\']([^"\']+)["\']'
-            for entry_match in re.finditer(entry_pattern, block_content, re.IGNORECASE):
-                entry_name = entry_match.group(1)
-                tracking["mods"][mod_id]["entries"].append({
-                    "name": entry_name,
-                    "type": "unknown"
-                })
-        
-    except Exception as e:
-        tracking["error"] = str(e)
-    
-    return tracking
-
-
-# =============================================================================
-# CLI Interface
-# =============================================================================
-
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='DayZ CE Merge Tracking System')
-    subparsers = parser.add_subparsers(dest='command')
-    
-    # Parse source entries
-    p_parse = subparsers.add_parser('parse-entries', help='Parse entries from a CE source file')
-    p_parse.add_argument('file', help='Path to source XML file')
-    
-    # Check collisions
-    p_coll = subparsers.add_parser('check-collisions', help='Check for name collisions')
-    p_coll.add_argument('source', help='Path to source file')
-    p_coll.add_argument('target', help='Path to target file')
-    p_coll.add_argument('--mod-id', required=True, help='Mod ID for prefix suggestion')
-    
-    # Find references
-    p_refs = subparsers.add_parser('find-references', help='Find references to an entry')
-    p_refs.add_argument('name', help='Entry name to search for')
-    p_refs.add_argument('--dirs', nargs='+', required=True, help='Directories to search')
-    
-    # Load tracking
-    p_load = subparsers.add_parser('load-tracking', help='Load tracking for a target file')
-    p_load.add_argument('--instance', required=True, help='Instance directory')
-    p_load.add_argument('--target', required=True, help='Target file name')
-    
-    # Rebuild from comments
-    p_rebuild = subparsers.add_parser('rebuild-tracking', help='Rebuild tracking from XML comments')
-    p_rebuild.add_argument('file', help='Path to target file')
-    
-    args = parser.parse_args()
-    
-    if args.command == 'parse-entries':
-        entries = parse_source_entries(args.file)
-        # Remove non-serializable element
-        for e in entries:
-            if 'element' in e:
-                del e['element']
-        print(json.dumps(entries, indent=2))
+    # CLI interface for shell script integration
+    if len(sys.argv) < 2:
+        print("Usage: merge_tracking.py <command> [args...]")
+        sys.exit(1)
         
-    elif args.command == 'check-collisions':
-        entries = parse_source_entries(args.source)
-        collisions = check_collisions(entries, args.target, args.mod_id)
-        print(json.dumps(collisions, indent=2))
+    cmd = sys.argv[1]
+    
+    if cmd == "check_collisions":
+        # check_collisions <source> <target>
+        if len(sys.argv) != 4:
+            sys.exit(1)
+        cols = check_collisions(sys.argv[2], sys.argv[3])
+        if cols:
+            print(json.dumps(cols))
+            sys.exit(2) # Exit 2 = Collisions found
+        else:
+            sys.exit(0) # Exit 0 = Clean merge
+            
+    elif cmd == "inject":
+        # inject <target> <source> <mod_id> <mod_name> <instance_dir>
+        if len(sys.argv) != 7:
+            print(f"Usage: {sys.argv[0]} inject <target> <source> <mod_id> <mod_name> <instance_dir>", file=sys.stderr)
+            sys.exit(1)
+            
+        target = sys.argv[2]
+        source = sys.argv[3]
+        mod_id = sys.argv[4]
+        mod_name = sys.argv[5]
+        inst_dir = sys.argv[6]
         
-    elif args.command == 'find-references':
-        refs = find_references(args.name, args.dirs)
-        print(json.dumps(refs, indent=2))
+        added = inject_entries(target, source, mod_id, mod_name)
+        if added:
+            # Update tracking
+            data = load_tracking(inst_dir, target)
+            if mod_id not in data.get('entries', {}):
+                if 'entries' not in data: data['entries'] = {}
+                data['entries'][mod_id] = []
+            
+            data['entries'][mod_id].extend(added)
+            save_tracking(inst_dir, target, data)
+            
+            print(f"Merged {len(added)} entries.")
+            sys.exit(0)
+        else:
+            print("No entries found to merge.", file=sys.stderr)
+            sys.exit(1)
+            
+    elif cmd == "remove":
+        # remove <target> <mod_id> <instance_dir>
+        if len(sys.argv) != 5:
+             print(f"Usage: {sys.argv[0]} remove <target> <mod_id> <instance_dir>", file=sys.stderr)
+             sys.exit(1)
+             
+        target = sys.argv[2]
+        mod_id = sys.argv[3]
+        inst_dir = sys.argv[4]
         
-    elif args.command == 'load-tracking':
-        data = load_tracking(args.instance, args.target)
-        print(json.dumps(data, indent=2))
+        data = load_tracking(inst_dir, target)
+        entries = data.get('entries', {}).get(mod_id, [])
         
-    elif args.command == 'rebuild-tracking':
-        data = rebuild_tracking_from_comments(args.file)
-        print(json.dumps(data, indent=2))
-        
+        if not entries:
+            print(f"No tracked entries found for mod {mod_id}", file=sys.stderr)
+            sys.exit(0)
+            
+        if remove_entries(target, entries):
+            # Clean tracking
+            del data['entries'][mod_id]
+            save_tracking(inst_dir, target, data)
+            print(f"Unmerged module {mod_id}.")
+            sys.exit(0)
+        else:
+            print("Failed to remove entries from XML.", file=sys.stderr)
+            sys.exit(1)
+            
     else:
-        parser.print_help()
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(1)

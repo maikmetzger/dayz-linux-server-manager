@@ -836,6 +836,17 @@ except: pass
                 *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
             esac
             
+            # Merge Status Override
+            if [[ "$ce_type" == "randompresets" || "$ce_type" == "eventgroups" ]]; then
+                if [[ ${states[$idx]} -eq 1 ]]; then
+                    status_str="[  MERGED  ]"
+                    status_color="$CYN"
+                else
+                    status_str="[ UNMERGED ]"
+                    status_color="$WHITE" 
+                fi
+            fi
+            
             echo "[DEBUG] 11. Case done, type_str=$type_str" >> "${SCRIPT_DIR}/loot_manager.log"
             
             # Modified indicator
@@ -922,7 +933,20 @@ except: pass
             local ct="${sce_types[$midx]:-types}"
             
             if [[ ${states[$midx]} -eq 1 ]]; then
-                # LINKED -> Unlink
+                # LINKED/MERGED -> Unlink/Unmerge
+                
+                # Check for merge-only types
+                if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
+                    local target_file="db/cfgrandompresets.xml"
+                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
+                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    
+                    unmerge_ce_file_python "$inst_dir" "$target_xml" "${smod_ids[$midx]}"
+                    # Force re-scan to update status
+                    continue
+                fi
+                
+                # Default Link Logic (Files via cfgeconomycore)
                 local target_to_unlink="${smod_ids[$midx]}_${fn}"
                 [[ "${smod_ids[$midx]}" == "LOCAL" ]] && target_to_unlink="$fn"
                 
@@ -941,23 +965,20 @@ except: pass
                     remove_ce_ignore "$inst_dir" "${smod_ids[$midx]}" "$fn"
                 fi
                 
-                # Check for merge-only types that can't be linked via cfgeconomycore
+                # Check for merge-only types
                 if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    show_message "$(cat <<EOF
-$fn cannot be linked automatically.
-
-cfgrandompresets.xml and cfgeventgroups.xml must be 
-MERGED into the existing file at:
-  db/cfgrandompresets.xml
-  db/cfgeventgroups.xml
-
-This is a DayZ limitation - these files cannot be 
-included via cfgeconomycore.xml like types.xml.
-
-Manual merge required for now.
-(Automatic merge support coming in Phase 2)
-EOF
-)" "Merge Required"
+                    if confirm "Merge entries from '$fn' into main $ct?" "y"; then
+                        # Call Python Merge Logic
+                        # Phase 2 Implementation
+                        local target_file="db/cfgrandompresets.xml"
+                        if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
+                        
+                        local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                        
+                        merge_ce_file_python "$inst_dir" "$target_xml" "$src" "${smod_ids[$midx]}" "${smod_names[$midx]}"
+                        # Force re-scan to update status
+                        continue
+                    fi
                 elif confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                 fi
@@ -1216,7 +1237,6 @@ servermods_file = os.environ.get('DAYZ_SERVERMODS_FILE')
 linked_json = os.environ.get('DAYZ_LINKED_JSON')
 script_dir = os.environ.get('DAYZ_SCRIPT_DIR')
 mission_path = os.environ.get('DAYZ_MISSION_PATH')
-
 # Import xml_parser for fast detection
 sys.path.append(os.path.join(script_dir, 'lib'))
 try:
@@ -1415,6 +1435,65 @@ for folder in ce_folders:
 
 print(json.dumps(results))
 PYTHON_CE_SCAN
+}
+
+# =============================================================================
+# Merge Tracking Wrappers (Phase 2)
+# =============================================================================
+
+# merge_ce_file_python "$inst_dir" "$target_xml" "$source_xml" "$mod_id" "$mod_name"
+merge_ce_file_python() {
+    local inst_dir="$1"
+    local target_xml="$2"
+    local source_xml="$3"
+    local mod_id="$4"
+    local mod_name="$5"
+    
+    # 1. Check collisions
+    local collisions
+    collisions=$(python3 "${SCRIPT_DIR}/lib/merge_tracking.py" check_collisions "$source_xml" "$target_xml" 2>&1)
+    local exit_code=$?
+    
+    if [[ $exit_code -eq 2 ]]; then
+        show_message "Merge conflict detected!\nSome entries in this mod already exist in the target file." "Warning"
+        if ! confirm "Proceed anyway? (Duplicates might cause errors)" "n"; then
+            return 1
+        fi
+    elif [[ $exit_code -ne 0 ]]; then
+        show_message "Error checking collisions:\n$collisions" "Error"
+        return 1
+    fi
+    
+    # 2. Perform Inject
+    local output
+    output=$(python3 "${SCRIPT_DIR}/lib/merge_tracking.py" inject "$target_xml" "$source_xml" "$mod_id" "$mod_name" "$inst_dir" 2>&1)
+    if [[ $? -eq 0 ]]; then
+        show_message "Successfully merged entries!\n$output" "Success"
+        return 0
+    else
+        show_message "Merge failed:\n$output" "Error"
+        return 1
+    fi
+}
+
+# unmerge_ce_file_python "$inst_dir" "$target_xml" "$mod_id"
+unmerge_ce_file_python() {
+    local inst_dir="$1"
+    local target_xml="$2"
+    local mod_id="$3"
+    
+    if confirm "Remove all merged entries for this mod?" "y"; then
+        local output
+        output=$(python3 "${SCRIPT_DIR}/lib/merge_tracking.py" remove "$target_xml" "$mod_id" "$inst_dir" 2>&1)
+        if [[ $? -eq 0 ]]; then
+            show_message "Successfully unmerged entries!\n$output" "Success"
+            return 0
+        else
+            show_message "Unmerge failed:\n$output" "Error"
+            return 1
+        fi
+    fi
+    return 1
 }
 
 # check_ce_file_update - Check if a linked CE file has updates from workshop
