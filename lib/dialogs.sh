@@ -207,6 +207,76 @@ show_message() {
 }
 
 # -----------------------------------------------------------------------------
+# Progress Bar Dialog (Auto-closes, no keypress needed)
+# -----------------------------------------------------------------------------
+
+# Global vars for progress bar state
+_PROGRESS_BOX_ROW=0
+_PROGRESS_BOX_COL=0
+_PROGRESS_BOX_WIDTH=50
+_PROGRESS_BAR_WIDTH=40
+
+# Start a progress bar dialog
+# Usage: show_progress_start "Title" "Initial message"
+show_progress_start() {
+    local title="${1:-Progress}"
+    local message="${2:-Working...}"
+    
+    get_term_size
+    draw_header "$title"
+    
+    _PROGRESS_BOX_WIDTH=50
+    _PROGRESS_BAR_WIDTH=$((_PROGRESS_BOX_WIDTH - 8))
+    local box_height=7
+    _PROGRESS_BOX_ROW=$(( (TERM_ROWS - box_height) / 2 ))
+    _PROGRESS_BOX_COL=$(( (TERM_COLS - _PROGRESS_BOX_WIDTH) / 2 ))
+    
+    draw_box $_PROGRESS_BOX_ROW $_PROGRESS_BOX_COL $box_height $_PROGRESS_BOX_WIDTH "$title"
+    
+    # Initial message
+    move_to $((_PROGRESS_BOX_ROW + 2)) $((_PROGRESS_BOX_COL + 3))
+    printf "%s%-$((_PROGRESS_BOX_WIDTH - 6))s%s" "$WHITE" "${message:0:$((_PROGRESS_BOX_WIDTH - 6))}" "$RESET"
+    
+    # Empty progress bar
+    move_to $((_PROGRESS_BOX_ROW + 4)) $((_PROGRESS_BOX_COL + 3))
+    printf "%s[%s]%s" "$DIM" "$(printf '%*s' $_PROGRESS_BAR_WIDTH ' ')" "$RESET"
+}
+
+# Update progress bar
+# Usage: show_progress_update "Message" 50 (0-100 percent)
+show_progress_update() {
+    local message="${1:-Working...}"
+    local percent="${2:-0}"
+    
+    [[ $percent -lt 0 ]] && percent=0
+    [[ $percent -gt 100 ]] && percent=100
+    
+    local filled=$(( (_PROGRESS_BAR_WIDTH * percent) / 100 ))
+    local empty=$((_PROGRESS_BAR_WIDTH - filled))
+    
+    # Update message
+    move_to $((_PROGRESS_BOX_ROW + 2)) $((_PROGRESS_BOX_COL + 3))
+    printf "%s%-$((_PROGRESS_BOX_WIDTH - 6))s%s" "$WHITE" "${message:0:$((_PROGRESS_BOX_WIDTH - 6))}" "$RESET"
+    
+    # Update progress bar
+    move_to $((_PROGRESS_BOX_ROW + 4)) $((_PROGRESS_BOX_COL + 3))
+    printf "%s[%s%s%s%s]%s %3d%%" "$CYN" "$GRN" "$(printf '%*s' $filled '' | tr ' ' '█')" "$RESET$DIM" "$(printf '%*s' $empty '')" "$RESET" "$percent"
+}
+
+# End progress bar (auto-closes, no keypress)
+# Usage: show_progress_end "Done!" [wait_ms]
+show_progress_end() {
+    local final_message="${1:-Done!}"
+    local wait_ms="${2:-500}"
+    
+    # Show 100% complete
+    show_progress_update "$final_message" 100
+    
+    # Brief pause so user sees completion
+    sleep "$(echo "scale=3; $wait_ms / 1000" | bc)"
+}
+
+# -----------------------------------------------------------------------------
 # Command Execution with Output
 # -----------------------------------------------------------------------------
 

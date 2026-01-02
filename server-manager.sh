@@ -440,9 +440,11 @@ mod_manager() {
                         show_message "Container must be running to sync"
                     else
                         run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
-                        # Refresh update cache after sync
-                        show_message "Refreshing update cache..." "Sync"
+                        # Refresh update cache after sync with progress bar
+                        show_progress_start "Sync" "Refreshing update cache..."
+                        show_progress_update "Checking mod versions..." 50
                         check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
+                        show_progress_end "Sync complete!" 300
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
                     # FixMods
@@ -472,15 +474,16 @@ mod_manager() {
                 else
                     run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
                     
-                    # Refresh update cache after sync
-                    # Refresh update cache after sync
-                    show_message "Refreshing update cache..." "Sync"
+                    # Progress bar for post-sync operations
+                    show_progress_start "Sync" "Refreshing update cache..."
                     local workshop_path="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
                     if [[ ! -d "$workshop_path" ]]; then workshop_path="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"; fi
                     
+                    show_progress_update "Checking mod versions..." 30
                     check_all_mod_updates "$SELECTED_DIR" "$workshop_path" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
                     
                     # Scan for CE files (Phase 3-4)
+                    show_progress_update "Scanning CE files..." 60
                     local ce_result
                     ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>/dev/null | tail -n 1)
 
@@ -492,6 +495,9 @@ mod_manager() {
                          # Count NEW or UNLINKED files
                          new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status') in ['new', 'unlinked']))" 2>/dev/null || echo "0")
                     fi
+                    
+                    # Complete progress bar
+                    show_progress_end "Sync complete!" 300
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
                         # Build list of new file names for the confirm dialog
