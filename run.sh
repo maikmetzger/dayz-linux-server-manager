@@ -100,7 +100,11 @@ run_steamcmd_workshop_multi() {
   require_steamcmd
   # shellcheck disable=SC2206
   local login=( $(steam_login_args_for_workshop) )
-  "${STEAMCMD}" +force_install_dir "${DZ_SERVERFILES}" "${login[@]}" "$@" +quit
+  # NOTE: steamcmd often returns non-zero even on success; don't let set -e kill us
+  "${STEAMCMD}" +force_install_dir "${DZ_SERVERFILES}" "${login[@]}" "$@" +quit || {
+    local rc=$?
+    warn "SteamCMD exited with code $rc (may be normal for 'already up to date')"
+  }
 }
 
 read_ids() {
