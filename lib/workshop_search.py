@@ -34,6 +34,23 @@ def save_cache(cache):
         with open(CACHE_FILE, 'w') as f: json.dump(cache, f, indent=2)
     except: pass
 
+def fetch_mod_names(ids):
+    if not ids: return {}
+    api_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+    data_dict = {"itemcount": len(ids)}
+    for i, mid in enumerate(ids): data_dict[f"publishedfileids[{i}]"] = mid
+    encoded_data = urllib.parse.urlencode(data_dict).encode('utf-8')
+    names = {}
+    try:
+        req = urllib.request.Request(api_url, data=encoded_data)
+        with urllib.request.urlopen(req) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+        for d in res_data.get('response', {}).get('publishedfiledetails', []):
+            mid = d.get('publishedfileid')
+            if mid: names[mid] = d.get('title', f"Mod {mid}")
+    except: pass
+    return names
+
 def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     cache = load_cache()
     cache_key = f"search_{text}_{sort}_{num}_{page}_{mode}"
@@ -338,6 +355,34 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
             seen.add(obj['id'])
 
     for res in results: resolve(res)
+    
+    # Resolve dependency names
+    all_dep_ids = set()
+    for res in final_results:
+        for dep in res.get('dependencies', []):
+            all_dep_ids.add(dep)
+            
+    dep_names_map = {}
+    missing_ids = []
+    
+    for dep_id in all_dep_ids:
+        d_key = f"details_{dep_id}"
+        if d_key in cache:
+            dep_names_map[dep_id] = cache[d_key]['data'].get('name', f"Mod {dep_id}")
+        else:
+            missing_ids.append(dep_id)
+            
+    if missing_ids:
+        # Fetch in batches of 100
+        for i in range(0, len(missing_ids), 100):
+            batch = missing_ids[i:i+100]
+            fetched = fetch_mod_names(batch)
+            dep_names_map.update(fetched)
+            
+    for res in final_results:
+        deps = res.get('dependencies', [])
+        names = [dep_names_map.get(d, f"Mod {d}") for d in deps]
+        res['dependency_names'] = names
     
     if update_rules and os.path.exists(update_rules):
         try:

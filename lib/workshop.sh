@@ -501,21 +501,55 @@ _draw_workshop_screen() {
     printf "%s" "$RESET"
     
     if [[ $count -gt 0 ]]; then
-        IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$selection]:-}"
-        move_to $((footer_row + 1)) 2; printf "%sDescription:%s" "$YLW" "$RESET"
-        local clean_desc=$(echo "$mdesc" | tr '\n' ' ' | sed 's/  */ /g')
-        move_to $((footer_row + 2)) 4; printf "%s%s%s" "$WHITE" "${clean_desc:0:$((TERM_COLS-8))}" "$RESET"
-        move_to $((footer_row + 3)) 2; printf "%sDependencies: %s%s" "$YLW" "$WHITE" "${mchildren:-"None (Direct)"}"
+        IFS='|' read -r mid mname mrating msubs msize mdate mdesc mchildren msubs_raw <<< "${_items_ref[$selection]:-}"
         
-        # Sort marker
-        move_to $((footer_row + 4)) 2;
+        # 1. Header: Dependencies + Sort Status
+        move_to $((footer_row + 1)) 2; printf "%sDependencies:%s" "$YLW" "$RESET"
+        
         local s_desc="Standard"
         [[ "$f_sort" == "mostsubscribed" ]] && s_desc="Subscribers (Desc)"
         [[ "$f_sort" == "mostsubscribed_asc" ]] && s_desc="Subscribers (Asc)"
         [[ "$f_sort" == "newestfirst" ]] && s_desc="Newest First"
         [[ "$f_sort" == "lastupdated" ]] && s_desc="Last Updated"
         [[ "$f_sort" == "relevance" ]] && s_desc="Relevancy"
-        printf "%sSorted By: %s%s" "$CYN" "$WHITE" "$s_desc"
+        local sort_str="Sorted By: $s_desc"
+        local sort_col=$((TERM_COLS - ${#sort_str} - 1))
+        [[ $sort_col -lt 20 ]] && sort_col=20
+        move_to $((footer_row + 1)) $sort_col
+        printf "%s%s%s" "$CYN" "$sort_str" "$RESET"
+
+        # 2. Dependencies List (Dynamic Height, Max 2 lines)
+        local available_width=$((TERM_COLS - 6))
+        local deps_text="${mchildren:-"None (Direct)"}"
+        local -a dep_lines=()
+        while IFS= read -r line; do dep_lines+=("$line"); done < <(echo "$deps_text" | fold -s -w $available_width)
+        
+        local d_row=$((footer_row + 2))
+        local max_dep_lines=2
+        local used_dep_lines=0
+        
+        for ((i=0; i<${#dep_lines[@]} && i<max_dep_lines; i++)); do
+             move_to $((d_row + i)) 4
+             printf "%s%s%s" "$WHITE" "${dep_lines[$i]}" "$RESET"
+             used_dep_lines=$((used_dep_lines + 1))
+        done
+        
+        # 3. Description (Fills remaining space)
+        local desc_start_row=$((d_row + used_dep_lines))
+        move_to $desc_start_row 2; printf "%sDescription:%s" "$YLW" "$RESET"
+        
+        local clean_desc=$(echo "$mdesc" | tr '\n' ' ' | sed 's/  */ /g')
+        local -a desc_lines=()
+        while IFS= read -r line; do desc_lines+=("$line"); done < <(echo "$clean_desc" | fold -s -w $available_width)
+        
+        local desc_print_row=$((desc_start_row + 1))
+        local max_row=$((TERM_ROWS - 2)) # Leave 1 line for footer hints
+        
+        for ((i=0; i<${#desc_lines[@]}; i++)); do
+             if [[ $((desc_print_row + i)) -gt $max_row ]]; then break; fi
+             move_to $((desc_print_row + i)) 4
+             printf "%s%s%s" "$DIM$WHITE" "${desc_lines[$i]}" "$RESET"
+        done
     fi
     
     # 6. Keyboard Hints
@@ -1026,7 +1060,11 @@ try:
         updated_dt = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
         # id|name|rating|subs_f|size|updated_f|desc|children|subs_raw
         desc = x.get('description_clean', x.get('description',''))[:500].replace('|',' ').replace('\n', ' ').replace('\r', ' ')
-        print(f\"{x['id']}|{x['name']}|{x.get('rating_stars','?')}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{','.join(x.get('dependencies', []))}|{x.get('subscribers',0)}\")
+        # Prefer resolved names, fallback to IDs
+        raw_deps = x.get('dependency_names') if x.get('dependency_names') is not None else x.get('dependencies', [])
+        clean_deps = [str(d).replace('|', '') for d in raw_deps]
+        children_str = ', '.join(clean_deps)
+        print(f\"{x['id']}|{x['name']}|{x.get('rating_stars','?')}|{x.get('subscribers_f','0')}|{x.get('size','0 MB')}|{updated_dt}|{desc}|{children_str}|{x.get('subscribers',0)}\")
 except Exception as e:
     pass
 ")
