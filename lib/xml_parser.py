@@ -193,9 +193,13 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
         tree = ET.parse(xml_path)
         root = tree.getroot()
         
+    # Layer 1: Try parsing and checking root tag
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        
         registry_entry = CE_TYPE_REGISTRY.get(root.tag)
         if registry_entry:
-            # print(f"DEBUG: {filename} -> root_tag '{root.tag}'", file=sys.stderr)
             result = dict(registry_entry)
             result['detection_method'] = 'root_tag'
             return result
@@ -203,7 +207,6 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
         # Layer 2a: Check if root tag itself is a fragment element
         fragment_ce_type = CE_FRAGMENT_REGISTRY.get(root.tag)
         if fragment_ce_type:
-            # print(f"DEBUG: {filename} -> fragment_root '{root.tag}'", file=sys.stderr)
             for entry in CE_TYPE_REGISTRY.values():
                 if entry['ce_type'] == fragment_ce_type:
                     result = dict(entry)
@@ -217,7 +220,6 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
             child_tag = first_child.tag
             fragment_ce_type = CE_FRAGMENT_REGISTRY.get(child_tag)
             if fragment_ce_type:
-                # print(f"DEBUG: {filename} -> fragment_child '{child_tag}'", file=sys.stderr)
                 # Look up full info from CE_TYPE_REGISTRY using the type name
                 for entry in CE_TYPE_REGISTRY.values():
                     if entry['ce_type'] == fragment_ce_type:
@@ -237,11 +239,6 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
             tag_match = re.search(r'<([a-zA-Z_][a-zA-Z0-9_-]*)\s', content)
             if tag_match:
                 first_tag = tag_match.group(1).lower()
-                
-                # Debug specific file
-                if 'trader_config' in filename:
-                    print(f"DEBUG: {filename} matched tag '{first_tag}'", file=sys.stderr)
-                
                 fragment_ce_type = CE_FRAGMENT_REGISTRY.get(first_tag)
                 if fragment_ce_type:
                     for entry in CE_TYPE_REGISTRY.values():
@@ -259,7 +256,6 @@ def detect_ce_type(xml_path: str, use_filename_fallback: bool = True) -> Optiona
     if use_filename_fallback:
         for pattern, ce_type in CE_FILENAME_PATTERNS:
             if pattern.match(filename):
-                # print(f"DEBUG: {filename} -> filename pattern", file=sys.stderr)
                 # Look up full info from registry
                 for entry in CE_TYPE_REGISTRY.values():
                     if entry['ce_type'] == ce_type:

@@ -1294,7 +1294,7 @@ for mod_id in sorted(mod_ids):
                     # Skip common non-loot files found in mods (e.g. info, setup, core folders)
                     rel_p = root.lower()
                     if 'setup' in rel_p or 'info' in rel_p or 'core' in rel_p: continue
-                    ce_type = 'types' # Default fallback
+                    continue # Skip unknown XML files (don't default to types)
             
             # 3. Check status - MOD-AWARE matching
             # Priority: 1) ModID_filename, 2) Exact filename match
