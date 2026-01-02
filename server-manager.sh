@@ -159,7 +159,7 @@ mod_manager() {
                 
                 local mname
                 mname="$(get_mod_name "$mid")"
-                local max_name=$((TERM_COLS - 35))
+                local max_name=$((TERM_COLS - 45))
                 [[ $max_name -lt 20 ]] && max_name=20
                 [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
                 mod_names+=("$mname")
@@ -187,7 +187,8 @@ try:
     mods_info = data.get('mods', {})
     def fmt(ts):
         if not ts or ts == 0: return '-'
-        return datetime.datetime.fromtimestamp(ts).strftime('%b %d')
+        # User requested: 10. Nov 2025 13:45 (24h)
+        return datetime.datetime.fromtimestamp(ts).strftime('%d. %b %Y %H:%M')
     
     # Process IDs passed from bash (we need to preserve order)
     target_ids = '''$(printf "%s\n" "${mod_ids[@]}")'''.strip().split('\n')
@@ -199,14 +200,20 @@ try:
         up = m.get('has_update', False)
         
         v = fmt(inst)
-        if up: v = f'{fmt(inst)} → {fmt(lat)}'
+        if up: v = f'NEED SYNC' # User requested NEED SYNC in version column
         elif inst == 0: v = fmt(lat)
         
         print(f'{v}|{1 if up else 0}')
 except:
     # Fallback for error/empty
-    for _ in range($((${#mod_ids[@]}))): print('-|0')
+    for _ in range($((${#mod_ids[@]}))): print('NEED SYNC|1' if $((${#mod_ids[@]})) > 0 else '-|0')
 " 2>/dev/null)
+            
+            # Global sync flag
+            global_sync_needed=0
+            for flag in "${mod_update_flags[@]}"; do
+                [[ "$flag" -eq 1 ]] && { global_sync_needed=1; break; }
+            done
             
             # Pre-calculate dependency warnings
             for i in "${!mod_ids[@]}"; do
@@ -233,13 +240,15 @@ except:
         
         # Header bar
         move_to 1 1
-        printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "Mod Manager - $SELECTED_NAME" "${ESC}[K" "$RESET"
+        local header_title="Mod Manager - $SELECTED_NAME"
+        [[ ${global_sync_needed:-0} -eq 1 ]] && header_title="$header_title ${YELLOW}[ SYNC NEEDED ]${RESET}${BG_RED}${WHITE}${BOLD}"
+        printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
         
         # Table header
         local table_start=3
         local col_status=2
         local col_version=10
-        local col_name=26
+        local col_name=33
         local col_id=$((TERM_COLS - 25))
         local col_type=$((TERM_COLS - 10))
         
@@ -301,7 +310,7 @@ except:
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
                 move_to $row $col_version
-                printf "%-14s" "${version_display:0:14}"
+                printf "%-22s" "${version_display:0:22}"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
@@ -310,25 +319,30 @@ except:
                 printf "[%s]" "$type_short"
                 printf "%s" "$RESET"
             else
+                local row_color="$RESET"
+                [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
+                
+                printf "%s" "$row_color"
                 move_to $row $col_status
                 if [[ "$mtype" == "disabled" ]]; then
-                    printf "  %s%s%s" "$RED" "$status_icon" "$RESET"
+                    printf "  %s%s%s" "$RED" "$status_icon" "$row_color"
                 else
-                    printf "  %s%s%s" "$GREEN" "$status_icon" "$RESET"
+                    printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
                 fi
                 move_to $row $col_version
-                printf "%s%-14s%s" "$version_color" "${version_display:0:14}" "$RESET"
+                printf "%-22s" "${version_display:0:22}"
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
-                printf "%s%s%s" "$DIM" "$mid" "$RESET"
+                printf "%s%s%s" "$DIM" "$mid" "$row_color"
                 move_to $row $col_type
                 case "$mtype" in
-                    both)     printf "%s%s%s" "$GREEN" "$type_label" "$RESET" ;;
-                    client)   printf "%s%s%s" "$YELLOW" "$type_label" "$RESET" ;;
-                    server)   printf "%s%s%s" "$YELLOW" "$type_label" "$RESET" ;;
-                    disabled) printf "%s%s%s" "$RED" "$type_label" "$RESET" ;;
+                    both)     printf "%s%s%s" "$GREEN" "$type_label" "$row_color" ;;
+                    client)   printf "%s%s%s" "$YELLOW" "$type_label" "$row_color" ;;
+                    server)   printf "%s%s%s" "$YELLOW" "$type_label" "$row_color" ;;
+                    disabled) printf "%s%s%s" "$RED" "$type_label" "$row_color" ;;
                 esac
+                printf "%s" "$RESET"
             fi
             row=$((row+1))
         done
