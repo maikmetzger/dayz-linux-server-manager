@@ -265,10 +265,10 @@ try:
         if remote_v == 0: remote_v = m.get('latest', 0)
         
         # DEBUG: Add specific codes to know WHY
-        reason = ""
-        if (remote_v > local_v): reason += "U"
-        if (local_v == 0): reason += "M"
-        if (not is_deployed): reason += "D"
+        reason = ''
+        if (remote_v > local_v): reason += 'U'
+        if (local_v == 0): reason += 'M'
+        if (not is_deployed): reason += 'D'
         
         has_update = (len(reason) > 0)
         
