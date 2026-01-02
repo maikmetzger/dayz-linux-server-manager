@@ -577,7 +577,16 @@ except: pass
                                 for ((i=0; i<ce_count; i++)); do
                                     local check=" "
                                     [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
-                                    items+=("[$check] ${ce_mod_names[$i]} - ${ce_filenames[$i]}")
+                                    # Format CE type for display
+                                    local type_label
+                                    case "${ce_types[$i]}" in
+                                        types)          type_label="[TYPES]" ;;
+                                        spawnabletypes) type_label="[SPAWNABLE]" ;;
+                                        events)         type_label="[EVENTS]" ;;
+                                        eventspawns)   type_label="[EVENTPOS]" ;;
+                                        *)              type_label="[OTHER]" ;;
+                                    esac
+                                    items+=("[$check] ${ce_mod_names[$i]} $type_label - ${ce_filenames[$i]}")
                                 done
                                 
                                 items+=("--------------------")
