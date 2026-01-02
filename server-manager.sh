@@ -245,7 +245,9 @@ try:
                 
                 for r in check_roots:
                     # DEBUG: sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
-                    if os.path.exists(os.path.join(r, f'@{mid}')):
+                    # Use lexists because symlinks might be absolute paths valid only inside container
+                    # and thus 'broken' on the host, but the link itself EXISTS.
+                    if os.path.lexists(os.path.join(r, f'@{mid}')):
                         is_deployed = True
                         break
             except: pass
