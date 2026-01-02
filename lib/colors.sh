@@ -41,6 +41,7 @@ MOD_SV="${ESC}[38;2;255;82;77m"    # #ff524d
 CYN="${ESC}[36m"
 CYAN="${CYN}"
 BLU="${ESC}[34m"
+MAG="${ESC}[35m"
 YLW="${YELLOW}"
 GRN="${GREEN}"
 C0="${RESET}"
