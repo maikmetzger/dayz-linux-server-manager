@@ -543,7 +543,7 @@ except: pass
                                 for ((i=0; i<ce_count; i++)); do
                                     local check=" "
                                     [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
-                                    items+=("[$check] ${ce_filenames[$i]} - ${ce_mod_names[$i]}")
+                                    items+=("[$check] ${ce_mod_names[$i]} - ${ce_filenames[$i]}")
                                 done
                                 
                                 items+=("--------------------")
