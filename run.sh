@@ -428,23 +428,20 @@ start_foreground() {
     update_server
   fi
 
+  # -------------------------------------------------------------------------
+  # Always regenerate mods.args from mods.txt before starting
+  # This ensures the command-line always matches the current mod list
+  # -------------------------------------------------------------------------
+  log "Regenerating mod arguments from config files..."
+  fix_mods
+  fix_servermods
+  log "Mod arguments updated."
+
+  # Optional: Full sync (downloads) on DZ_SYNC_ON_START=1
   if [[ "${DZ_SYNC_ON_START}" == "1" ]]; then
+    log "DZ_SYNC_ON_START=1, running full sync..."
     if [[ -n "$(read_ids "${MODS_FILE}" || true)" ]]; then sync_mods; fi
     if [[ -n "$(read_ids "${SERVERMODS_FILE}" || true)" ]]; then sync_servermods; fi
-  fi
-
-  # -------------------------------------------------------------------------
-  # Auto-Sync on Mismatch: Ensure mods.args matches mods.txt before starting
-  # -------------------------------------------------------------------------
-  local txt_count args_count
-  txt_count=$(read_ids "${MODS_FILE}" 2>/dev/null | wc -l || echo 0)
-  args_count=$(cat "${MODS_ARGS_FILE}" 2>/dev/null | tr ';' '\n' | grep -c '@' || echo 0)
-  
-  if [[ "$txt_count" -ne "$args_count" ]]; then
-    warn "Mismatch detected: mods.txt has $txt_count mods, mods.args has $args_count. Forcing sync..."
-    sync_mods
-    sync_servermods
-    log "Auto-sync complete."
   fi
 
   # Ensure args files exist
