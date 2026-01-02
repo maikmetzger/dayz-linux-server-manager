@@ -292,35 +292,47 @@ unregister_modular_loot() {
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
     
-    # Remove from cfgeconomycore.xml (searches ALL CE blocks)
-    python3 <<EOF
+    # Export vars for Python (heredoc is quoted to prevent shell issues)
+    export UNREGISTER_CORE_PATH="$core_xml"
+    export UNREGISTER_FILENAME="$target_filename"
+    
+    # Remove from cfgeconomycore.xml (searches ALL CE blocks with case-insensitive match)
+    python3 <<'PYTHON_UNREGISTER'
 import xml.etree.ElementTree as ET
 import sys
+import os
 
-core_path = "$core_xml"
-file_to_rem = "$target_filename"
+core_path = os.environ.get('UNREGISTER_CORE_PATH')
+file_to_rem = os.environ.get('UNREGISTER_FILENAME')
 
 try:
     tree = ET.parse(core_path)
     root = tree.getroot()
     
-    # Search all CE blocks for the file
+    # Search all CE blocks for the file (case-insensitive)
     rem_count = 0
+    file_to_rem_lower = file_to_rem.lower().strip()
     for ce_node in root.findall('ce'):
-        for f in ce_node.findall('file'):
-            if f.get('name') == file_to_rem:
+        for f in list(ce_node.findall('file')):
+            fname = f.get('name', '')
+            if fname.lower().strip() == file_to_rem_lower:
                 ce_node.remove(f)
                 rem_count += 1
+                sys.stderr.write(f"DEBUG: Removed '{fname}' from cfgeconomycore.xml\n")
     
     if rem_count > 0:
         if hasattr(ET, 'indent'):
             ET.indent(tree, space="\t", level=0)
         tree.write(core_path, encoding='UTF-8', xml_declaration=True)
         print("Success")
+    else:
+        sys.stderr.write(f"DEBUG: No match found for '{file_to_rem}' in cfgeconomycore.xml\n")
+        print("NotFound")
 except Exception as e:
+    sys.stderr.write(f"DEBUG: Error in unregister: {e}\n")
     print(f"Error: {e}")
     sys.exit(1)
-EOF
+PYTHON_UNREGISTER
 }
 
 # Scans mods for CE files and returns structured data
