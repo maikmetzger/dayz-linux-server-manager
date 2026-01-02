@@ -11,6 +11,7 @@ test_output.json
 # Python Cache
 __pycache__/
 *.pyc
+lib/__pycache__/
 
 # System Files
 .DS_Store
