@@ -226,7 +226,7 @@ show_progress_start() {
     draw_header "$title"
     
     _PROGRESS_BOX_WIDTH=50
-    _PROGRESS_BAR_WIDTH=$((_PROGRESS_BOX_WIDTH - 8))
+    _PROGRESS_BAR_WIDTH=25
     local box_height=7
     _PROGRESS_BOX_ROW=$(( (TERM_ROWS - box_height) / 2 ))
     _PROGRESS_BOX_COL=$(( (TERM_COLS - _PROGRESS_BOX_WIDTH) / 2 ))
