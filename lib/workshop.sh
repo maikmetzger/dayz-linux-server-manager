@@ -266,18 +266,13 @@ get_update_summary() {
     local cache_file
     cache_file=$(get_update_cache_file "$instance_dir")
     
-    if [[ ! -f "$cache_file" ]]; then
-        echo ""
-        return
-    fi
+    [[ -f "$cache_file" ]] || return
     
     local update_count
     update_count=$(python3 -c "import json; print(json.load(open('$cache_file')).get('update_count', 0))" 2>/dev/null || echo "0")
     
     if [[ "$update_count" -gt 0 ]]; then
-        echo "(${update_count} mod update$([ "$update_count" -gt 1 ] && echo "s"))"
-    else
-        echo ""
+        echo "[NEED SYNC] (${update_count} mod update$([ "$update_count" -gt 1 ] && echo "s"))"
     fi
 }
 
