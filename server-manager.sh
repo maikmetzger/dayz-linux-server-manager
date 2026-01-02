@@ -177,11 +177,30 @@ mod_manager() {
             mod_update_flags=()
             
             # Use Python to extract all info at once for speed
+            # Pass IDs on a separate line or via env to avoid quoting hell
+            mod_versions=()
+            mod_update_flags=()
+            
             while IFS='|' read -r v_disp has_up; do
+                [[ -z "$v_disp" ]] && continue
                 mod_versions+=("$v_disp")
                 mod_update_flags+=("$has_up")
-            done < <(echo "$cache_data" | python3 -c "
+            done < <(# Pass possible workshop paths for robustness
+                     WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" \
+                     WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100" \
+                     MOD_IDS_STR="${mod_ids[*]}" \
+                     echo "$cache_data" | python3 -c "
 import json, sys, datetime, os
+
+mod_ids = os.environ.get('MOD_IDS_STR', '').split()
+ws_path1 = os.environ.get('WS_PATH_1', '')
+ws_path2 = os.environ.get('WS_PATH_2', '')
+
+# Use the first one that exists
+ws_dir = ws_path1
+if not os.path.exists(ws_dir) and os.path.exists(ws_path2):
+    ws_dir = ws_path2
+
 try:
     data = json.load(sys.stdin)
     mods_info = data.get('mods', {})
@@ -190,12 +209,7 @@ try:
         if not ts or ts == 0: return '-'
         return datetime.datetime.fromtimestamp(ts).strftime('%d. %b %Y %H:%M')
     
-    # Check local disk for 100% accuracy
-    ws_dir = '${DZ_SERVERFILES}/steamapps/workshop/content/221100'
-    
-    # Process IDs passed from bash (we need to preserve order)
-    target_ids = '''$(printf "%s\n" "${mod_ids[@]}")'''.strip().split('\n')
-    for mid in target_ids:
+    for mid in mod_ids:
         if not mid: continue
         m = mods_info.get(mid, {})
         
@@ -220,8 +234,7 @@ try:
         
         print(f'{v}|{1 if has_update else 0}')
 except Exception as e:
-    # Fallback for error
-    for _ in range($((${#mod_ids[@]}))): print('NEED SYNC|1')
+    for _ in mod_ids: print('NEED SYNC|1')
 " 2>/dev/null)
             
             # Global sync flag
