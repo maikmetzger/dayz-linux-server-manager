@@ -407,3 +407,32 @@ check_mod_load_order() {
         fi
     done
 }
+
+# Check if other installed mods depend on the target mod
+# Usage: blocker=$(check_reverse_dependencies "TargetID" "${all_installed_ids[@]}")
+# Returns: "Dependent Mod Name" if blocked, stdout empty if safe
+check_reverse_dependencies() {
+    local target_id="$1"
+    local -a installed_ids=("${@:2}")
+    
+    for rule in "${DEPENDENCY_RULES[@]}"; do
+        local dep_id="${rule%%:*}"
+        local rest="${rule#*:}"
+        local req_id="${rest%%:*}"
+        
+        # If the rule says "Mod X requires Target Mod"
+        # i.e. Target is a dependency for Mod X
+        if [[ "$req_id" == "$target_id" ]]; then
+            # Check if Mod X (dep_id) is currently installed (i.e. in the list passed to us)
+            for installed in "${installed_ids[@]}"; do
+                if [[ "$installed" == "$dep_id" ]]; then
+                    # Block found!
+                    local dep_name=$(get_mod_name "$dep_id")
+                    if [[ -z "$dep_name" ]]; then dep_name="Mod $dep_id"; fi
+                    echo "$dep_name"
+                    return 0
+                fi
+            done
+        fi
+    done
+}

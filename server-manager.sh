@@ -605,7 +605,12 @@ END_PYTHON
                     local mid="${mod_ids[$selected]}"
                     local mname=$(get_mod_name "$mid")
                     
-                    if confirm "Remove mod '$mname' from list?" "n"; then
+                    # Dependency Protection
+                    local blocker
+                    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
+                    if [[ -n "$blocker" ]]; then
+                        show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
+                    elif confirm "Remove mod '$mname' from list?" "n"; then
                         # Auto-Cleanup CE (unlink/unmerge)
                         cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
                         
@@ -657,7 +662,13 @@ END_PYTHON
                     if [[ $selected -lt $mod_count ]]; then
                         local mid="${mod_ids[$selected]}"
                         local mname=$(get_mod_name "$mid")
-                        if confirm "Remove mod '$mname' from list?" "n"; then
+                        
+                        # Dependency Protection
+                        local blocker
+                        blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
+                        if [[ -n "$blocker" ]]; then
+                            show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
+                        elif confirm "Remove mod '$mname' from list?" "n"; then
                             # Auto-Cleanup CE (unlink/unmerge)
                             cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
                             removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
