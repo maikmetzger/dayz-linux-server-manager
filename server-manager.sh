@@ -316,11 +316,11 @@ END_PYTHON
         # Table header
         local table_start=3
         local col_status=2
-        local col_wsver=6
-        local col_synced=22
-        local col_name=38
-        local col_id=$((TERM_COLS - 25))
-        local col_type=$((TERM_COLS - 10))
+        local col_type=6
+        local col_name=13
+        local col_id=$((TERM_COLS - 45))
+        local col_wsver=$((TERM_COLS - 32))
+        local col_synced=$((TERM_COLS - 15))
         
         move_to $table_start 1
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
@@ -329,16 +329,16 @@ END_PYTHON
         
         move_to $((table_start + 1)) $col_status
         printf "%s%sSTATUS%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_wsver
-        printf "%s%sWS VER%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_synced
-        printf "%s%sSYNCED%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_type
+        printf "%s%sTYPE%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_name
         printf "%s%sMOD NAME%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_id
-        printf "%s%sWORKSHOP ID%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_type
-        printf "%s%sTYPE%s" "$DIM" "$WHITE" "$RESET"
+        printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_wsver
+        printf "%s%sWORKSHOP DATE%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_synced
+        printf "%s%sSYNCED%s" "$DIM" "$WHITE" "$RESET"
         
         move_to $((table_start + 2)) 1
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
@@ -359,12 +359,19 @@ END_PYTHON
             [[ ${#mname} -gt $max_name_len ]] && mname="${mname:0:$((max_name_len-3))}..."
             
             local mtype="${mod_types[$i]}"
-            local status_icon type_label type_short
+            local status_icon type_short
+            # Status icon
             case "$mtype" in
-                both)     status_icon="✓"; type_label="[C+S]"; type_short="C+S" ;;
-                client)   status_icon="✓"; type_label="[Cli]"; type_short="Cli" ;;
-                server)   status_icon="✓"; type_label="[Srv]"; type_short="Srv" ;;
-                disabled) status_icon="✗"; type_label="[Off]"; type_short="Off" ;;
+                both|client|server) status_icon="✓" ;;
+                disabled) status_icon="✗" ;;
+            esac
+            
+            # Type Label formatting
+            case "$mtype" in
+                both)     type_short="C+S" ;;
+                client)   type_short="Cli" ;;
+                server)   type_short="Srv" ;;
+                disabled) type_short="Off" ;;
             esac
             
             if [[ -n "${mod_warnings[$i]:-}" ]]; then
@@ -391,16 +398,23 @@ END_PYTHON
                 printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
                 move_to $row $col_status
                 printf "▶ %s" "$status_icon"
-                move_to $row $col_wsver
-                printf "%-14s" "${ws_ver:0:14}"
-                move_to $row $col_synced
-                printf "%-14s" "${sync_ver:0:14}"
+                move_to $row $col_type
+                
+                # Selected row color logic for Types
+                case "$mtype" in
+                    both)     printf "[%sC%s+%sS%s]" "$CYN" "$WHITE$BOLD" "$RED" "$WHITE$BOLD" ;;
+                    client)   printf "[%s%s%s]" "$CYN" "$type_short" "$WHITE$BOLD" ;;
+                    server)   printf "[%s%s%s]" "$RED" "$type_short" "$WHITE$BOLD" ;;
+                    disabled) printf "[%s]" "$type_short" ;;
+                esac
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
                 printf "%s" "$mid"
-                move_to $row $col_type
-                printf "[%s]" "$type_short"
+                move_to $row $col_wsver
+                printf "%-14s" "${ws_ver:0:14}"
+                move_to $row $col_synced
+                printf "%-14s" "${sync_ver:0:14}"
                 printf "%s" "$RESET"
             else
                 local row_color="$RESET"
@@ -413,21 +427,21 @@ END_PYTHON
                 else
                     printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
                 fi
-                move_to $row $col_wsver
-                printf "%s%-14s%s" "$ws_color" "${ws_ver:0:14}" "$row_color"
-                move_to $row $col_synced
-                printf "%s%-14s%s" "$sync_color" "${sync_ver:0:14}" "$row_color"
+                move_to $row $col_type
+                case "$mtype" in
+                    both)     printf "[%sC%s+%sS%s]%s" "$CYN" "$row_color" "$RED" "$row_color" "$RESET" ;;
+                    client)   printf "[%s%s%s]%s" "$CYN" "$type_short" "$row_color" "$RESET" ;;
+                    server)   printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
+                    disabled) printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
+                esac
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
                 printf "%s%s%s" "$DIM" "$mid" "$row_color"
-                move_to $row $col_type
-                case "$mtype" in
-                    both)     printf "%s%s%s" "$GREEN" "$type_label" "$row_color" ;;
-                    client)   printf "%s%s%s" "$YELLOW" "$type_label" "$row_color" ;;
-                    server)   printf "%s%s%s" "$YELLOW" "$type_label" "$row_color" ;;
-                    disabled) printf "%s%s%s" "$RED" "$type_label" "$row_color" ;;
-                esac
+                move_to $row $col_wsver
+                printf "%s%-14s%s" "$ws_color" "${ws_ver:0:14}" "$row_color"
+                move_to $row $col_synced
+                printf "%s%-14s%s" "$sync_color" "${sync_ver:0:14}" "$row_color"
                 printf "%s" "$RESET"
             fi
             row=$((row+1))
@@ -472,7 +486,7 @@ END_PYTHON
 
         move_to $TERM_ROWS 1
         move_to $TERM_ROWS 1
-        printf "%s%s ↑↓ Select  U/D Move  Enter Toggle  [A] Add  [R] Remove  [S] Sync  [Space] Info%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
+        printf "%s%s [↑↓] Select  [U/D] Move  [Enter] Toggle  [A] Add  [R] Remove  [S] Sync  [F] Fix  [Space] Info  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
         
         # Read input
         IFS= read -rsn1 key
