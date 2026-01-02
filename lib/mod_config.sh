@@ -1485,21 +1485,30 @@ cleanup_mod_ce_files() {
             local ct="${sce_types[$i]:-types}"
             local ln="${slinked_names[$i]}"
             
-            # Check for merge-only types
-            if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                local target_file="db/cfgrandompresets.xml"
-                if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
-                
-                unmerge_ce_file_python "$inst_dir" "$target_xml" "$mid"
-                count=$((count + 1))
+            # Helper label
+            local action_label="Unlink"
+            if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then action_label="Unmerge"; fi
+            
+            # Prompt user
+            if confirm "${action_label} '${fn}'?" "y"; then
+                # Check for merge-only types
+                if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
+                    local target_file="db/cfgrandompresets.xml"
+                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
+                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    
+                    unmerge_ce_file_python "$inst_dir" "$target_xml" "$mid"
+                    count=$((count + 1))
+                else
+                    # Standard Unlink
+                    local target_to_unlink="${mid}_${fn}"
+                    if [[ -n "$ln" ]]; then target_to_unlink="$ln"; fi
+                    
+                    unregister_modular_loot "$inst_dir" "$target_to_unlink"
+                    count=$((count + 1))
+                fi
             else
-                # Standard Unlink
-                local target_to_unlink="${mid}_${fn}"
-                if [[ -n "$ln" ]]; then target_to_unlink="$ln"; fi
-                
-                unregister_modular_loot "$inst_dir" "$target_to_unlink"
-                count=$((count + 1))
+                echo "Skipped ${fn}"
             fi
         fi
     done
