@@ -96,9 +96,35 @@ CE_FILENAME_PATTERNS = [
 
 
 def get_types_root(xml_path):
+    """
+    Parse a types XML file, handling both standard and fragment files.
+    
+    For fragment files (no root <types> wrapper), automatically wraps
+    the content with <types>...</types> before parsing.
+    """
     try:
         tree = ET.parse(xml_path)
         return tree, tree.getroot()
+    except ET.ParseError as e:
+        # Try wrapping as fragment
+        try:
+            with open(xml_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Check if it looks like a fragment (starts with <type or similar)
+            content_stripped = content.strip()
+            if content_stripped.startswith('<type ') or content_stripped.startswith('<type>'):
+                # Wrap with types root
+                wrapped = f'<?xml version="1.0" encoding="UTF-8"?>\n<types>\n{content}\n</types>'
+                root = ET.fromstring(wrapped)
+                # Create a pseudo-tree
+                tree = ET.ElementTree(root)
+                return tree, root
+        except Exception:
+            pass
+        
+        print(f"Error parsing XML: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Error parsing XML: {e}", file=sys.stderr)
         sys.exit(1)
