@@ -699,6 +699,10 @@ except: pass
                 fi
             else
                 # UNLINKED -> Link
+                # If ignored, auto-remove from ignore list when linking
+                if [[ ${signored[$midx]:-0} -eq 1 ]]; then
+                    remove_ce_ignore "$inst_dir" "${smod_ids[$midx]}" "$fn"
+                fi
                 if confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                 fi
@@ -709,7 +713,10 @@ except: pass
             local mid="${smod_ids[$midx]}"
             local fn="${sfile_names[$midx]}"
             
-            if [[ ${signored[$midx]:-0} -eq 1 ]]; then
+            # Can only ignore UNLINKED files
+            if [[ ${states[$midx]} -eq 1 ]]; then
+                show_message "Cannot ignore linked files. Unlink first." "Warning"
+            elif [[ ${signored[$midx]:-0} -eq 1 ]]; then
                 # Currently ignored -> Un-ignore
                 remove_ce_ignore "$inst_dir" "$mid" "$fn"
             else
