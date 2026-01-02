@@ -120,17 +120,40 @@ confirm() {
     get_term_size
     draw_header "Confirm"
     
-    local box_width=50
-    local box_height=7
+    local box_width=60
+    local max_text_width=$((box_width - 6))
+    
+    # Word-wrap message into lines
+    local -a lines=()
+    local current_line=""
+    for word in $message; do
+        if [[ ${#current_line} -eq 0 ]]; then
+            current_line="$word"
+        elif [[ $((${#current_line} + 1 + ${#word})) -le $max_text_width ]]; then
+            current_line="$current_line $word"
+        else
+            lines+=("$current_line")
+            current_line="$word"
+        fi
+    done
+    [[ -n "$current_line" ]] && lines+=("$current_line")
+    
+    local line_count=${#lines[@]}
+    [[ $line_count -lt 1 ]] && line_count=1
+    local box_height=$((line_count + 5))
+    
     local box_row=$(( (TERM_ROWS - box_height) / 2 ))
     local box_col=$(( (TERM_COLS - box_width) / 2 ))
     
     draw_box $box_row $box_col $box_height $box_width
     
-    move_to $((box_row + 2)) $((box_col + 3))
-    printf "%s%s%s" "$WHITE" "$message" "$RESET"
+    # Print each line
+    for ((i=0; i<${#lines[@]}; i++)); do
+        move_to $((box_row + 2 + i)) $((box_col + 3))
+        printf "%s%s%s" "$WHITE" "${lines[$i]}" "$RESET"
+    done
     
-    move_to $((box_row + 4)) $((box_col + 3))
+    move_to $((box_row + box_height - 2)) $((box_col + 3))
     if [[ "$default" == "y" ]]; then
         printf "%s[Y]%s/n : " "$GREEN$BOLD" "$RESET"
     else

@@ -545,16 +545,12 @@ except: pass
                     target_to_unlink="${slinked_names[$midx]}"
                 fi
                 
-                # Shorten mod name for dialog
-                local short_mod="${smod_names[$midx]:0:20}"
-                
-                if confirm "Unlink '$fn' from $short_mod?" "y"; then
+                if confirm "Unlink '$fn' from ${smod_names[$midx]}?" "y"; then
                     unregister_modular_loot "$inst_dir" "$target_to_unlink"
                 fi
             else
                 # UNLINKED -> Link
-                local short_mod="${smod_names[$midx]:0:20}"
-                if confirm "Link '$fn' from $short_mod?" "y"; then
+                if confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                 fi
             fi
