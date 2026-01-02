@@ -567,16 +567,20 @@ _draw_workshop_details_screen() {
     
     local num_authors=${#authors_list[@]}
     local display_authors=$num_authors
-    # 9 fixed fields: ID, Auth, Size, Subs, Type, Inst, Sync, Upd, Rate, Deps
-    local meta_height=$((9 + num_authors + 2))
+    # Fixed fields: ID, Size, Subs, Type, Inst, Sync, Upd, Rel, Rate, Deps = 10 lines
+    # Padding: 1 top line (empty row 4)
+    # Box Borders: 2 lines
+    # Total Base: 10 + 1 + 2 = 13
+    local meta_height=$((13 + num_authors))
     
     # Cap height and authors
-    if [[ $meta_height -gt 15 ]]; then
-        meta_height=15
-        display_authors=7
+    # Allow slightly taller box for more authors
+    local max_meta_height=20
+    if [[ $meta_height -gt $max_meta_height ]]; then
+        meta_height=$max_meta_height
+        # display_authors = height - 13
+        display_authors=$((max_meta_height - 13))
     fi
-    # If we have exactly 8 authors, 7+1more is same lines, so just show 8? 
-    # Logic: If num > 7, show 6 and "... and X more" (1 line) = 7 lines.
     
     local show_more_msg=""
     if [[ $num_authors -gt $display_authors ]]; then
