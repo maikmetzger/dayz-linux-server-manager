@@ -614,6 +614,7 @@ END_PYTHON
                     fi
                 elif [[ $selected -eq $((mod_count + 5)) ]]; then
                     return 0
+                fi
                 ;;
             'i'|'I'|' ')
                 if [[ $selected -lt $mod_count ]]; then
