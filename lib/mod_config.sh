@@ -527,20 +527,26 @@ except: pass
 
     while true; do
         # 1. Scan everything (calls the Python implementation)
+        echo "[DEBUG] 1. Starting scan..." >> "${SCRIPT_DIR}/loot_manager.log"
         local ce_result
         local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
         if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
+        echo "[DEBUG] 2. Workshop path: $workshop_path" >> "${SCRIPT_DIR}/loot_manager.log"
         
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
+        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>>"${SCRIPT_DIR}/loot_manager.log" | tail -n 1)
+        echo "[DEBUG] 3. Scan done, result length: ${#ce_result}" >> "${SCRIPT_DIR}/loot_manager.log"
         
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
 
         # 2. Parse result into arrays
+        echo "[DEBUG] 4. Parsing results..." >> "${SCRIPT_DIR}/loot_manager.log"
         local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
         parse_scan_result "$ce_result"
+        echo "[DEBUG] 5. Parse done, count: ${#src_paths[@]}" >> "${SCRIPT_DIR}/loot_manager.log"
         
         # 3. Check ignore status for each file
         check_ignore_status
+        echo "[DEBUG] 6. Ignore check done" >> "${SCRIPT_DIR}/loot_manager.log"
         
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
