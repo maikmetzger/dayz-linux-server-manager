@@ -104,16 +104,28 @@ def get_types_root(xml_path):
     """
     try:
         tree = ET.parse(xml_path)
-        return tree, tree.getroot()
+        root = tree.getroot()
+        
+        # If root is not a known container type (types, spawnabletypes, etc.),
+        # treat it as a fragment (e.g. single <type> element) and force wrapping
+        if root.tag not in CE_TYPE_REGISTRY:
+            raise ET.ParseError(f"Root tag '{root.tag}' is not a valid container")
+            
+        return tree, root
     except ET.ParseError as e:
         # Try wrapping as fragment
         try:
             with open(xml_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
-            # Check if it looks like a fragment (starts with <type or similar)
-            content_stripped = content.strip()
-            if content_stripped.startswith('<type ') or content_stripped.startswith('<type>'):
+            # Check if it contains <type elements (even after comments)
+            # Strip XML comments for detection
+            import re
+            content_no_comments = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
+            content_stripped = content_no_comments.strip()
+            
+            # Check for type fragments anywhere in content
+            if '<type ' in content_stripped or '<type>' in content_stripped:
                 # Wrap with types root
                 wrapped = f'<?xml version="1.0" encoding="UTF-8"?>\n<types>\n{content}\n</types>'
                 root = ET.fromstring(wrapped)
