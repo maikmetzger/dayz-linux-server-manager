@@ -836,24 +836,27 @@ main_menu() {
             "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
             "⚒️|Mod Manager") mod_manager || true ;;
             "🧹|Wipe Server Data") wipe_menu || true ;;
-            "🔐|RCON Settings")
-                local rcon_path="${SELECTED_DIR}/data/config/BEServer_x64.cfg"
-                if [[ -f "$rcon_path" ]]; then
-                    fb_edit_file_nano "$rcon_path" "RCON Settings"
-                else
-                    show_message "RCON config not found: BEServer_x64.cfg" "Error"
-                fi
-                ;;
-            "📦|Loot Economy") loot_economy_browser "$SELECTED_DIR" || true ;;
+            "📦|Loot Economy") types_selection_menu "$SELECTED_DIR" "$SELECTED_CONTAINER" || true ;;
             "🔧|Server Settings")
                 local server_path="${SELECTED_DIR}/data/config/serverDZ.cfg"
                 if [[ -f "$server_path" ]]; then
-                    fb_edit_file_nano "$server_path" "Server Settings"
+                    config_category_editor "$SELECTED_CONTAINER" "$server_path" "serverDZ"
                 else
                     show_message "Server config not found: serverDZ.cfg" "Error"
                 fi
                 ;;
-            "📁|Mod Configs") modular_loot_dashboard "$SELECTED_DIR" || true ;;
+            "🔐|RCON Settings")
+                local rcon_path="${SELECTED_DIR}/data/config/BEServer_x64.cfg"
+                if [[ -f "$rcon_path" ]]; then
+                    config_category_editor "$SELECTED_CONTAINER" "$rcon_path" "BEServer"
+                else
+                    show_message "RCON config not found: BEServer_x64.cfg" "Error"
+                fi
+                ;;
+            "📁|Mod Configs")
+                local profile_dir="${SELECTED_DIR}/data/profile"
+                mod_config_browser "$profile_dir" || true
+                ;;
             "🎮|RCON Console")
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
                  set +e
