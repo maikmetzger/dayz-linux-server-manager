@@ -487,20 +487,50 @@ mod_manager() {
                     local ce_result
                     ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>/dev/null | tail -n 1)
 
-                    # Count new CE files
+                    # Load ignore list
+                    local ignore_file
+                    ignore_file=$(get_ce_ignore_file "$SELECTED_DIR" 2>/dev/null || echo "")
+                    local ignored_list=""
+                    if [[ -f "$ignore_file" ]]; then
+                        ignored_list=$(python3 -c "
+import json
+try:
+    with open('$ignore_file', 'r') as f:
+        data = json.load(f)
+    for item in data.get('ignored', []):
+        print(item.lower())
+except: pass
+" 2>/dev/null)
+                    fi
+
+                    # Count new CE files (excluding ignored)
                     local new_ce_count
                     if [[ -z "$ce_result" ]]; then
                          new_ce_count=0
                     else
-                         # Count NEW or UNLINKED files
-                         new_ce_count=$(echo "$ce_result" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if x.get('status') in ['new', 'unlinked']))" 2>/dev/null || echo "0")
+                         # Count NEW or UNLINKED files that aren't ignored
+                         new_ce_count=$(echo "$ce_result" | python3 -c "
+import json, sys
+ignored_raw = '''$ignored_list'''
+ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
+try:
+    d = json.load(sys.stdin)
+    count = 0
+    for x in d:
+        if x.get('status') in ['new', 'unlinked']:
+            key = f\"{x['mod_id']}|{x['filename']}\".lower()
+            if key not in ignored:
+                count += 1
+    print(count)
+except: print(0)
+" 2>/dev/null || echo "0")
                     fi
                     
                     # Complete progress bar
                     show_progress_end "Sync complete!" 300
                     
                     if [[ "$new_ce_count" -gt 0 ]]; then
-                        # Build arrays of new CE files for checklist
+                        # Build arrays of new CE files for checklist (excluding ignored)
                         local -a ce_mod_ids=()
                         local -a ce_mod_names=()
                         local -a ce_file_paths=()
@@ -516,20 +546,24 @@ mod_manager() {
                             ce_filenames+=("$fname")
                             ce_types+=("$cetype")
                             ce_selected+=(1)  # Pre-selected by default
-                        done < <(echo "$ce_result" | python3 -c '
+                        done < <(echo "$ce_result" | python3 -c "
 import json, sys
+ignored_raw = '''$ignored_list'''
+ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
 try:
     data = json.load(sys.stdin)
     for x in data:
-        if x.get("status") in ["new", "unlinked"]:
-            mid = x["mod_id"]
-            mname = x.get("mod_name", mid)
-            fpath = x["file_path"]
-            fname = x["filename"]
-            cetype = x["ce_type"]
-            print(f"{mid}|{mname}|{fpath}|{fname}|{cetype}")
+        if x.get('status') in ['new', 'unlinked']:
+            mid = x['mod_id']
+            fname = x['filename']
+            key = f'{mid}|{fname}'.lower()
+            if key not in ignored:
+                mname = x.get('mod_name', mid)
+                fpath = x['file_path']
+                cetype = x['ce_type']
+                print(f'{mid}|{mname}|{fpath}|{fname}|{cetype}')
 except: pass
-' 2>/dev/null)
+" 2>/dev/null)
                         
                         local ce_count=${#ce_filenames[@]}
                         if [[ $ce_count -gt 0 ]]; then

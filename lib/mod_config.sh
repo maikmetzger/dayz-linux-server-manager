@@ -335,6 +335,115 @@ except Exception as e:
 PYTHON_UNREGISTER
 }
 
+# -----------------------------------------------------------------------------
+# CE Ignore List Management
+# Files in this list won't trigger "found unlinked files" prompts during sync
+# -----------------------------------------------------------------------------
+
+# Get path to the ignore list JSON file
+get_ce_ignore_file() {
+    local inst_dir="$1"
+    local mission_path
+    mission_path=$(get_mission_path "$inst_dir" 2>/dev/null)
+    echo "${mission_path}/CustomCE/.ce_ignored.json"
+}
+
+# Check if a file is in the ignore list
+# Usage: is_ce_ignored "$inst_dir" "mod_id" "filename"
+is_ce_ignored() {
+    local inst_dir="$1"
+    local mod_id="$2"
+    local filename="$3"
+    local ignore_file
+    ignore_file=$(get_ce_ignore_file "$inst_dir")
+    
+    if [[ ! -f "$ignore_file" ]]; then
+        return 1  # Not ignored
+    fi
+    
+    python3 -c "
+import json, sys
+try:
+    with open('$ignore_file', 'r') as f:
+        data = json.load(f)
+    key = f'${mod_id}|${filename}'.lower()
+    if key in [x.lower() for x in data.get('ignored', [])]:
+        sys.exit(0)
+    sys.exit(1)
+except:
+    sys.exit(1)
+"
+}
+
+# Add a file to the ignore list
+# Usage: add_ce_ignore "$inst_dir" "mod_id" "filename"
+add_ce_ignore() {
+    local inst_dir="$1"
+    local mod_id="$2"
+    local filename="$3"
+    local ignore_file
+    ignore_file=$(get_ce_ignore_file "$inst_dir")
+    
+    python3 -c "
+import json, os
+ignore_file = '$ignore_file'
+mod_id = '$mod_id'
+filename = '$filename'
+key = f'{mod_id}|{filename}'
+
+data = {'ignored': []}
+if os.path.exists(ignore_file):
+    try:
+        with open(ignore_file, 'r') as f:
+            data = json.load(f)
+    except: pass
+
+if 'ignored' not in data:
+    data['ignored'] = []
+
+if key not in data['ignored']:
+    data['ignored'].append(key)
+
+os.makedirs(os.path.dirname(ignore_file), exist_ok=True)
+with open(ignore_file, 'w') as f:
+    json.dump(data, f, indent=2)
+print('Added')
+"
+}
+
+# Remove a file from the ignore list
+# Usage: remove_ce_ignore "$inst_dir" "mod_id" "filename"
+remove_ce_ignore() {
+    local inst_dir="$1"
+    local mod_id="$2"
+    local filename="$3"
+    local ignore_file
+    ignore_file=$(get_ce_ignore_file "$inst_dir")
+    
+    if [[ ! -f "$ignore_file" ]]; then
+        return
+    fi
+    
+    python3 -c "
+import json
+ignore_file = '$ignore_file'
+mod_id = '$mod_id'
+filename = '$filename'
+key = f'{mod_id}|{filename}'
+
+try:
+    with open(ignore_file, 'r') as f:
+        data = json.load(f)
+    
+    if 'ignored' in data and key in data['ignored']:
+        data['ignored'].remove(key)
+        with open(ignore_file, 'w') as f:
+            json.dump(data, f, indent=2)
+        print('Removed')
+except: pass
+"
+}
+
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
 # Uses scan_dayz_ce_files_python to get data
@@ -359,6 +468,7 @@ modular_loot_dashboard() {
         states=()
         slinked_names=()
         smodified=()
+        signored=()
         
         while IFS='|' read -r sp mid mn fn ct st ln md; do
             [[ -z "$sp" ]] && continue
@@ -370,6 +480,7 @@ modular_loot_dashboard() {
             states+=("$st")
             slinked_names+=("$ln")
             smodified+=("$md")
+            signored+=(0)  # Will be checked after
         done < <(echo "$json" | python3 -c "
 import json, sys
 try:
@@ -381,6 +492,34 @@ try:
         print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
 except: pass
 ")
+    }
+    
+    # Check ignore status for all parsed files
+    check_ignore_status() {
+        local ignore_file
+        ignore_file=$(get_ce_ignore_file "$inst_dir")
+        
+        if [[ ! -f "$ignore_file" ]]; then
+            return
+        fi
+        
+        local ignored_list
+        ignored_list=$(python3 -c "
+import json
+try:
+    with open('$ignore_file', 'r') as f:
+        data = json.load(f)
+    for item in data.get('ignored', []):
+        print(item.lower())
+except: pass
+" 2>/dev/null)
+        
+        for ((i=0; i<${#smod_ids[@]}; i++)); do
+            local key="${smod_ids[$i]}|${sfile_names[$i]}"
+            if echo "$ignored_list" | grep -qi "^${key}$" 2>/dev/null; then
+                signored[$i]=1
+            fi
+        done
     }
 
     while true; do
@@ -394,8 +533,11 @@ except: pass
         if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
 
         # 2. Parse result into arrays
-        local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names
+        local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
         parse_scan_result "$ce_result"
+        
+        # 3. Check ignore status for each file
+        check_ignore_status
         
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
@@ -435,7 +577,14 @@ except: pass
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
             local status_color="$WHITE"
-            if [[ ${states[$idx]} -eq 1 ]]; then
+            local row_dim=""
+            
+            # Check ignored status first (overrides unlinked display)
+            if [[ ${signored[$idx]:-0} -eq 1 ]]; then
+                status_str="[ IGNORED  ]"
+                status_color="$DIM"
+                row_dim="$DIM"
+            elif [[ ${states[$idx]} -eq 1 ]]; then
                 status_str="[  LINKED  ]"
                 status_color="$GRN"
             fi
@@ -468,13 +617,13 @@ except: pass
                 printf "%s" "$RESET"
             else
                 move_to $row 3
-                printf "%s%-12s%s %s%3s%s %s%-10s%s %-24s %-28s" "$status_color" "$status_str" "$RESET" "$mod_color" "$mod_str" "$RESET" "$type_color" "$type_str" "$RESET" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
+                printf "%s%s%-12s%s %s%3s%s %s%-10s%s %-24s %-28s%s" "$row_dim" "$status_color" "$status_str" "$RESET$row_dim" "$mod_color" "$mod_str" "$RESET$row_dim" "$type_color" "$type_str" "$RESET$row_dim" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}" "$RESET"
             fi
         done
         
         # Footer
         move_to $((TERM_ROWS - 1)) 1
-        local footer=" [Enter] Edit   [L] Toggle Link   [r] Rollback   [d] Delete   [q] Back"
+        local footer=" [Enter] Edit   [L] Link   [I] Ignore   [r] Rollback   [d] Delete   [q] Back"
         printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
         
         # 3. Handle Input
@@ -553,6 +702,19 @@ except: pass
                 if confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
                 fi
+            fi
+        elif [[ "$key" == "i" || "$key" == "I" ]]; then
+            # Toggle Ignore status
+            local midx=$selection
+            local mid="${smod_ids[$midx]}"
+            local fn="${sfile_names[$midx]}"
+            
+            if [[ ${signored[$midx]:-0} -eq 1 ]]; then
+                # Currently ignored -> Un-ignore
+                remove_ce_ignore "$inst_dir" "$mid" "$fn"
+            else
+                # Not ignored -> Add to ignore list
+                add_ce_ignore "$inst_dir" "$mid" "$fn"
             fi
         elif [[ "$key" == "" ]]; then
             # Edit File
