@@ -316,8 +316,8 @@ END_PYTHON
         # Table header
         local table_start=3
         local col_status=2
-        local col_type=6
-        local col_name=13
+        local col_type=8
+        local col_name=15
         local col_id=$((TERM_COLS - 45))
         local col_wsver=$((TERM_COLS - 32))
         local col_synced=$((TERM_COLS - 15))
@@ -418,8 +418,15 @@ END_PYTHON
                 printf "%s" "$RESET"
             else
                 local row_color="$RESET"
+                local id_color="$DIM"
+                
                 [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
-                [[ "$mtype" == "disabled" ]] && row_color="$DARKGRAY"
+                if [[ "$mtype" == "disabled" ]]; then
+                    row_color="$DARKGRAY"
+                    ws_color="$DARKGRAY"
+                    sync_color="$DARKGRAY"
+                    id_color="$DARKGRAY"
+                fi
                 
                 printf "%s" "$row_color"
                 move_to $row $col_status
@@ -433,16 +440,20 @@ END_PYTHON
                     both)     printf "[%sC%s+%sS%s]%s" "$MOD_CL" "$row_color" "$MOD_SV" "$row_color" "$RESET" ;;
                     client)   printf "[%s%s%s]%s" "$MOD_CL" "$type_short" "$row_color" "$RESET" ;;
                     server)   printf "[%s%s%s]%s" "$MOD_SV" "$type_short" "$row_color" "$RESET" ;;
-                    disabled) printf "[%s%s%s]%s" "$RED" "$type_short" "$row_color" "$RESET" ;;
+                    disabled) printf "[%s%s%s]" "$RED" "$type_short" "$row_color" ;;
                 esac
                 move_to $row $col_name
                 printf "%s" "$mname"
                 move_to $row $col_id
-                printf "%s%s%s" "$DIM" "$mid" "$row_color"
+                printf "%s%s%s" "$id_color" "$mid" "$row_color"
                 move_to $row $col_wsver
-                printf "%s%-14s%s" "$ws_color" "${ws_ver:0:14}" "$row_color"
+                
+                # Truncate dates to fit
+                local d_ws="${ws_ver:0:14}"
+                local d_sync="${sync_ver:0:14}"
+                printf "%s%-14s%s" "$ws_color" "$d_ws" "$row_color"
                 move_to $row $col_synced
-                printf "%s%-14s%s" "$sync_color" "${sync_ver:0:14}" "$row_color"
+                printf "%s%-14s%s" "$sync_color" "$d_sync" "$row_color"
                 printf "%s" "$RESET"
             fi
             row=$((row+1))
