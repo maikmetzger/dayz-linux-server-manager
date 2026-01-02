@@ -630,7 +630,8 @@ END_PYTHON
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
                     dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                    echo "$mid" >> "${SELECTED_DIR}/data/config/.pending_sync_mods"
+                    echo "$mid" >> "$pending_mods_file"
+                    pending_sync_mods="$pending_sync_mods $mid"
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
                     local new_id
