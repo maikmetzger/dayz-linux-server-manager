@@ -361,9 +361,13 @@ mod_manager() {
                 new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
                 if [[ "$new_id" =~ ^[0-9]+$ ]]; then
                     if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
-                        echo "$new_id" >> "$mods_file"
-                        show_message "Added mod $new_id as [Client]" "Mod Added"
-                        dirty=1; needs_rebuild=1
+                        # Show details first
+                        _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                        if [[ $? -eq 10 ]]; then
+                            echo "$new_id" >> "$mods_file"
+                            show_message "Added mod $new_id as [Client]" "Mod Added"
+                            dirty=1; needs_rebuild=1
+                        fi
                     else
                         show_message "Mod already in list" "Already Exists"
                     fi
@@ -405,9 +409,13 @@ mod_manager() {
                     new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
                     if [[ "$new_id" =~ ^[0-9]+$ ]]; then
                         if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
-                            echo "$new_id" >> "$mods_file"
-                            show_message "Added mod $new_id as [Client]" "Mod Added"
-                            dirty=1; needs_rebuild=1
+                            # Show details first
+                            _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                            if [[ $? -eq 10 ]]; then
+                                echo "$new_id" >> "$mods_file"
+                                show_message "Added mod $new_id as [Client]" "Mod Added"
+                                dirty=1; needs_rebuild=1
+                            fi
                         else
                             show_message "Mod already in list" "Already Exists"
                         fi
