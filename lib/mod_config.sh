@@ -618,6 +618,8 @@ except: pass
                 *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
             esac
             
+            echo "[DEBUG] 11. Case done, type_str=$type_str" >> "${SCRIPT_DIR}/loot_manager.log"
+            
             # Modified indicator
             local mod_str="   "
             local mod_color="$WHITE"
