@@ -375,7 +375,7 @@ END_PYTHON
             esac
             
             if [[ -n "${mod_warnings[$i]:-}" ]]; then
-                status_icon="⚠️"
+                status_icon="!"
             fi
             
             
@@ -421,6 +421,8 @@ END_PYTHON
                 local id_color="$DIM"
                 
                 [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
+                [[ -n "${mod_warnings[$i]:-}" ]] && row_color="$YELLOW"
+                
                 if [[ "$mtype" == "disabled" ]]; then
                     row_color="$DARKGRAY"
                     ws_color="$DARKGRAY"
@@ -432,6 +434,8 @@ END_PYTHON
                 move_to $row $col_status
                 if [[ "$mtype" == "disabled" ]]; then
                     printf "  %s%s%s" "$RED" "$status_icon" "$row_color"
+                elif [[ -n "${mod_warnings[$i]:-}" ]]; then
+                    printf "  %s%s%s" "$YELLOW$BOLD" "$status_icon" "$row_color"
                 else
                     printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
                 fi

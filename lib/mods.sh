@@ -394,12 +394,12 @@ check_mod_load_order() {
         done
         
         if [[ $dep_found -eq 0 ]]; then
-            echo "Missing: $(get_mod_name "$dep") ($dep)"
+            echo "Missing: $dep"
             return 0
         fi
         
         if [[ $mod_index -lt $dep_index ]]; then
-            echo "Load Order: $(get_mod_name "$dep") MUST be above this mod"
+            echo "Order: $dep must be ABOVE"
             return 0
         fi
     done

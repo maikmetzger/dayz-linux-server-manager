@@ -161,8 +161,28 @@ def scrape_dependencies(mod_id):
                 elif "0-star" in rating_section: stars = 0
             except: pass
         
-        return reqs, author, ratings_count, stars
-    except Exception: return [], "Unknown", 0, 0
+        # Scrape Created Date (as fallback for API)
+        created_ts = 0
+        try:
+            if 'Posted' in html:
+                p_section = html.split('Posted')[1].split('detailsStatRight">')[1].split('</div>')[0]
+                # Format: "4 Dec, 2018 @ 9:55pm" or "19 Oct @ 7:43am" (Steam format)
+                # Filter out the @
+                clean_date = p_section.strip().replace('@ ', '')
+                try:
+                    import datetime
+                    # Try with year first
+                    if ',' in clean_date:
+                        dt = datetime.datetime.strptime(clean_date, "%d %b, %Y %I:%M%p")
+                    else:
+                        c_year = datetime.datetime.now().year
+                        dt = datetime.datetime.strptime(f"{clean_date} {c_year}", "%d %b %I:%M%p %Y")
+                    created_ts = int(dt.timestamp())
+                except: pass
+        except: pass
+        
+        return reqs, author, ratings_count, stars, created_ts
+    except Exception: return [], "Unknown", 0, 0, 0
 
 def check_mod_updates(mod_ids: list, local_versions: dict) -> dict:
     if not mod_ids:
@@ -221,8 +241,9 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
             data = entry['data']
             needs_refetch = False
             if 'author' not in data or 'images' not in data or data['author'] == "Unknown": needs_refetch = True
-            elif 'rating_count' not in data: needs_refetch = True
-            elif 'rating_stars' not in data: needs_refetch = True
+            elif 'rating_count' not in data or 'rating_stars' not in data: needs_refetch = True
+            elif 'dependencies' not in data or 'created' not in data: needs_refetch = True
+            elif data.get('created', 0) == 0: needs_refetch = True
             
             if not needs_refetch and time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
                 results.append(data)
@@ -260,8 +281,12 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                     size_str = f"{size_bytes / (1024**3):.1f} GB" if size_bytes > 1024**3 else f"{size_bytes / (1024**2):.1f} MB"
                     
                     req_items = [r.get('publishedfileid') for r in d.get('required_items', [])]
-                    scraped_reqs, author, rating_count, stars = scrape_dependencies(mid)
+                    scraped_reqs, author, rating_count, stars, scraped_created = scrape_dependencies(mid)
                     if not req_items: req_items = scraped_reqs
+                    
+                    created_val = d.get('time_created', 0)
+                    if not created_val or created_val == 0:
+                        created_val = scraped_created
                     
                     raw_desc = d.get('description', "")
                     clean_desc, imgs = parse_bbcode(raw_desc)
@@ -271,7 +296,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                         "subscribers": subs, "subscribers_f": formatted_subs,
                         "size": size_str, "size_bytes": size_bytes,
                         "updated": d.get('time_updated', 0), 
-                        "created": d.get('time_created', 0),
+                        "created": created_val,
                         "description": raw_desc,
                         "description_clean": clean_desc,
                         "images": imgs,
@@ -323,8 +348,9 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                 if not mid.startswith("details_"): continue
                 item = entry['data']
                 iid = item['id']
-                if iid not in rules['dependencies'] or rules['dependencies'][iid] != item['dependencies']:
-                    rules['dependencies'][iid] = item['dependencies']; ch = True
+                deps = item.get('dependencies', [])
+                if iid not in rules['dependencies'] or rules['dependencies'][iid] != deps:
+                    rules['dependencies'][iid] = deps; ch = True
             if ch:
                 with open(update_rules, 'w') as f: json.dump(rules, f, indent=4)
         except Exception as e: print(f"Rules Update Error: {e}", file=sys.stderr)

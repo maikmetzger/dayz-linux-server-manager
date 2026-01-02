@@ -1127,6 +1127,9 @@ except Exception as e:
                     [[ ${#to_install_names[@]} -gt 3 ]] && install_summary="${to_install_names[0]}, ${to_install_names[1]} and $(( ${#to_install_names[@]} - 2 )) more"
                     echo "INSTALL: About to confirm" >> /tmp/workshop_crash.log
                     local confirm_msg="Install ${#to_install_ids[@]} mod(s): ${install_summary}"
+                    if [[ ${#to_install_ids[@]} -gt 1 ]]; then
+                        confirm_msg="Mod has dependencies. Install ${#to_install_ids[@]} mods: ${install_summary}"
+                    fi
                     if confirm "$confirm_msg" "y"; then
                         local auto_top=0
                         if [[ ${#frameworks_found[@]} -gt 0 ]] && confirm "Move frameworks (${frameworks_found[*]}) to top of load order?" "y"; then auto_top=1; fi
