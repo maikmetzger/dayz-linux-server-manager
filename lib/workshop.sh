@@ -533,7 +533,9 @@ _draw_workshop_details_screen() {
     local img_sel=${13}
     local minstalled="${14:-n/a}"
     local msynced="${15:-n/a}"
+    local msynced="${15:-n/a}"
     local mtype="${16:-Unknown}"
+    local mreleased="${17:-n/a}"
     
     get_term_size
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -544,6 +546,10 @@ _draw_workshop_details_screen() {
     if [[ ${#mname} -gt $((TERM_COLS-14)) ]]; then
          move_to 1 14; printf "%s%s" "$BG_BLUE" "${mname:0:$((TERM_COLS-15))}..."
     fi
+    
+    # 2. Workshop Link
+    move_to 2 1
+    printf "%sSteam: https://steamcommunity.com/sharedfiles/filedetails/?id=%s%s" "$DIM" "$mid" "$RESET"
 
     local meta_width=40
     # Clean split author string by comma (assuming comma separated from python)
@@ -611,27 +617,23 @@ _draw_workshop_details_screen() {
     ((a_row++))
     move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
     ((a_row++))
-    move_to $a_row 4; printf "%sWorkshop :%s %s" "$DIM" "$RESET" "$mupdated"
-    ((a_row++))
-    move_to $a_row 4; printf "%sRating   :%s %s (%s)" "$DIM" "$RESET" "$mrating_stars" "$mrating_count"
-    ((a_row++))
-    move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "$mdeps"
-    ((a_row++))
-    move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
-    ((a_row++))
     move_to $a_row 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
     ((a_row++))
-    move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "${mdeps:-None}"
+    move_to $a_row 4; printf "%sReleased :%s %s" "$DIM" "$RESET" "$mreleased"
     ((a_row++))
     
     # Rating Display
     local r_disp="-"
-    if [[ "$mrating_stars" =~ ^[0-5]$ ]]; then
+    if [[ "$mrating_stars" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
          r_disp="$mrating_stars/5 ($mrating_count)"
     else
          r_disp="? ($mrating_count)"
     fi
     move_to $a_row 4; printf "%sRating   :%s %s" "$DIM" "$RESET" "$r_disp"
+    ((a_row++))
+    
+    move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "$mdeps"
+    ((a_row++))
 
     # 3. Images Box (Left, below Metadata)
     local img_height=$((TERM_ROWS - meta_height - 6))
@@ -759,7 +761,7 @@ _view_mod_details() {
     echo "PARSING JSON..." >> /tmp/workshop_crash.log
     
     # Parse Python output
-    local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mdesc="Loading..." mdeps="0" mrating_stars="-" mrating_count="0"
+    local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mreleased="-" mdesc="Loading..." mdeps="0" mrating_stars="-" mrating_count="0"
     local -a mimages=()
     
     local tmp_source="/tmp/workshop_source_${mid}.sh"
@@ -771,7 +773,8 @@ try:
     data = json.load(sys.stdin)
     if data:
         x = data[0]
-        ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%Y-%m-%d')
+        ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%d. %b %Y %H:%M')
+        rd = datetime.datetime.fromtimestamp(x.get('created', 0)).strftime('%d. %b %Y %H:%M')
         
         def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
         
@@ -784,6 +787,7 @@ try:
             f.write(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}\\n')
             f.write(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}\\n')
             f.write(f'mupdated={shlex.quote(ud)}\\n')
+            f.write(f'mreleased={shlex.quote(rd)}\\n')
             f.write(f'mdesc={shlex.quote(clean(desc))}\\n')
             f.write(f'mdeps={len(x.get(\"dependencies\",[]))}\\n')
             f.write(f'mrating_stars={shlex.quote(str(x.get(\"rating_stars\",\"-\")))}\\n')
@@ -858,7 +862,7 @@ except: pass
         local desc_height=$((TERM_ROWS - 6))
         local view_height=$((desc_height - 3))
         
-        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$mrating_stars" "$mrating_count" "$scroll" mimages $img_sel "$minstalled" "$msynced" "$mtype"
+        _draw_workshop_details_screen "$mid" "$mname" "$mauthor" "$msize" "$msubs" "$mupdated" "$mdesc" "$mdeps" "$mrating_stars" "$mrating_count" "$scroll" mimages "$img_sel" "$minstalled" "$msynced" "$mtype" "$mreleased"
         
         IFS= read -rsn1 k
         if [[ "$k" == $'\x1b' ]]; then
@@ -1034,7 +1038,7 @@ except Exception as e:
         # Determine current active limit for resize logic
         local current_active_limit=$fetch_count
 
-        IFS= read -rsn1 -t 0.5 key || { 
+        IFS= read -rsn1 -t 2 key || { 
             # Timeout - Check for Resize
             local new_v_height=$((TERM_ROWS - 14))
             [[ $new_v_height -lt 5 ]] && new_v_height=5

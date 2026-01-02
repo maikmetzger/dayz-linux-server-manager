@@ -152,13 +152,31 @@ def scrape_dependencies(mod_id):
             html = response.read().decode('utf-8', errors='ignore')
         
         reqs = []
-        sidebar_id = 'id="RequiredItems_container"'
-        if sidebar_id in html:
-            container = html.split(sidebar_id)[1].split('</div>')[0]
-            reqs = re.findall(r'id=([0-9]+)', container)
+        
+        # Robust container finding
+        container = ""
+        if 'id="RequiredItems"' in html:
+            container = html.split('id="RequiredItems"')[1]
+        elif 'id="RequiredItems_container"' in html:
+            container = html.split('id="RequiredItems_container"')[1]
         elif "Required items" in html:
-            section = html.split("Required items")[1].split("</div>")[0]
-            reqs = re.findall(r'id=([0-9]+)', section)
+            container = html.split("Required items")[1]
+            
+        if container:
+            # Stop at next major section to avoid false positives
+            # "class=panel" is common start of next block
+            end_markers = ['class="panel"', '<div class="panel"', 'class="rightSectionTopTitle"']
+            limit_idx = len(container)
+            for m in end_markers:
+                idx = container.find(m)
+                if idx != -1 and idx < limit_idx:
+                    limit_idx = idx
+            
+            container = container[:limit_idx]
+            # Extract IDs from hrefs
+            reqs = re.findall(r'href="[^"]*[?&]id=([0-9]+)', container)
+            # Unique
+            reqs = list(set(reqs))
         
         author = "Unknown"
         # Robust Author Regex
@@ -341,6 +359,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
                         "subscribers": subs, "subscribers_f": formatted_subs,
                         "size": size_str, "size_bytes": size_bytes,
                         "updated": d.get('time_updated', 0), 
+                        "created": d.get('time_created', 0),
                         "description": raw_desc,
                         "description_clean": clean_desc,
                         "images": imgs,
