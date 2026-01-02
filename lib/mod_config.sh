@@ -559,7 +559,7 @@ except: pass
         printf "%s" "$RESET"
         
         move_to $((table_start + 1)) 1
-        printf "  %-12s %-3s %-10s %-24s %-28s" "STATUS" "MOD" "TYPE" "SOURCE / GROUP" "FILE NAME"
+        printf "  %-12s %-3s %-10s %-12s %-20s %-28s" "STATUS" "MOD" "TYPE" "WORKSHOP ID" "SOURCE / GROUP" "FILE NAME"
         
         move_to $((table_start + 2)) 1
         printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
@@ -613,11 +613,11 @@ except: pass
             if [[ $idx -eq $selection ]]; then
                 printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
                 move_to $row 3
-                printf "%-12s %3s %-10s %-24s %-28s" "$status_str" "$mod_str" "$type_str" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
+                printf "%-12s %3s %-10s %-12s %-20s %-28s" "$status_str" "$mod_str" "$type_str" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:20}" "${sfile_names[$idx]:0:28}"
                 printf "%s" "$RESET"
             else
                 move_to $row 3
-                printf "%s%s%-12s%s %s%3s%s %s%-10s%s %-24s %-28s%s" "$row_dim" "$status_color" "$status_str" "$RESET$row_dim" "$mod_color" "$mod_str" "$RESET$row_dim" "$type_color" "$type_str" "$RESET$row_dim" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}" "$RESET"
+                printf "%s%s%-12s%s %s%3s%s %s%-10s%s %-12s %-20s %-28s%s" "$row_dim" "$status_color" "$status_str" "$RESET$row_dim" "$mod_color" "$mod_str" "$RESET$row_dim" "$type_color" "$type_str" "$RESET$row_dim" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:20}" "${sfile_names[$idx]:0:28}" "$RESET"
             fi
         done
         
