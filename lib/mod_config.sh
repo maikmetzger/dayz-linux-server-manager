@@ -545,18 +545,17 @@ except: pass
                     target_to_unlink="${slinked_names[$midx]}"
                 fi
                 
-                # Debug: Show what we're about to unlink
-                echo "[DEBUG] Index=$midx, Mod=${smod_names[$midx]}, File=$fn, LinkedAs=$target_to_unlink" >> "${SCRIPT_DIR}/loot_manager.log"
+                # Shorten mod name for dialog
+                local short_mod="${smod_names[$midx]:0:20}"
                 
-                if confirm "Unlink '$target_to_unlink' from ${smod_names[$midx]}?" "y"; then
+                if confirm "Unlink '$fn' from $short_mod?" "y"; then
                     unregister_modular_loot "$inst_dir" "$target_to_unlink"
-                    show_message "Unlinked $target_to_unlink" "Success"
                 fi
             else
                 # UNLINKED -> Link
-                if confirm "Link '$fn' (${smod_names[$midx]}) to your economy?" "y"; then
+                local short_mod="${smod_names[$midx]:0:20}"
+                if confirm "Link '$fn' from $short_mod?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
-                     show_message "Linked $fn ($ct)" "Success"
                 fi
             fi
         elif [[ "$key" == "" ]]; then
