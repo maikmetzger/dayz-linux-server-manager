@@ -264,17 +264,20 @@ try:
         remote_v = m.get('updated', 0)
         if remote_v == 0: remote_v = m.get('latest', 0)
         
-        has_update = (remote_v > local_v) or (local_v == 0) or (not is_deployed)
+        # DEBUG: Add specific codes to know WHY
+        reason = ""
+        if (remote_v > local_v): reason += "U"
+        if (local_v == 0): reason += "M"
+        if (not is_deployed): reason += "D"
         
-        # If it needs sync solely because of deployment, let's allow it but maybe warn?
-        # No, strict is better. If it says NEED SYNC, user hits sync, and run.sh fixes it.
+        has_update = (len(reason) > 0)
         
         v = fmt(local_v)
-        if has_update: v = 'NEED SYNC'
+        if has_update: v = f'NEED SYNC ({reason})'
         print(f'{v}|{1 if has_update else 0}')
 except Exception as e:
     # DEBUG: sys.stderr.write(f"ERROR: {e}\n")
-    for _ in mod_ids: print('NEED SYNC|1')
+    for _ in mod_ids: print('NEED SYNC (Err)|1')
 "
             )
             
