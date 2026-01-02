@@ -825,17 +825,29 @@ except Exception as e:
     # 1. Timestamps
     if [[ -d "$workshop_content_path" ]]; then
        # Use python because stat syntax varies (BSD vs GNU) and handles large ints better
-       eval $(python3 -c "
+        eval $(python3 -c "
 import os, datetime
 try:
     p = '$workshop_content_path'
-    ct = os.path.getctime(p)
-    mt = os.path.getmtime(p)
-    # Check if .installed_version exists for better MT
-    v_file = os.path.join(p, '.installed_version')
-    if os.path.exists(v_file):
-        with open(v_file) as f: mt = int(f.read().strip())
     
+    # msynced = current sync status (mtime)
+    mt = os.path.getmtime(p)
+    
+    # minstalled = persistent original install date
+    f_inst = os.path.join(p, '.first_installed')
+    v_file = os.path.join(p, '.installed_version')
+    
+    if os.path.exists(f_inst):
+        try:
+            with open(f_inst) as f: ct = int(f.read().strip())
+        except: ct = os.path.getctime(p)
+    elif os.path.exists(v_file):
+         try:
+             with open(v_file) as f: ct = int(f.read().strip())
+         except: ct = os.path.getctime(p)
+    else:
+         ct = os.path.getctime(p)
+         
     print(f'minstalled=\"{datetime.datetime.fromtimestamp(ct).strftime(\"%d. %b %Y %H:%M\")}\"')
     print(f'msynced=\"{datetime.datetime.fromtimestamp(mt).strftime(\"%d. %b %Y %H:%M\")}\"')
 except: pass

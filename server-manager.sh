@@ -128,6 +128,10 @@ mod_manager() {
     
     local selected=0
     local dirty=0
+    local needs_sync_file="${SELECTED_DIR}/data/config/.needs_sync"
+    
+    # Load persisted dirty state
+    [[ -f "$needs_sync_file" ]] && dirty=1
     
     local needs_rebuild=1
     local -a mod_ids=()
@@ -219,25 +223,37 @@ try:
         if not mid: continue
         m = mods_info.get(mid, {})
         
-        # Check both potential workshop paths
-        path1 = os.path.join(ws_path1, mid)
-        path2 = os.path.join(ws_path2, mid)
-        m_path = path2 if os.path.exists(path2) else path1
+        # Check both potential workshop paths and pick the newest one
+        # to handle mirrored folders smoothly.
+        p1 = os.path.join(ws_path1, mid)
+        p2 = os.path.join(ws_path2, mid)
+        choices = [p for p in [p1, p2] if os.path.exists(p)]
+        m_path = max(choices, key=lambda x: os.path.getmtime(x)) if choices else None
         
         local_v = 0
         install_ts = 0
         
         # Local Stats
         if os.path.exists(m_path):
-            # Prefer mtime for both as ctime is metadata-change on Linux
-            install_ts = int(os.path.getmtime(m_path))
+            # SYNCED (local_v) = actual filesystem modification time
+            # We touch this on every sync/fix, so it tells us when we last processed it.
+            local_v = int(os.path.getmtime(m_path))
+            
+            # INSTALLED (install_ts) = Persistent original install date
+            f_inst = os.path.join(m_path, '.first_installed')
             v_file = os.path.join(m_path, '.installed_version')
-            if os.path.exists(v_file):
-                try: 
-                    with open(v_file) as f: local_v = int(f.read().strip())
-                except: local_v = int(os.path.getmtime(m_path))
+            
+            if os.path.exists(f_inst):
+                 try:
+                     with open(f_inst) as f: install_ts = int(f.read().strip())
+                 except: install_ts = int(os.path.getctime(m_path))
+            elif os.path.exists(v_file):
+                 # Fallback: check .installed_version (Steam timestamp)
+                 try:
+                     with open(v_file) as f: install_ts = int(f.read().strip())
+                 except: install_ts = int(os.path.getctime(m_path))
             else:
-                local_v = int(os.path.getmtime(m_path))
+                 install_ts = int(os.path.getctime(m_path))
         
         # Deployment Check
         is_deployed = False
@@ -484,10 +500,25 @@ END_PYTHON
         move_to $action_row 2
         for a in "${!actions[@]}"; do
             local action_idx=$((mod_count + a))
+            local action_label="${actions[$a]}"
+            
+            # Highlight Sync button in yellow when dirty
+            if [[ "$action_label" == "[S] Sync" && $dirty -eq 1 ]]; then
+                action_label="[!S] Sync"
+            fi
+            
             if [[ $selected -eq $action_idx ]]; then
-                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "${actions[$a]}" "$RESET"
+                if [[ "$action_label" == "[!S] Sync" ]]; then
+                    printf "%s%s▶ %s %s" "$BG_YELLOW" "$BLACK$BOLD" "$action_label" "$RESET"
+                else
+                    printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
+                fi
             else
-                printf "  %s " "${actions[$a]}"
+                if [[ "$action_label" == "[!S] Sync" ]]; then
+                    printf "  %s%s%s " "$YELLOW$BOLD" "$action_label" "$RESET"
+                else
+                    printf "  %s " "$action_label"
+                fi
             fi
             printf " "
         done
@@ -527,7 +558,7 @@ END_PYTHON
                     local mid="${mod_ids[$selected]}"
                     move_mod_up "$mid" "$mods_file" "$servermods_file"
                     selected=$((selected - 1))
-                    dirty=1; needs_rebuild=1
+                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                 fi
                 continue
                 ;;
@@ -536,7 +567,7 @@ END_PYTHON
                     local mid="${mod_ids[$selected]}"
                     move_mod_down "$mid" "$mods_file" "$servermods_file"
                     selected=$((selected + 1))
-                    dirty=1; needs_rebuild=1
+                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                 fi
                 continue
                 ;;
@@ -551,7 +582,7 @@ END_PYTHON
                         if [[ $? -eq 10 ]]; then
                             echo "$new_id" >> "$mods_file"
                             show_message "Added mod $new_id as [Client]" "Mod Added"
-                            dirty=1; needs_rebuild=1
+                            dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         fi
                     else
                         show_message "Mod already in list" "Already Exists"
@@ -571,7 +602,7 @@ END_PYTHON
                         local removed_keys
                         removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
                         show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
-                        dirty=1; needs_rebuild=1
+                        dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
                         [[ $selected -lt 0 ]] && selected=0
                     fi
@@ -587,7 +618,7 @@ END_PYTHON
                         server) add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
-                    dirty=1; needs_rebuild=1
+                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
                     local new_id
@@ -599,7 +630,7 @@ END_PYTHON
                             if [[ $? -eq 10 ]]; then
                                 echo "$new_id" >> "$mods_file"
                                 show_message "Added mod $new_id as [Client]" "Mod Added"
-                                dirty=1; needs_rebuild=1
+                                dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                             fi
                         else
                             show_message "Mod already in list" "Already Exists"
@@ -613,7 +644,7 @@ END_PYTHON
                         if confirm "Remove mod '$mname' from list?" "n"; then
                             removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
                             show_message "Removed: $mname" "Success"
-                            dirty=1; needs_rebuild=1
+                            dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         fi
                     else
                         show_message "Select a mod to remove first" "Info"
@@ -625,7 +656,8 @@ END_PYTHON
                     if [[ "$status" != "RUNNING" ]]; then
                         show_message "Container must be running to sync"
                     else
-                        run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                        run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
+                        dirty=0; rm -f "$needs_sync_file"
                         needs_rebuild=1
                         # Refresh update cache after sync with progress bar
                         show_progress_start "Sync" "Refreshing update cache..."
@@ -640,7 +672,7 @@ END_PYTHON
                     if [[ "$status" != "RUNNING" ]]; then
                         show_message "Container must be running to fix mods"
                     else
-                        run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                        run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
                      # Info
@@ -670,7 +702,8 @@ END_PYTHON
                 if [[ "$status" != "RUNNING" ]]; then
                     show_message "Container must be running to sync"
                 else
-                    run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods && /dayz/run.sh sync-servermods"
+                    run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
+                    dirty=0; rm -f "$needs_sync_file"
                     needs_rebuild=1
                     
                     # Progress bar for post-sync operations

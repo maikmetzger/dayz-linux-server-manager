@@ -264,6 +264,10 @@ mod_list_apply_fixes() {
 
       ln -sfn "${mod_dir}" "${DZ_SERVERFILES}/@${id}"
       touch "${mod_dir}" # Update mtime to reflect sync status in UI
+      # Keep track of first installation date
+      if [[ ! -f "${mod_dir}/.first_installed" ]]; then
+          date +%s > "${mod_dir}/.first_installed"
+      fi
       mod_args+="${mod_args:+;}"
       mod_args+="@${id}"
 
