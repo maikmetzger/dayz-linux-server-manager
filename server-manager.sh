@@ -1105,7 +1105,7 @@ main_menu() {
         case "$selected_item" in
             "▶️|Start Server") run_with_output "Starting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose up -d" ;;
             "⏹️|Stop Server") run_with_output "Stopping Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop" ;;
-            "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose restart" ;;
+            "🔄|Restart Server") run_with_output "Restarting Server" bash -c "cd '$SELECTED_DIR' && $DOCKER compose stop && $DOCKER compose up -d" ;;
             "⚒️|Mod Manager"*) mod_manager || true ;;
             "🌐|Workshop") workshop_browser "$SELECTED_DIR" || true ;;
             "🧹|Wipe Server Data") wipe_menu || true ;;
