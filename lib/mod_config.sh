@@ -444,6 +444,224 @@ except: pass
 "
 }
 
+# =============================================================================
+# Workshop Folder Browser - Navigate mod folders to view README and docs
+# =============================================================================
+workshop_folder_browser() {
+    local base_dir="$1"        # Workshop path for the mod (e.g., /path/workshop/221100/123456)
+    local mod_name="$2"        # Mod name for display
+    local mod_id="$3"          # Mod ID for display
+    local current_dir="${4:-$base_dir}"  # Current browsing directory
+    
+    local selection=0
+    local offset=0
+    
+    while true; do
+        # Get directory contents
+        local -a items=()
+        local -a item_types=()
+        local -a item_sizes=()
+        
+        # Add parent directory if not at base
+        if [[ "$current_dir" != "$base_dir" ]]; then
+            items+=("..")
+            item_types+=("dir")
+            item_sizes+=("-")
+        fi
+        
+        # List directories first, then files
+        while IFS= read -r -d '' entry; do
+            [[ -z "$entry" ]] && continue
+            local name=$(basename "$entry")
+            [[ "$name" == "." || "$name" == ".." ]] && continue
+            
+            if [[ -d "$entry" ]]; then
+                items+=("$name/")
+                item_types+=("dir")
+                item_sizes+=("-")
+            fi
+        done < <(find "$current_dir" -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
+        
+        while IFS= read -r -d '' entry; do
+            [[ -z "$entry" ]] && continue
+            local name=$(basename "$entry")
+            items+=("$name")
+            item_types+=("file")
+            # Get human-readable file size
+            local size=$(du -h "$entry" 2>/dev/null | cut -f1)
+            item_sizes+=("${size:-?}")
+        done < <(find "$current_dir" -maxdepth 1 -type f -print0 2>/dev/null | sort -z)
+        
+        local count=${#items[@]}
+        [[ $count -eq 0 ]] && { show_message "Empty folder" "Info"; return; }
+        
+        # Calculate relative path for display
+        local rel_path="${current_dir#$base_dir}"
+        [[ -z "$rel_path" ]] && rel_path="/"
+        
+        # Draw TUI
+        get_term_size
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        move_to 1 1
+        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Workshop Browser: $mod_name ($mod_id)" "$RESET"
+        
+        move_to 2 1
+        printf "%s Path: %s%s" "$DIM" "$rel_path" "$RESET"
+        
+        move_to 3 1
+        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+        printf "%s" "$RESET"
+        
+        local v_height=$((TERM_ROWS - 8))
+        [[ $v_height -lt 5 ]] && v_height=5
+        if [[ $selection -lt $offset ]]; then offset=$selection; fi
+        if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
+        
+        for ((i=0; i<v_height; i++)); do
+            local idx=$((offset + i))
+            [[ $idx -ge $count ]] && break
+            
+            local row=$((4 + i))
+            local name="${items[$idx]}"
+            local ftype="${item_types[$idx]}"
+            local fsize="${item_sizes[$idx]}"
+            
+            # Icon based on type
+            local icon="📄"
+            local color="$WHITE"
+            if [[ "$ftype" == "dir" ]]; then
+                icon="📁"
+                color="$CYN"
+            elif [[ "$name" == *.md || "$name" == *.txt || "$name" == *README* ]]; then
+                icon="📝"
+                color="$GRN"
+            elif [[ "$name" == *.xml ]]; then
+                icon="📋"
+                color="$YLW"
+            fi
+            
+            move_to $row 1
+            if [[ $idx -eq $selection ]]; then
+                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+                move_to $row 2
+                printf " %s  %-50s %8s" "$icon" "${name:0:50}" "$fsize"
+                printf "%s" "$RESET"
+            else
+                printf " %s  %s%-50s%s %8s" "$icon" "$color" "${name:0:50}" "$RESET" "$fsize"
+            fi
+        done
+        
+        # Footer
+        move_to $((TERM_ROWS - 1)) 1
+        printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" " [Enter] Open/View   [q] Back" "$RESET"
+        
+        # Handle input
+        IFS= read -rsn1 key
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 seq || true
+            case "$seq" in
+                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+            esac
+        elif [[ "$key" == "q" || "$key" == "Q" ]]; then
+            return
+        elif [[ "$key" == "" ]]; then  # Enter key
+            local selected="${items[$selection]}"
+            local selected_type="${item_types[$selection]}"
+            
+            if [[ "$selected" == ".." ]]; then
+                # Go up
+                current_dir=$(dirname "$current_dir")
+                selection=0
+                offset=0
+            elif [[ "$selected_type" == "dir" ]]; then
+                # Enter directory
+                current_dir="$current_dir/${selected%/}"
+                selection=0
+                offset=0
+            else
+                # View file
+                local file_path="$current_dir/$selected"
+                view_file_content "$file_path" "$selected"
+            fi
+        fi
+    done
+}
+
+# View file content in a simple pager
+view_file_content() {
+    local file_path="$1"
+    local file_name="$2"
+    
+    # Check if file is viewable
+    local ext="${file_name##*.}"
+    ext="${ext,,}"  # lowercase
+    
+    case "$ext" in
+        md|txt|cfg|ini|json|xml|html)
+            # Text file - show in pager
+            ;;
+        *)
+            # Check if it's text by looking at content
+            if ! file "$file_path" 2>/dev/null | grep -qi "text"; then
+                show_message "Cannot view binary file: $file_name" "Warning"
+                return
+            fi
+            ;;
+    esac
+    
+    local offset=0
+    local -a lines=()
+    
+    # Read file into array
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        lines+=("$line")
+    done < "$file_path"
+    
+    local total_lines=${#lines[@]}
+    
+    while true; do
+        get_term_size
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        
+        # Header
+        move_to 1 1
+        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Viewing: $file_name" "$RESET"
+        
+        move_to 2 1
+        printf "%s Line %d-%d of %d%s" "$DIM" "$((offset + 1))" "$((offset + TERM_ROWS - 5))" "$total_lines" "$RESET"
+        
+        # Content area
+        local v_height=$((TERM_ROWS - 5))
+        for ((i=0; i<v_height; i++)); do
+            local line_idx=$((offset + i))
+            [[ $line_idx -ge $total_lines ]] && break
+            
+            move_to $((3 + i)) 1
+            # Truncate long lines
+            printf "%.${TERM_COLS}s" "${lines[$line_idx]}"
+        done
+        
+        # Footer
+        move_to $((TERM_ROWS - 1)) 1
+        printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" " [↑/↓] Scroll   [PgUp/PgDn] Page   [q] Back" "$RESET"
+        
+        # Handle input
+        IFS= read -rsn1 key
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 seq || true
+            case "$seq" in
+                "[A") [[ $offset -gt 0 ]] && ((offset--)) ;;
+                "[B") [[ $offset -lt $((total_lines - v_height)) ]] && ((offset++)) ;;
+                "[5") ((offset -= v_height)); [[ $offset -lt 0 ]] && offset=0 ;;  # Page Up
+                "[6") ((offset += v_height)); [[ $offset -gt $((total_lines - v_height)) ]] && offset=$((total_lines - v_height)) ;;  # Page Down
+            esac
+        elif [[ "$key" == "q" || "$key" == "Q" ]]; then
+            return
+        fi
+    done
+}
+
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
 # Uses scan_dayz_ce_files_python to get data
@@ -642,7 +860,7 @@ except: pass
         
         # Footer
         move_to $((TERM_ROWS - 1)) 1
-        local footer=" [Enter] Edit   [L] Link   [I] Ignore   [r] Rollback   [d] Delete   [q] Back"
+        local footer=" [Enter] Edit   [L] Link   [B] Browse   [I] Ignore   [r] Rollback   [d] Delete   [q] Back"
         printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
         
         # 3. Handle Input
@@ -742,6 +960,28 @@ EOF
 )" "Merge Required"
                 elif confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
                      register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
+                fi
+            fi
+        elif [[ "$key" == "b" || "$key" == "B" ]]; then
+            # Browse workshop folder
+            local midx=$selection
+            local mid="${smod_ids[$midx]}"
+            local mname="${smod_names[$midx]}"
+            
+            if [[ "$mid" == "LOCAL" || "$mid" == "ORPHAN" ]]; then
+                show_message "Cannot browse local/orphan files - no workshop folder" "Info"
+            else
+                # Find workshop path
+                local workshop_base="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+                if [[ ! -d "$workshop_base" ]]; then
+                    workshop_base="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
+                fi
+                local mod_folder="${workshop_base}/${mid}"
+                
+                if [[ -d "$mod_folder" ]]; then
+                    workshop_folder_browser "$mod_folder" "$mname" "$mid"
+                else
+                    show_message "Workshop folder not found: @${mid}" "Error"
                 fi
             fi
         elif [[ "$key" == "i" || "$key" == "I" ]]; then
