@@ -191,7 +191,7 @@ mod_manager() {
                 export MOD_IDS_STR="${mod_ids[*]}"
                 export CACHE_JSON="$cache_data"
                 
-                python3 -c "
+                python3 <<'END_PYTHON'
 import json, sys, datetime, os
 
 mod_ids = os.environ.get('MOD_IDS_STR', '').split()
@@ -229,33 +229,22 @@ try:
         is_deployed = False
         if ws_dir:
             try:
-                # ws_dir is .../steamapps/workshop/content/221100
-                # We need to find the 'root' where @mods are typically linked.
-                # Usually this is the 'serverfiles' directory itself.
-                
-                # Go up until we hit 'serverfiles' or 'dayz-server' root?
-                # Actually, simpler: go 4 levels up from content/221100
-                # .../serverfiles/steamapps/workshop/content/221100 -> .../serverfiles
-                
-                # Check 1: Standard
+                # serverfiles/steamapps/workshop/content/221100 -> serverfiles/
+                # Check 1: Standard relative path
                 check_roots = []
                 p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(ws_dir))))
                 check_roots.append(p1)
                 
-                # Check 2: Just in case logic is slightly off, explicit path construction
-                # from the known 'serverfiles' in the path
+                # Check 2: Explicit 'serverfiles' heuristic for odd layouts
                 if 'serverfiles' in ws_dir:
-                    # Split path and rebuild up to serverfiles
                     parts = ws_dir.split(os.sep)
                     if 'serverfiles' in parts:
                         idx = parts.index('serverfiles')
-                        # Rejoin up to serverfiles (inclusive)
                         p2 = os.sep.join(parts[:idx+1])
                         check_roots.append(p2)
                 
                 for r in check_roots:
-                    # DEBUG: Print what we are checking to stderr so it shows up
-                    # sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
+                    # DEBUG: sys.stderr.write(f"DEBUG_CHECK: {os.path.join(r, f'@{mid}')}\n")
                     if os.path.exists(os.path.join(r, f'@{mid}')):
                         is_deployed = True
                         break
@@ -278,7 +267,7 @@ try:
 except Exception as e:
     # DEBUG: sys.stderr.write(f"ERROR: {e}\n")
     for _ in mod_ids: print('NEED SYNC (Err)|1')
-"
+END_PYTHON
             )
             
             # Global sync flag
