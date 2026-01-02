@@ -433,6 +433,20 @@ start_foreground() {
     if [[ -n "$(read_ids "${SERVERMODS_FILE}" || true)" ]]; then sync_servermods; fi
   fi
 
+  # -------------------------------------------------------------------------
+  # Auto-Sync on Mismatch: Ensure mods.args matches mods.txt before starting
+  # -------------------------------------------------------------------------
+  local txt_count args_count
+  txt_count=$(read_ids "${MODS_FILE}" 2>/dev/null | wc -l || echo 0)
+  args_count=$(cat "${MODS_ARGS_FILE}" 2>/dev/null | tr ';' '\n' | grep -c '@' || echo 0)
+  
+  if [[ "$txt_count" -ne "$args_count" ]]; then
+    warn "Mismatch detected: mods.txt has $txt_count mods, mods.args has $args_count. Forcing sync..."
+    sync_mods
+    sync_servermods
+    log "Auto-sync complete."
+  fi
+
   # Ensure args files exist
   [[ -f "${MODS_ARGS_FILE}" ]] || echo -n "" > "${MODS_ARGS_FILE}"
   [[ -f "${SERVERMODS_ARGS_FILE}" ]] || echo -n "" > "${SERVERMODS_ARGS_FILE}"
