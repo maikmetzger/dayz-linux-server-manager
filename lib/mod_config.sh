@@ -586,6 +586,9 @@ except: pass
             local idx=$((offset + i))
             [[ $idx -ge $count ]] && break
             
+            # Debug: log each row being drawn
+            echo "[DEBUG] 10. Drawing row i=$i idx=$idx ce_type=${sce_types[$idx]:-unknown}" >> "${SCRIPT_DIR}/loot_manager.log"
+            
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
             local status_color="$WHITE"
