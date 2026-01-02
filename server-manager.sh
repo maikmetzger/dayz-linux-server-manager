@@ -185,18 +185,18 @@ mod_manager() {
                 [[ -z "$v_disp" ]] && continue
                 mod_versions+=("$v_disp")
                 mod_update_flags+=("$has_up")
-            done < <(# Pass possible workshop paths for robustness
-                     WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" \
-                     WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100" \
-                     MOD_IDS_STR="${mod_ids[*]}" \
-                     echo "$cache_data" | python3 -c "
+            done < <(
+                export WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"
+                export WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+                export MOD_IDS_STR="${mod_ids[*]}"
+                
+                python3 -c "
 import json, sys, datetime, os
 
 mod_ids = os.environ.get('MOD_IDS_STR', '').split()
 ws_path1 = os.environ.get('WS_PATH_1', '')
 ws_path2 = os.environ.get('WS_PATH_2', '')
 
-# Use the first one that exists
 ws_dir = ws_path1
 if not os.path.exists(ws_dir) and os.path.exists(ws_path2):
     ws_dir = ws_path2
@@ -212,8 +212,6 @@ try:
     for mid in mod_ids:
         if not mid: continue
         m = mods_info.get(mid, {})
-        
-        # Verify local disk status
         m_path = os.path.join(ws_dir, mid)
         local_v = 0
         if os.path.exists(m_path):
@@ -226,16 +224,17 @@ try:
                 local_v = int(os.path.getmtime(m_path))
         
         remote_v = m.get('latest', 0)
-        # If not installed (local_v=0) OR remote is higher than local, it needs sync
         has_update = (remote_v > local_v) or (local_v == 0)
         
         v = fmt(local_v)
         if has_update: v = 'NEED SYNC'
-        
         print(f'{v}|{1 if has_update else 0}')
 except Exception as e:
     for _ in mod_ids: print('NEED SYNC|1')
-" 2>/dev/null)
+" <<EOF
+$cache_data
+EOF
+            )
             
             # Global sync flag
             global_sync_needed=0
