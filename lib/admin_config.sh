@@ -416,7 +416,8 @@ get_rcon_password() {
     local file="${config_dir}/BEServer_x64.cfg"
     
     if [[ -f "$file" ]]; then
-        grep -oP '^RConPassword\s+\K.*' "$file" 2>/dev/null || true
+        # Use awk to extract password (same as rcon.sh)
+        grep "^RConPassword" "$file" 2>/dev/null | awk '{print $2}' | tr -d '\r' || echo ""
     fi
 }
 
@@ -426,12 +427,17 @@ set_rcon_password() {
     local password="$2"
     local file="${config_dir}/BEServer_x64.cfg"
     
-    if [[ -f "$file" ]]; then
-        if grep -qE '^RConPassword' "$file"; then
-            sed -i "s/^RConPassword.*/RConPassword ${password}/" "$file"
-        else
-            echo "RConPassword ${password}" >> "$file"
-        fi
+    # Create file if it doesn't exist
+    if [[ ! -f "$file" ]]; then
+        mkdir -p "$(dirname "$file")"
+        echo "RConPassword ${password}" > "$file"
+        return 0
+    fi
+    
+    if grep -qE '^RConPassword' "$file"; then
+        sed -i "s/^RConPassword.*/RConPassword ${password}/" "$file"
+    else
+        echo "RConPassword ${password}" >> "$file"
     fi
 }
 

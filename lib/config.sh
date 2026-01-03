@@ -15,7 +15,7 @@
 # Format: "parser|relative_path|icon|label"
 declare -A CONFIG_REGISTRY=(
     ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
-    ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
+    ["BEServer"]="beserver|data/config/BEServer_x64.cfg|🔐|RCON Settings"
     ["types"]="xml||📦|Loot Economy"
     ["modConfigs"]="mod||📁|Mod Configs"
     ["adminTools"]="admin||🔐|Admin Tools"
@@ -703,6 +703,10 @@ config_table_editor() {
     local filename
     filename="$(basename "$config_path")"
     
+    # Determine parser format based on prefix
+    local parser_format="cfg"
+    [[ "$prefix" == "BESERVER" ]] && parser_format="beserver"
+    
     # Parse keys
     IFS=',' read -ra keys <<< "$keys_csv"
     
@@ -717,7 +721,7 @@ config_table_editor() {
     while true; do
         # Fetch current values
         local result
-        result=$(config_parser_exec "$container" getall cfg "$container_path")
+        result=$(config_parser_exec "$container" getall "$parser_format" "$container_path")
         
         if [[ "$(json_get_status "$result")" != "ok" ]]; then
             show_message "Failed to read config: $(json_get "$result" "message")" "Error"
@@ -936,7 +940,7 @@ config_table_editor() {
             
             if [[ "$new_val" != "$current_val" ]]; then
                 local set_result
-                set_result=$(config_parser_exec "$container" set cfg "$container_path" "$selected_key" "$new_val")
+                set_result=$(config_parser_exec "$container" set "$parser_format" "$container_path" "$selected_key" "$new_val")
                 if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
                     local msg
                     msg=$(json_get "$set_result" "message")

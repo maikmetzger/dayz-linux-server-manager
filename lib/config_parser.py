@@ -121,6 +121,74 @@ class CfgParser:
 
 
 # =============================================================================
+# BEServer Parser (BattlEye config format: KEY VALUE)
+# =============================================================================
+# Format: KEY value  (space-separated, no = sign, no semicolon)
+
+class BEServerParser:
+    """Parser for BattlEye config files (KEY VALUE format)"""
+    
+    # Regex pattern for KEY VALUE format
+    KEY_VALUE_PATTERN = re.compile(r'^([A-Za-z][A-Za-z0-9_]*)\s+(.*)$')
+    
+    def __init__(self, path: str):
+        self.path = path
+        self.lines: List[str] = []
+        self.load()
+    
+    def load(self) -> None:
+        """Load file contents."""
+        if not os.path.exists(self.path):
+            raise FileNotFoundError(f"Config file not found: {self.path}")
+        with open(self.path, 'r', encoding='utf-8') as f:
+            self.lines = f.readlines()
+    
+    def save(self) -> None:
+        """Save file contents."""
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.writelines(self.lines)
+    
+    def list_keys(self) -> List[str]:
+        """List all keys in the config file."""
+        keys = []
+        for line in self.lines:
+            match = self.KEY_VALUE_PATTERN.match(line.strip())
+            if match:
+                keys.append(match.group(1))
+        return keys
+    
+    def get(self, key: str) -> Optional[str]:
+        """Get a value by key."""
+        for line in self.lines:
+            match = self.KEY_VALUE_PATTERN.match(line.strip())
+            if match and match.group(1) == key:
+                return match.group(2).strip()
+        return None
+    
+    def get_all(self) -> Dict[str, str]:
+        """Get all key-value pairs."""
+        result = {}
+        for line in self.lines:
+            match = self.KEY_VALUE_PATTERN.match(line.strip())
+            if match:
+                result[match.group(1)] = match.group(2).strip()
+        return result
+    
+    def set(self, key: str, value: str) -> bool:
+        """Set a value by key. Returns True if key was found and updated."""
+        for i, line in enumerate(self.lines):
+            match = self.KEY_VALUE_PATTERN.match(line.strip())
+            if match and match.group(1) == key:
+                self.lines[i] = f"{key} {value}\n"
+                self.save()
+                return True
+        # Key not found - add it
+        self.lines.append(f"{key} {value}\n")
+        self.save()
+        return True
+
+
+# =============================================================================
 # JSON Parser (Placeholder for Phase 2)
 # =============================================================================
 
@@ -152,6 +220,7 @@ def get_parser(fmt: str, path: str):
     """Factory function to get the right parser for a format."""
     parsers = {
         'cfg': CfgParser,
+        'beserver': BEServerParser,
         'json': JsonParser,
         'xml': XmlParser,
     }
