@@ -486,6 +486,37 @@ remove_tool_admin() {
 
 admin_tools_menu() {
     local inst_dir="$1"
+    
+    while true; do
+        local -a items=(
+            "🔑|Passwords"
+            "--------------------"
+            "←|Back"
+        )
+        
+        if ! run_menu items "Admin Tools"; then
+            return
+        fi
+        
+        local selected_item="${items[$MENU_RESULT]}"
+        
+        case "$selected_item" in
+            "🔑|Passwords")
+                passwords_menu "$inst_dir"
+                ;;
+            "←|Back"|----*)
+                [[ "$selected_item" == "←|Back" ]] && return
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Passwords Menu (Admin IDs & Passwords)
+# =============================================================================
+
+passwords_menu() {
+    local inst_dir="$1"
     local profile_dir="${inst_dir}/data/profile"
     local config_dir="${inst_dir}/data/config"
     
@@ -538,7 +569,7 @@ admin_tools_menu() {
         tool_data+=("")
         tool_data+=("")
         
-        if ! run_menu items "Admin Tools - Set Passwords & IDs"; then
+        if ! run_menu items "Passwords - Admin IDs & Server Passwords"; then
             return
         fi
         
