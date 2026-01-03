@@ -248,7 +248,9 @@ if __name__ == "__main__":
     # Action-based interface for TUI integration
     parser.add_argument('--action', choices=['players', 'kick', 'ban', 'say', 'loadbans'],
                         help='Predefined action with JSON output')
-    parser.add_argument('--player-id', type=str, help='Player ID for kick/ban actions')
+    parser.add_argument('--player-id', type=str, help='Player ID (deprecated, use --player-name or --player-guid)')
+    parser.add_argument('--player-name', type=str, help='Player name for kick action')
+    parser.add_argument('--player-guid', type=str, help='Player GUID/Steam64ID for ban action')
     parser.add_argument('--message', type=str, help='Message for say action')
     parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
     
@@ -261,15 +263,19 @@ if __name__ == "__main__":
             if args.action == 'players':
                 print(client.action_players())
             elif args.action == 'kick':
-                if not args.player_id:
-                    print('{"success": false, "error": "Missing --player-id"}')
+                # Use --player-name, fall back to --player-id for backwards compat
+                name = args.player_name or args.player_id
+                if not name:
+                    print('{"success": false, "error": "Missing --player-name"}')
                     sys.exit(1)
-                print(client.action_kick(args.player_id, args.reason))
+                print(client.action_kick(name, args.reason))
             elif args.action == 'ban':
-                if not args.player_id:
-                    print('{"success": false, "error": "Missing --player-id"}')
+                # Use --player-guid, fall back to --player-id for backwards compat
+                guid = args.player_guid or args.player_id
+                if not guid:
+                    print('{"success": false, "error": "Missing --player-guid"}')
                     sys.exit(1)
-                print(client.action_ban(args.player_id, args.reason))
+                print(client.action_ban(guid, args.reason))
             elif args.action == 'say':
                 if not args.message:
                     print('{"success": false, "error": "Missing --message"}')
