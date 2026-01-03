@@ -14,6 +14,12 @@ The mod manager does more than just download files; it helps keep your server st
 - **Sync Status**: Mods with pending changes appear **yellow** until synced. A `[SYNC NEEDED]` indicator shows in both the header and main menu.
 - **Automation**: Fixes mod casing (lowercase) and handles your `.bikey` and `.bisign` keys automatically.
 
+### Workshop Folder Browser [NEW]
+Inspect the contents of any mod directly from the Workshop Manager or Loot Manager.
+- **Browse Files**: Navigate through `addons/`, `data/`, and other mod folders.
+- **View Content**: Identify if a mod has hidden XML configs or valid keys.
+- **Access**: Press `[B]` on any mod to open the file browser.
+
 ### Steam Workshop Browser
 A fully integrated TUI browser for the Steam Workshop.
 - **Search**: Find mods by name, author, or relevance directly in the terminal.
@@ -32,7 +38,7 @@ Take control of your loot without manually editing giant XML files.
 - **Loot Editor**: Search for items in a table view and edit spawn rates (nominal, lifetime, etc.) instantly.
 - **Modular Loot**: Register workshop loot as modular includes. This keeps your main `types.xml` clean and makes it easy to add or remove mods.
 - **Link Toggle**: Enable or disable specific loot files with a single keypress.
-- **CE Detection**: Mods with Central Economy files are auto-detected and flagged for easy management.
+- **Smart CE Detection**: Automatically identifies Central Economy files even in subfolders or with weird names (e.g., `Control/Config/types.xml`), and correctly ignores non-CE files like Trader Configs.
 
 ### Maintenance & Reliability
 - **Selective Wipe**: Choose exactly what to reset. You can refresh the loot on the ground (CLE) without destroying player bases, or wipe vehicles and players individually.

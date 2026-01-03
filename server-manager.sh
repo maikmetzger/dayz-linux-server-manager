@@ -1085,6 +1085,7 @@ main_menu() {
             "🔧|Server Settings"
             "🔐|RCON Settings"
             "📁|Mod Configs"
+            "🔐|Admin Tools"
             "--------------------"
             "🎮|RCON Console"
             "📜|View Logs"
@@ -1129,6 +1130,10 @@ main_menu() {
             "📁|Mod Configs")
                 local profile_dir="${SELECTED_DIR}/data/profile"
                 mod_config_browser "$profile_dir" || true
+                ;;
+            "🔐|Admin Tools")
+                source "${SCRIPT_DIR}/lib/admin_config.sh"
+                admin_tools_menu "$SELECTED_DIR" || true
                 ;;
             "🎮|RCON Console")
                  printf "%s" "$SHOW_CURSOR" "$CLEAR_SCREEN"
