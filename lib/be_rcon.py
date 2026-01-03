@@ -185,21 +185,21 @@ class BattlEyeRcon:
         resp = self.send_command("players")
         return self.parse_players_response(resp)
     
-    def action_kick(self, player_id, reason=""):
-        """Kick a player by ID."""
+    def action_kick(self, player_name, reason=""):
+        """Kick a player by NAME (not ID)."""
         import json
-        # BattlEye uses #kick format
-        cmd = f"#kick {player_id}"
+        # BattlEye #kick uses player name
+        cmd = f"#kick {player_name}"
         if reason:
             cmd += f" {reason}"
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban(self, player_id, reason=""):
-        """Ban a player by ID (permanent via RCON)."""
+    def action_ban(self, player_guid, reason=""):
+        """Ban a player by GUID/Steam64ID (permanent via RCON)."""
         import json
-        # BattlEye uses #ban format  
-        cmd = f"#ban {player_id}"
+        # BattlEye uses #exec ban with Steam64ID
+        cmd = f"#exec ban {player_guid}"
         if reason:
             cmd += f" {reason}"
         resp = self.send_command(cmd)

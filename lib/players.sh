@@ -444,12 +444,12 @@ They can rejoin at any time." "n"; then
         return
     fi
     
-    # Execute kick
+    # Execute kick - uses player NAME (not ID)
     local result
     if [[ -n "$reason" ]]; then
-        result=$(run_rcon_action "$inst_dir" "kick" --player-id "$player_id" --reason "$reason")
+        result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name" --reason "$reason")
     else
-        result=$(run_rcon_action "$inst_dir" "kick" --player-id "$player_id")
+        result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name")
     fi
     
     local success
@@ -530,9 +530,9 @@ Reason: ${reason}" "y"; then
         return
     fi
     
-    # Execute ban via RCON (permanent) and kick
+    # Execute ban via RCON - uses GUID/Steam64ID
     local result
-    result=$(run_rcon_action "$inst_dir" "ban" --player-id "$player_id" --reason "$reason")
+    result=$(run_rcon_action "$inst_dir" "ban" --player-guid "$player_guid" --reason "$reason")
     
     local success
     success=$(json_get "$result" "success" "false")
