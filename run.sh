@@ -290,15 +290,29 @@ mod_list_apply_fixes() {
     fi
   done <<< "${ids}"
 
-  # Garbage Collection: Remove symlinks for mods that are NOT in the valid list
+  # Garbage Collection: Remove symlinks for mods that are NOT in EITHER list
+  # We need to check both mods.txt AND servermods.txt to avoid pruning valid mods
   log "Performing garbage collection on old mod links..."
+  
+  # Build combined valid list from BOTH files
+  declare -A ALL_VALID_MODS
+  local all_ids
+  all_ids="$(read_ids "${MODS_FILE}" 2>/dev/null || true)"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && ALL_VALID_MODS["$id"]=1
+  done <<< "$all_ids"
+  all_ids="$(read_ids "${SERVERMODS_FILE}" 2>/dev/null || true)"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] && ALL_VALID_MODS["$id"]=1
+  done <<< "$all_ids"
+  
   while IFS= read -r link; do
     local link_name
     link_name="$(basename "$link")"      # e.g., @123456
     local link_id="${link_name#@}"       # e.g., 123456
     
-    # Check if this ID is in our valid list (safe for set -u)
-    if [[ -z "${VALID_MODS[$link_id]+x}" ]]; then
+    # Check if this ID is in EITHER list (safe for set -u)
+    if [[ -z "${ALL_VALID_MODS[$link_id]+x}" ]]; then
         # Double check it is a numeric ID (safety)
         if [[ "$link_id" =~ ^[0-9]+$ ]]; then
             log "Pruning removed mod: $link_name"
