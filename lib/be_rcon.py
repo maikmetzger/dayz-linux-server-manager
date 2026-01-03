@@ -205,6 +205,22 @@ class BattlEyeRcon:
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
+    def action_ban_by_name(self, player_name, reason=""):
+        """Ban a player by NAME (not GUID)."""
+        import json
+        cmd = f"#ban {player_name}"
+        if reason:
+            cmd += f" {reason}"
+        resp = self.send_command(cmd)
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_unban(self, player_guid):
+        """Unban a player by GUID/Steam64ID."""
+        import json
+        cmd = f"#exec unban {player_guid}"
+        resp = self.send_command(cmd)
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
     def action_say(self, message, player_id=-1):
         """Send a message to all players (-1) or specific player."""
         import json
@@ -216,6 +232,40 @@ class BattlEyeRcon:
         """Reload bans.txt file."""
         import json
         resp = self.send_command("#exec loadBans")
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    # ==========================================================================
+    # Server Control Actions
+    # ==========================================================================
+    
+    def action_shutdown(self):
+        """Graceful server shutdown via #shutdown."""
+        import json
+        resp = self.send_command("#shutdown")
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_lock(self):
+        """Lock server - prevent new connections."""
+        import json
+        resp = self.send_command("#lock")
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_unlock(self):
+        """Unlock server - allow new connections."""
+        import json
+        resp = self.send_command("#unlock")
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_monitor(self, seconds=5):
+        """Get performance monitoring data."""
+        import json
+        resp = self.send_command(f"#monitor {seconds}")
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_login(self):
+        """Explicit RCON admin login (some servers require this)."""
+        import json
+        resp = self.send_command(f"#login {self.password}")
         return json.dumps({"success": True, "response": resp, "error": None})
 
     def interactive(self):
@@ -246,36 +296,52 @@ if __name__ == "__main__":
     parser.add_argument('--command', help='Single raw command to execute')
     
     # Action-based interface for TUI integration
-    parser.add_argument('--action', choices=['players', 'kick', 'ban', 'say', 'loadbans'],
+    parser.add_argument('--action', 
+                        choices=['players', 'kick', 'ban', 'ban_by_name', 'unban', 
+                                 'say', 'loadbans', 'shutdown', 'lock', 'unlock', 'monitor'],
                         help='Predefined action with JSON output')
-    parser.add_argument('--player-id', type=str, help='Player ID (deprecated, use --player-name or --player-guid)')
-    parser.add_argument('--player-name', type=str, help='Player name for kick action')
-    parser.add_argument('--player-guid', type=str, help='Player GUID/Steam64ID for ban action')
+    parser.add_argument('--player-id', type=str, help='Player ID (deprecated)')
+    parser.add_argument('--player-name', type=str, help='Player name for kick/ban_by_name')
+    parser.add_argument('--player-guid', type=str, help='Player GUID/Steam64ID for ban/unban')
     parser.add_argument('--message', type=str, help='Message for say action')
     parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
+    parser.add_argument('--seconds', type=int, default=5, help='Seconds for monitor action')
     
     args = parser.parse_args()
     
     client = BattlEyeRcon(args.host, args.port, args.password)
     if client.connect():
         if args.action:
+            # Auto-login before action commands (some servers require this)
+            client.action_login()
+            
             # Action-based mode with JSON output
             if args.action == 'players':
                 print(client.action_players())
             elif args.action == 'kick':
-                # Use --player-name, fall back to --player-id for backwards compat
                 name = args.player_name or args.player_id
                 if not name:
                     print('{"success": false, "error": "Missing --player-name"}')
                     sys.exit(1)
                 print(client.action_kick(name, args.reason))
             elif args.action == 'ban':
-                # Use --player-guid, fall back to --player-id for backwards compat
                 guid = args.player_guid or args.player_id
                 if not guid:
                     print('{"success": false, "error": "Missing --player-guid"}')
                     sys.exit(1)
                 print(client.action_ban(guid, args.reason))
+            elif args.action == 'ban_by_name':
+                name = args.player_name or args.player_id
+                if not name:
+                    print('{"success": false, "error": "Missing --player-name"}')
+                    sys.exit(1)
+                print(client.action_ban_by_name(name, args.reason))
+            elif args.action == 'unban':
+                guid = args.player_guid or args.player_id
+                if not guid:
+                    print('{"success": false, "error": "Missing --player-guid"}')
+                    sys.exit(1)
+                print(client.action_unban(guid))
             elif args.action == 'say':
                 if not args.message:
                     print('{"success": false, "error": "Missing --message"}')
@@ -283,6 +349,14 @@ if __name__ == "__main__":
                 print(client.action_say(args.message))
             elif args.action == 'loadbans':
                 print(client.action_loadbans())
+            elif args.action == 'shutdown':
+                print(client.action_shutdown())
+            elif args.action == 'lock':
+                print(client.action_lock())
+            elif args.action == 'unlock':
+                print(client.action_unlock())
+            elif args.action == 'monitor':
+                print(client.action_monitor(args.seconds))
         elif args.command:
             # Raw command mode
             resp = client.send_command(args.command)
@@ -295,4 +369,3 @@ if __name__ == "__main__":
         import json
         print(json.dumps({"success": False, "error": "Connection failed"}))
         sys.exit(1)
-
