@@ -297,8 +297,8 @@ mod_list_apply_fixes() {
     link_name="$(basename "$link")"      # e.g., @123456
     local link_id="${link_name#@}"       # e.g., 123456
     
-    # Check if this ID is in our valid list
-    if [[ -z "${VALID_MODS[$link_id]}" ]]; then
+    # Check if this ID is in our valid list (safe for set -u)
+    if [[ -z "${VALID_MODS[$link_id]+x}" ]]; then
         # Double check it is a numeric ID (safety)
         if [[ "$link_id" =~ ^[0-9]+$ ]]; then
             log "Pruning removed mod: $link_name"
