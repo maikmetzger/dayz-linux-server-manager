@@ -35,6 +35,45 @@ declare -a ADMIN_TOOL_PATTERNS=(
 # VPP password file path (relative to profile)
 VPP_CREDENTIALS_PATH="VPPAdminTools/Permissions/credentials.txt"
 
+# Steam username cache (in-memory)
+declare -A STEAM_NAME_CACHE=()
+
+# =============================================================================
+# Steam Username Lookup
+# =============================================================================
+
+# Get Steam username from Steam64 ID (via community profile scraping)
+# Usage: name=$(get_steam_username "76561198012345678")
+get_steam_username() {
+    local steam_id="$1"
+    
+    # Check cache first
+    if [[ -n "${STEAM_NAME_CACHE[$steam_id]:-}" ]]; then
+        echo "${STEAM_NAME_CACHE[$steam_id]}"
+        return 0
+    fi
+    
+    # Try to scrape Steam community profile
+    local name=""
+    if command -v curl &>/dev/null; then
+        local response
+        response=$(curl -s --max-time 3 "https://steamcommunity.com/profiles/${steam_id}/?xml=1" 2>/dev/null || true)
+        
+        if [[ -n "$response" ]]; then
+            # Extract <steamID> from XML (the display name)
+            name=$(echo "$response" | grep -oP '<steamID><!\[CDATA\[\K[^\]]+' | head -1 || true)
+        fi
+    fi
+    
+    # Fallback to short ID if lookup failed
+    [[ -z "$name" ]] && name="${steam_id: -6}"
+    
+    # Cache the result
+    STEAM_NAME_CACHE["$steam_id"]="$name"
+    
+    echo "$name"
+}
+
 # =============================================================================
 # Validation Functions
 # =============================================================================
@@ -559,10 +598,14 @@ admin_tool_submenu() {
         
         items+=("--------------------")
         
-        # List current admins for removal
+        # List current admins for removal (with Steam names)
         if [[ -n "$admins" ]]; then
             while IFS= read -r admin_id; do
-                [[ -n "$admin_id" ]] && items+=("🗑|Remove: $admin_id")
+                if [[ -n "$admin_id" ]]; then
+                    local steam_name
+                    steam_name=$(get_steam_username "$admin_id")
+                    items+=("🗑|Remove: $admin_id ($steam_name)")
+                fi
             done <<< "$admins"
         else
             items+=("  |No admins configured")
@@ -586,10 +629,14 @@ admin_tool_submenu() {
         elif [[ "$selected_item" == "🔑|Set VPP Password"* ]]; then
             admin_vpp_password_dialog "$profile_dir"
         elif [[ "$selected_item" == "🗑|Remove:"* ]]; then
-            local steam_id="${selected_item#*Remove: }"
-            if confirm "Remove admin '$steam_id' from $tool_name?"; then
+            # Extract Steam64 ID (format: "🗑|Remove: 76561198012345678 (Name)")
+            local full_text="${selected_item#*Remove: }"
+            local steam_id="${full_text%% (*}"  # Remove " (Name)" suffix
+            local steam_name="${full_text#*\(}"
+            steam_name="${steam_name%)}"
+            if confirm "Remove admin '$steam_name' ($steam_id) from $tool_name?"; then
                 remove_tool_admin "$profile_dir" "$tool_name" "$steam_id"
-                show_message "Removed $steam_id from $tool_name" "Success"
+                show_message "Removed $steam_name from $tool_name" "Success"
             fi
         fi
     done
