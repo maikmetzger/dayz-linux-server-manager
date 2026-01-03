@@ -1,0 +1,631 @@
+#!/usr/bin/env bash
+# =============================================================================
+# DayZ Player Management - TUI Library
+# =============================================================================
+# Provides player list view and admin actions (kick, ban, message) via RCON
+# Requires: lib/tui.sh, lib/dialogs.sh, lib/colors.sh
+# =============================================================================
+
+# Prevent double-sourcing
+[[ -n "${_DAYZ_PLAYERS_LOADED:-}" ]] && return 0
+_DAYZ_PLAYERS_LOADED=1
+
+# Source dependencies
+PLAYERS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${PLAYERS_LIB_DIR}/colors.sh"
+source "${PLAYERS_LIB_DIR}/tui.sh"
+source "${PLAYERS_LIB_DIR}/dialogs.sh"
+source "${PLAYERS_LIB_DIR}/utils.sh"
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# State directory for ban tracking
+PLAYERS_STATE_DIR=""
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Get max players from serverDZ.cfg
+# Usage: max=$(get_max_players "$inst_dir")
+get_max_players() {
+    local inst_dir="$1"
+    local config_file="${inst_dir}/data/config/serverDZ.cfg"
+    
+    if [[ -f "$config_file" ]]; then
+        local max
+        max=$(grep -oP 'maxPlayers\s*=\s*\K[0-9]+' "$config_file" 2>/dev/null || echo "60")
+        echo "${max:-60}"
+    else
+        echo "60"
+    fi
+}
+
+# Fetch online players via RCON as JSON
+# Usage: json=$(fetch_online_players "$inst_dir")
+fetch_online_players() {
+    local inst_dir="$1"
+    local rcon_output
+    
+    # Use run_rcon_action function (defined below) to execute RCON
+    rcon_output=$(run_rcon_action "$inst_dir" "players")
+    
+    if [[ -z "$rcon_output" ]]; then
+        echo '{"count": 0, "players": [], "error": "RCON failed"}'
+    else
+        echo "$rcon_output"
+    fi
+}
+
+# Run RCON action and return JSON
+# Usage: result=$(run_rcon_action "$inst_dir" "action" [args...])
+run_rcon_action() {
+    local inst_dir="$1"
+    local action="$2"
+    shift 2
+    local extra_args=("$@")
+    
+    # Get RCON details from the instance
+    local marker="${inst_dir}/.dayz-instance"
+    local container_name
+    container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
+    
+    if [[ -z "$container_name" ]]; then
+        echo '{"success": false, "error": "No container found"}'
+        return 1
+    fi
+    
+    # Get RCON port and password from BEServer config
+    local be_config="${inst_dir}/data/profile/BattlEye/BEServer_x64.cfg"
+    if [[ ! -f "$be_config" ]]; then
+        echo '{"success": false, "error": "BattlEye config not found"}'
+        return 1
+    fi
+    
+    local port pass
+    port=$(grep -oP 'RConPort\s+\K[0-9]+' "$be_config" 2>/dev/null || echo "2306")
+    pass=$(grep -oP 'RConPassword\s+\K\S+' "$be_config" 2>/dev/null || echo "")
+    
+    if [[ -z "$pass" ]]; then
+        echo '{"success": false, "error": "RCON password not configured"}'
+        return 1
+    fi
+    
+    # Build RCON command arguments
+    local rcon_args=(
+        --host "127.0.0.1"
+        --port "$port"
+        --password "$pass"
+        --action "$action"
+    )
+    
+    # Add extra arguments
+    for arg in "${extra_args[@]}"; do
+        rcon_args+=("$arg")
+    done
+    
+    # Execute via Docker
+    local python_src="${PLAYERS_LIB_DIR}/be_rcon.py"
+    if [[ ! -f "$python_src" ]]; then
+        echo '{"success": false, "error": "RCON client not found"}'
+        return 1
+    fi
+    
+    # Copy script to container and execute
+    docker cp "$python_src" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
+    docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+}
+
+# =============================================================================
+# Players Menu
+# =============================================================================
+
+# Main players menu showing online player list
+# Usage: players_menu "$inst_dir"
+players_menu() {
+    local inst_dir="$1"
+    
+    # Initialize state directory
+    PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
+    mkdir -p "$PLAYERS_STATE_DIR" 2>/dev/null
+    
+    while true; do
+        local max_players
+        max_players=$(get_max_players "$inst_dir")
+        
+        # Fetch player data
+        local player_json
+        player_json=$(fetch_online_players "$inst_dir")
+        
+        local player_count
+        player_count=$(echo "$player_json" | jq -r '.count // 0')
+        
+        local error
+        error=$(echo "$player_json" | jq -r '.error // empty')
+        
+        # Build menu items
+        local -a items=()
+        
+        if [[ -n "$error" && "$error" != "null" ]]; then
+            # Error state
+            items+=("⚠️|Error: $error")
+        elif [[ "$player_count" -eq 0 ]]; then
+            # No players
+            items+=("ℹ️|No players online")
+        else
+            # Add each player as menu item
+            local players_array
+            players_array=$(echo "$player_json" | jq -c '.players[]')
+            
+            while IFS= read -r player; do
+                local name ping pid
+                name=$(echo "$player" | jq -r '.name')
+                ping=$(echo "$player" | jq -r '.ping')
+                pid=$(echo "$player" | jq -r '.id')
+                
+                # Format: "👤|Name|Ping|#ID"
+                items+=("👤|${name}|${ping}ms|#${pid}")
+            done <<< "$players_array"
+        fi
+        
+        items+=("--------------------")
+        items+=("🔄|Refresh")
+        items+=("←|Back")
+        
+        # Draw custom header with player count
+        get_term_size
+        printf "%s" "$CLEAR_SCREEN"
+        
+        # Header bar
+        move_to 1 1
+        printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+        printf " 👥 Players - Online: %d / %d%*s" "$player_count" "$max_players" "$((TERM_COLS - 30))" ""
+        printf "%s\n" "$RESET"
+        
+        if ! run_menu items "Players" 3; then
+            return
+        fi
+        
+        local selected="${items[$MENU_RESULT]}"
+        
+        case "$selected" in
+            "🔄|Refresh")
+                continue
+                ;;
+            "←|Back"|"----"*|"⚠️|"*|"ℹ️|"*)
+                [[ "$selected" == "←|Back" ]] && return
+                ;;
+            "👤|"*)
+                # Parse player data from selection
+                local player_name player_ping player_id
+                IFS='|' read -r _ player_name player_ping player_id <<< "$selected"
+                player_id="${player_id#\#}"  # Remove # prefix
+                
+                # Get full player data from JSON
+                local full_player_data
+                full_player_data=$(echo "$player_json" | jq -c ".players[] | select(.id == $player_id)")
+                
+                player_details_menu "$inst_dir" "$full_player_data"
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Player Details Menu
+# =============================================================================
+
+# Show player details and action menu
+# Usage: player_details_menu "$inst_dir" "$player_json"
+player_details_menu() {
+    local inst_dir="$1"
+    local player_json="$2"
+    
+    local player_name player_id player_ping player_guid
+    player_name=$(echo "$player_json" | jq -r '.name')
+    player_id=$(echo "$player_json" | jq -r '.id')
+    player_ping=$(echo "$player_json" | jq -r '.ping')
+    player_guid=$(echo "$player_json" | jq -r '.guid')
+    
+    while true; do
+        local -a items=(
+            "💬|Send Message"
+            "👢|Kick"
+            "⛔|Ban"
+            "--------------------"
+            "←|Back"
+        )
+        
+        # Custom header with player info
+        get_term_size
+        printf "%s" "$CLEAR_SCREEN"
+        
+        move_to 1 1
+        printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+        printf " 👤 %s%*s" "$player_name" "$((TERM_COLS - ${#player_name} - 5))" ""
+        printf "%s\n" "$RESET"
+        
+        move_to 2 1
+        printf "%s Player #%s  │  Ping: %sms  │  GUID: %s...%s\n" \
+            "$DIM" "$player_id" "$player_ping" "${player_guid:0:12}" "$RESET"
+        
+        if ! run_menu items "Player Actions" 4; then
+            return
+        fi
+        
+        local selected="${items[$MENU_RESULT]}"
+        
+        case "$selected" in
+            "💬|Send Message")
+                send_message_dialog "$inst_dir" "$player_name"
+                ;;
+            "👢|Kick")
+                kick_player_dialog "$inst_dir" "$player_id" "$player_name"
+                return  # Return to player list after kick
+                ;;
+            "⛔|Ban")
+                ban_player_dialog "$inst_dir" "$player_id" "$player_name" "$player_guid"
+                return  # Return to player list after ban
+                ;;
+            "←|Back"|"----"*)
+                [[ "$selected" == "←|Back" ]] && return
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Action Dialogs
+# =============================================================================
+
+# Send message dialog
+# Usage: send_message_dialog "$inst_dir" "$player_name"
+send_message_dialog() {
+    local inst_dir="$1"
+    local player_name="$2"
+    
+    local message
+    message=$(read_input "Message to $player_name:" "" "Send Message")
+    
+    if [[ -z "$message" ]]; then
+        return  # Cancelled
+    fi
+    
+    # Format: [Admin → PlayerName]: message
+    local formatted="[Admin → ${player_name}]: ${message}"
+    
+    # Send via RCON
+    local result
+    result=$(run_rcon_action "$inst_dir" "say" --message "$formatted")
+    
+    local success
+    success=$(echo "$result" | jq -r '.success // false')
+    
+    if [[ "$success" == "true" ]]; then
+        show_message "Message sent to server chat" "✓ Success"
+    else
+        local error
+        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        show_message "Failed: $error" "✗ Error"
+    fi
+}
+
+# Kick player dialog with reason
+# Usage: kick_player_dialog "$inst_dir" "$player_id" "$player_name"
+kick_player_dialog() {
+    local inst_dir="$1"
+    local player_id="$2"
+    local player_name="$3"
+    
+    # Get reason (optional)
+    local reason
+    reason=$(read_input "Reason for kick (optional):" "" "Kick $player_name")
+    
+    # Confirm
+    if ! confirm "Kick '$player_name' from server?\n\nThey can rejoin at any time." "n"; then
+        return
+    fi
+    
+    # Execute kick
+    local result
+    if [[ -n "$reason" ]]; then
+        result=$(run_rcon_action "$inst_dir" "kick" --player-id "$player_id" --reason "$reason")
+    else
+        result=$(run_rcon_action "$inst_dir" "kick" --player-id "$player_id")
+    fi
+    
+    local success
+    success=$(echo "$result" | jq -r '.success // false')
+    
+    if [[ "$success" == "true" ]]; then
+        show_message "Kicked '$player_name'" "✓ Success"
+    else
+        local error
+        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        show_message "Failed: $error" "✗ Error"
+    fi
+}
+
+# Ban player dialog with duration and reason
+# Usage: ban_player_dialog "$inst_dir" "$player_id" "$player_name" "$player_guid"
+ban_player_dialog() {
+    local inst_dir="$1"
+    local player_id="$2"
+    local player_name="$3"
+    local player_guid="$4"
+    
+    # Step 1: Get duration
+    local duration
+    duration=$(read_input "Ban duration (30m, 2h, 7d, perm):" "perm" "Ban $player_name")
+    
+    if [[ -z "$duration" ]]; then
+        return  # Cancelled
+    fi
+    
+    # Step 2: Get reason
+    local reason
+    reason=$(read_input "Reason for ban:" "" "Ban Reason")
+    
+    if [[ -z "$reason" ]]; then
+        reason="Banned by admin"
+    fi
+    
+    # Parse duration to human-readable
+    local human_duration="permanent"
+    local duration_minutes=-1
+    
+    if [[ "$duration" != "perm" && "$duration" != "permanent" ]]; then
+        # Parse duration like "30m", "2h", "7d"
+        local num="${duration%[mhdMHD]}"
+        local unit="${duration: -1}"
+        
+        case "${unit,,}" in
+            m) 
+                duration_minutes=$num
+                human_duration="$num minutes"
+                ;;
+            h) 
+                duration_minutes=$((num * 60))
+                human_duration="$num hours"
+                ;;
+            d) 
+                duration_minutes=$((num * 60 * 24))
+                human_duration="$num days"
+                ;;
+            *)
+                human_duration="$duration"
+                ;;
+        esac
+    fi
+    
+    # Step 3: Confirm
+    if ! confirm "Ban '$player_name' for $human_duration?\n\nReason: $reason" "y"; then
+        return
+    fi
+    
+    # Execute ban via RCON (permanent) and kick
+    local result
+    result=$(run_rcon_action "$inst_dir" "ban" --player-id "$player_id" --reason "$reason")
+    
+    local success
+    success=$(echo "$result" | jq -r '.success // false')
+    
+    if [[ "$success" == "true" ]]; then
+        # Save ban record to our tracking file
+        save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"
+        show_message "Banned '$player_name' for $human_duration" "✓ Success"
+    else
+        local error
+        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        show_message "Failed: $error" "✗ Error"
+    fi
+}
+
+# =============================================================================
+# Ban Tracking
+# =============================================================================
+
+# Save ban record to JSON file for tracking
+# Usage: save_ban_record "$inst_dir" "$guid" "$name" "$duration_minutes" "$reason"
+save_ban_record() {
+    local inst_dir="$1"
+    local guid="$2"
+    local name="$3"
+    local duration_minutes="$4"
+    local reason="$5"
+    
+    local bans_file="${PLAYERS_STATE_DIR}/bans.json"
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    # Calculate expiry
+    local expires="never"
+    if [[ "$duration_minutes" -gt 0 ]]; then
+        expires=$(date -u -d "+${duration_minutes} minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
+    fi
+    
+    # Create or update bans file
+    if [[ ! -f "$bans_file" ]]; then
+        echo '{"bans": []}' > "$bans_file"
+    fi
+    
+    local new_ban
+    new_ban=$(jq -n \
+        --arg guid "$guid" \
+        --arg name "$name" \
+        --arg reason "$reason" \
+        --arg banned_at "$now" \
+        --arg expires "$expires" \
+        --arg duration_minutes "$duration_minutes" \
+        '{guid: $guid, name: $name, reason: $reason, banned_at: $banned_at, expires: $expires, duration_minutes: ($duration_minutes | tonumber)}')
+    
+    # Append to bans array
+    jq --argjson ban "$new_ban" '.bans += [$ban]' "$bans_file" > "${bans_file}.tmp" && \
+        mv "${bans_file}.tmp" "$bans_file"
+}
+
+# =============================================================================
+# Ban List Menu
+# =============================================================================
+
+# Show ban list and allow unbanning
+# Usage: ban_list_menu "$inst_dir"
+ban_list_menu() {
+    local inst_dir="$1"
+    
+    PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
+    local bans_file="${PLAYERS_STATE_DIR}/bans.json"
+    
+    while true; do
+        local -a items=()
+        local ban_count=0
+        
+        if [[ -f "$bans_file" ]]; then
+            ban_count=$(jq '.bans | length' "$bans_file")
+            
+            if [[ "$ban_count" -gt 0 ]]; then
+                while IFS= read -r ban; do
+                    local name reason
+                    name=$(echo "$ban" | jq -r '.name')
+                    reason=$(echo "$ban" | jq -r '.reason // "No reason"')
+                    
+                    # Truncate reason for display
+                    [[ ${#reason} -gt 20 ]] && reason="${reason:0:17}..."
+                    
+                    items+=("🚫|${name}|${reason}")
+                done < <(jq -c '.bans[]' "$bans_file")
+            fi
+        fi
+        
+        if [[ "$ban_count" -eq 0 ]]; then
+            items+=("ℹ️|No bans recorded")
+        fi
+        
+        items+=("--------------------")
+        items+=("🔄|Refresh")
+        items+=("←|Back")
+        
+        # Header
+        get_term_size
+        printf "%s" "$CLEAR_SCREEN"
+        move_to 1 1
+        printf "%s%s" "$BG_RED" "$WHITE$BOLD"
+        printf " 🚫 Ban List - %d bans%*s" "$ban_count" "$((TERM_COLS - 25))" ""
+        printf "%s\n" "$RESET"
+        
+        if ! run_menu items "Ban List" 3; then
+            return
+        fi
+        
+        local selected="${items[$MENU_RESULT]}"
+        
+        case "$selected" in
+            "🔄|Refresh")
+                continue
+                ;;
+            "←|Back"|"----"*|"ℹ️|"*)
+                [[ "$selected" == "←|Back" ]] && return
+                ;;
+            "🚫|"*)
+                # Parse ban info and show details
+                local ban_name
+                IFS='|' read -r _ ban_name _ <<< "$selected"
+                
+                # Find full ban record
+                local ban_record
+                ban_record=$(jq -c ".bans[] | select(.name == \"$ban_name\")" "$bans_file")
+                
+                if [[ -n "$ban_record" ]]; then
+                    ban_details_menu "$inst_dir" "$ban_record"
+                fi
+                ;;
+        esac
+    done
+}
+
+# Show ban details with unban option
+# Usage: ban_details_menu "$inst_dir" "$ban_json"
+ban_details_menu() {
+    local inst_dir="$1"
+    local ban_json="$2"
+    
+    local name guid reason banned_at expires
+    name=$(echo "$ban_json" | jq -r '.name')
+    guid=$(echo "$ban_json" | jq -r '.guid')
+    reason=$(echo "$ban_json" | jq -r '.reason // "No reason"')
+    banned_at=$(echo "$ban_json" | jq -r '.banned_at // "Unknown"')
+    expires=$(echo "$ban_json" | jq -r '.expires // "never"')
+    
+    while true; do
+        local -a items=(
+            "🔓|Unban Player"
+            "--------------------"
+            "←|Back"
+        )
+        
+        # Custom display with ban details
+        get_term_size
+        printf "%s" "$CLEAR_SCREEN"
+        
+        move_to 1 1
+        printf "%s%s 🚫 Ban Details %s\n" "$BG_RED" "$WHITE$BOLD" "$RESET"
+        
+        move_to 3 3
+        printf "%sPlayer:%s %s\n" "$DIM" "$RESET" "$name"
+        move_to 4 3
+        printf "%sGUID:%s %s\n" "$DIM" "$RESET" "$guid"
+        move_to 5 3
+        printf "%sBanned:%s %s\n" "$DIM" "$RESET" "$banned_at"
+        move_to 6 3
+        printf "%sExpires:%s %s\n" "$DIM" "$RESET" "$expires"
+        move_to 7 3
+        printf "%sReason:%s %s\n" "$DIM" "$RESET" "$reason"
+        
+        if ! run_menu items "Actions" 9; then
+            return
+        fi
+        
+        local selected="${items[$MENU_RESULT]}"
+        
+        case "$selected" in
+            "🔓|Unban Player")
+                if confirm "Unban '$name'?\n\nThey will be able to rejoin immediately." "n"; then
+                    unban_player "$inst_dir" "$guid" "$name"
+                    return
+                fi
+                ;;
+            "←|Back"|"----"*)
+                [[ "$selected" == "←|Back" ]] && return
+                ;;
+        esac
+    done
+}
+
+# Unban a player
+# Usage: unban_player "$inst_dir" "$guid" "$name"
+unban_player() {
+    local inst_dir="$1"
+    local guid="$2"
+    local name="$3"
+    
+    # Remove from our tracking
+    local bans_file="${PLAYERS_STATE_DIR}/bans.json"
+    if [[ -f "$bans_file" ]]; then
+        jq "del(.bans[] | select(.guid == \"$guid\"))" "$bans_file" > "${bans_file}.tmp" && \
+            mv "${bans_file}.tmp" "$bans_file"
+    fi
+    
+    # Remove from BattlEye bans.txt
+    local be_bans="${inst_dir}/data/profile/BattlEye/bans.txt"
+    if [[ -f "$be_bans" ]]; then
+        grep -v "^${guid}" "$be_bans" > "${be_bans}.tmp" 2>/dev/null && \
+            mv "${be_bans}.tmp" "$be_bans"
+    fi
+    
+    # Reload bans via RCON
+    run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
+    
+    show_message "Unbanned '$name'" "✓ Success"
+}

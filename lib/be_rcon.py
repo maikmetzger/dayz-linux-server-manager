@@ -141,7 +141,81 @@ class BattlEyeRcon:
         except socket.timeout:
             return None
 
+    def parse_players_response(self, response):
+        """
+        Parse the 'players' command response into structured data.
+        Format: Players on server:
+        [#] [IP:Port] [Ping] [GUID] [Name]
+        0   IP:Port   45    abc123... PlayerName
+        """
+        import re
+        import json
+        
+        players = []
+        if not response:
+            return json.dumps({"count": 0, "players": [], "error": None})
+        
+        lines = response.strip().split('\n')
+        # Skip header line if present
+        for line in lines:
+            # Match pattern: ID  IP:Port  Ping  GUID  Name
+            # Example: 0   127.0.0.1:2304  45    abc123def456789abc123def45(OK) PlayerName
+            match = re.match(r'^\s*(\d+)\s+(\S+)\s+(\d+)\s+([a-f0-9]+)\((\w+)\)\s+(.+)$', line, re.IGNORECASE)
+            if match:
+                player_id = match.group(1)
+                ip_port = match.group(2)
+                ping = match.group(3)
+                guid = match.group(4)
+                status = match.group(5)
+                name = match.group(6).strip()
+                
+                players.append({
+                    "id": int(player_id),
+                    "name": name,
+                    "ping": int(ping),
+                    "guid": guid,
+                    "ip": ip_port.split(':')[0] if ':' in ip_port else ip_port,
+                    "status": status
+                })
+        
+        return json.dumps({"count": len(players), "players": players, "error": None})
+
+    def action_players(self):
+        """Get list of online players as JSON."""
+        resp = self.send_command("players")
+        return self.parse_players_response(resp)
+    
+    def action_kick(self, player_id, reason=""):
+        """Kick a player by ID."""
+        import json
+        cmd = f"kick {player_id}"
+        if reason:
+            cmd += f" {reason}"
+        resp = self.send_command(cmd)
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_ban(self, player_id, reason=""):
+        """Ban a player by ID (permanent via RCON)."""
+        import json
+        cmd = f"#exec ban {player_id}"
+        resp = self.send_command(cmd)
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_say(self, message, player_id=-1):
+        """Send a message to all players (-1) or specific player."""
+        import json
+        cmd = f"say {player_id} {message}"
+        resp = self.send_command(cmd)
+        return json.dumps({"success": True, "response": resp, "error": None})
+    
+    def action_loadbans(self):
+        """Reload bans.txt file."""
+        import json
+        resp = self.send_command("#exec loadBans")
+        return json.dumps({"success": True, "response": resp, "error": None})
+
     def interactive(self):
+        """Interactive RCON console mode."""
         print(f"Connected to {self.host}:{self.port} (Type 'exit' to quit)")
         while True:
             try:
@@ -161,21 +235,54 @@ class BattlEyeRcon:
                 break
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Simple BattlEye RCON Client')
+    parser = argparse.ArgumentParser(description='BattlEye RCON Client for DayZ')
     parser.add_argument('--host', required=True, help='Server IP')
     parser.add_argument('--port', required=True, type=int, help='RCON Port')
     parser.add_argument('--password', required=True, help='RCON Password')
-    parser.add_argument('--command', help='Single command to execute')
+    parser.add_argument('--command', help='Single raw command to execute')
+    
+    # Action-based interface for TUI integration
+    parser.add_argument('--action', choices=['players', 'kick', 'ban', 'say', 'loadbans'],
+                        help='Predefined action with JSON output')
+    parser.add_argument('--player-id', type=str, help='Player ID for kick/ban actions')
+    parser.add_argument('--message', type=str, help='Message for say action')
+    parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
     
     args = parser.parse_args()
     
     client = BattlEyeRcon(args.host, args.port, args.password)
     if client.connect():
-        if args.command:
+        if args.action:
+            # Action-based mode with JSON output
+            if args.action == 'players':
+                print(client.action_players())
+            elif args.action == 'kick':
+                if not args.player_id:
+                    print('{"success": false, "error": "Missing --player-id"}')
+                    sys.exit(1)
+                print(client.action_kick(args.player_id, args.reason))
+            elif args.action == 'ban':
+                if not args.player_id:
+                    print('{"success": false, "error": "Missing --player-id"}')
+                    sys.exit(1)
+                print(client.action_ban(args.player_id, args.reason))
+            elif args.action == 'say':
+                if not args.message:
+                    print('{"success": false, "error": "Missing --message"}')
+                    sys.exit(1)
+                print(client.action_say(args.message))
+            elif args.action == 'loadbans':
+                print(client.action_loadbans())
+        elif args.command:
+            # Raw command mode
             resp = client.send_command(args.command)
             if resp:
                 print(resp.strip())
         else:
+            # Interactive mode
             client.interactive()
     else:
+        import json
+        print(json.dumps({"success": False, "error": "Connection failed"}))
         sys.exit(1)
+

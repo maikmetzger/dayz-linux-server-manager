@@ -18,6 +18,7 @@ source "${ADMIN_CONFIG_LIB_DIR}/colors.sh"
 source "${ADMIN_CONFIG_LIB_DIR}/dialogs.sh"
 source "${ADMIN_CONFIG_LIB_DIR}/tui.sh"
 source "${ADMIN_CONFIG_LIB_DIR}/mods.sh"
+source "${ADMIN_CONFIG_LIB_DIR}/players.sh"
 
 # =============================================================================
 # Admin Tool Registry
@@ -489,6 +490,8 @@ admin_tools_menu() {
     
     while true; do
         local -a items=(
+            "👥|Players"
+            "🚫|Ban List"
             "🔑|Passwords"
             "--------------------"
             "←|Back"
@@ -501,6 +504,12 @@ admin_tools_menu() {
         local selected_item="${items[$MENU_RESULT]}"
         
         case "$selected_item" in
+            "👥|Players")
+                players_menu "$inst_dir"
+                ;;
+            "🚫|Ban List")
+                ban_list_menu "$inst_dir"
+                ;;
             "🔑|Passwords")
                 passwords_menu "$inst_dir"
                 ;;
