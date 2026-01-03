@@ -33,6 +33,13 @@ Edit server settings without touching raw files.
 - **RCON Settings**: Manage your BattlEye settings securely.
 - **Globals**: Tweak `globals.xml` values easily.
 
+### Admin Tools
+Manage admin permissions across all your mods from one place.
+- **Centralized Passwords**: Set DayZ Admin password (`passwordAdmin`), RCON, and VPP credentials.
+- **Steam64 ID Management**: Add/remove admin Steam64 IDs for VPPAdminTools, COT, ZomBerry, and DayZ Expansion.
+- **Auto-Detection**: Only shows admin mods that are actually installed.
+- **Steam Name Lookup**: Displays player names next to Steam64 IDs.
+
 ### Central Economy Tools
 Take control of your loot without manually editing giant XML files.
 - **Loot Editor**: Search for items in a table view and edit spawn rates (nominal, lifetime, etc.) instantly.
