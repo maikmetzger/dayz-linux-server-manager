@@ -18,6 +18,95 @@ source "${PLAYERS_LIB_DIR}/dialogs.sh"
 source "${PLAYERS_LIB_DIR}/utils.sh"
 
 # =============================================================================
+# JSON Parsing Helpers (uses python3, no jq dependency)
+# =============================================================================
+
+# Parse JSON field using Python
+# Usage: value=$(json_get "$json" ".field" "default")
+json_get() {
+    local json="$1"
+    local path="$2"
+    local default="${3:-}"
+    
+    python3 -c "
+import json, sys
+try:
+    data = json.loads('''$json''')
+    keys = '$path'.lstrip('.').split('.')
+    result = data
+    for key in keys:
+        if key:
+            result = result.get(key, None) if isinstance(result, dict) else None
+            if result is None:
+                break
+    if result is None:
+        print('$default')
+    else:
+        print(result if not isinstance(result, (dict, list)) else json.dumps(result))
+except:
+    print('$default')
+" 2>/dev/null
+}
+
+# Parse JSON array to lines using Python
+# Usage: while IFS= read -r item; do ... done < <(json_array "$json" ".players")
+json_array() {
+    local json="$1"
+    local path="$2"
+    
+    python3 -c "
+import json, sys
+try:
+    data = json.loads('''$json''')
+    keys = '$path'.lstrip('.').split('.')
+    result = data
+    for key in keys:
+        if key:
+            result = result.get(key, []) if isinstance(result, dict) else []
+    if isinstance(result, list):
+        for item in result:
+            print(json.dumps(item))
+except:
+    pass
+" 2>/dev/null
+}
+
+# Count JSON array length
+# Usage: count=$(json_count "$json" ".players")
+json_count() {
+    local json="$1"
+    local path="$2"
+    
+    python3 -c "
+import json
+try:
+    data = json.loads('''$json''')
+    keys = '$path'.lstrip('.').split('.')
+    result = data
+    for key in keys:
+        if key:
+            result = result.get(key, []) if isinstance(result, dict) else []
+    print(len(result) if isinstance(result, list) else 0)
+except:
+    print(0)
+" 2>/dev/null
+}
+
+# Create JSON object using Python
+# Usage: json=$(json_create key1 val1 key2 val2 ...)
+json_create() {
+    local args=("$@")
+    local pairs=""
+    for ((i=0; i<${#args[@]}; i+=2)); do
+        local key="${args[$i]}"
+        local val="${args[$((i+1))]}"
+        [[ -n "$pairs" ]] && pairs+=", "
+        pairs+="\"$key\": \"$val\""
+    done
+    echo "{$pairs}"
+}
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -140,10 +229,10 @@ players_menu() {
         player_json=$(fetch_online_players "$inst_dir")
         
         local player_count
-        player_count=$(echo "$player_json" | jq -r '.count // 0')
+        player_count=$(json_get "$player_json" "count" "0")
         
         local error
-        error=$(echo "$player_json" | jq -r '.error // empty')
+        error=$(json_get "$player_json" "error" "")
         
         # Build menu items
         local -a items=()
@@ -156,18 +245,16 @@ players_menu() {
             items+=("ℹ️|No players online")
         else
             # Add each player as menu item
-            local players_array
-            players_array=$(echo "$player_json" | jq -c '.players[]')
-            
             while IFS= read -r player; do
+                [[ -z "$player" ]] && continue
                 local name ping pid
-                name=$(echo "$player" | jq -r '.name')
-                ping=$(echo "$player" | jq -r '.ping')
-                pid=$(echo "$player" | jq -r '.id')
+                name=$(json_get "$player" "name" "Unknown")
+                ping=$(json_get "$player" "ping" "0")
+                pid=$(json_get "$player" "id" "0")
                 
                 # Format: "👤|Name|Ping|#ID"
                 items+=("👤|${name}|${ping}ms|#${pid}")
-            done <<< "$players_array"
+            done < <(json_array "$player_json" "players")
         fi
         
         items+=("--------------------")
@@ -203,9 +290,19 @@ players_menu() {
                 IFS='|' read -r _ player_name player_ping player_id <<< "$selected"
                 player_id="${player_id#\#}"  # Remove # prefix
                 
-                # Get full player data from JSON
+                # Get full player data - construct it from known values
                 local full_player_data
-                full_player_data=$(echo "$player_json" | jq -c ".players[] | select(.id == $player_id)")
+                full_player_data="{\"id\": ${player_id}, \"name\": \"${player_name}\", \"ping\": ${player_ping%ms}}"
+                
+                # Try to get GUID from the original JSON
+                while IFS= read -r p; do
+                    local pid
+                    pid=$(json_get "$p" "id" "-1")
+                    if [[ "$pid" == "$player_id" ]]; then
+                        full_player_data="$p"
+                        break
+                    fi
+                done < <(json_array "$player_json" "players")
                 
                 player_details_menu "$inst_dir" "$full_player_data"
                 ;;
@@ -224,10 +321,10 @@ player_details_menu() {
     local player_json="$2"
     
     local player_name player_id player_ping player_guid
-    player_name=$(echo "$player_json" | jq -r '.name')
-    player_id=$(echo "$player_json" | jq -r '.id')
-    player_ping=$(echo "$player_json" | jq -r '.ping')
-    player_guid=$(echo "$player_json" | jq -r '.guid')
+    player_name=$(json_get "$player_json" "name" "Unknown")
+    player_id=$(json_get "$player_json" "id" "0")
+    player_ping=$(json_get "$player_json" "ping" "0")
+    player_guid=$(json_get "$player_json" "guid" "")
     
     while true; do
         local -a items=(
@@ -301,13 +398,13 @@ send_message_dialog() {
     result=$(run_rcon_action "$inst_dir" "say" --message "$formatted")
     
     local success
-    success=$(echo "$result" | jq -r '.success // false')
+    success=$(json_get "$result" "success" "false")
     
     if [[ "$success" == "true" ]]; then
         show_message "Message sent to server chat" "✓ Success"
     else
         local error
-        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        error=$(json_get "$result" "error" "Unknown error")
         show_message "Failed: $error" "✗ Error"
     fi
 }
@@ -337,13 +434,13 @@ kick_player_dialog() {
     fi
     
     local success
-    success=$(echo "$result" | jq -r '.success // false')
+    success=$(json_get "$result" "success" "false")
     
     if [[ "$success" == "true" ]]; then
         show_message "Kicked '$player_name'" "✓ Success"
     else
         local error
-        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        error=$(json_get "$result" "error" "Unknown error")
         show_message "Failed: $error" "✗ Error"
     fi
 }
@@ -410,7 +507,7 @@ ban_player_dialog() {
     result=$(run_rcon_action "$inst_dir" "ban" --player-id "$player_id" --reason "$reason")
     
     local success
-    success=$(echo "$result" | jq -r '.success // false')
+    success=$(json_get "$result" "success" "false")
     
     if [[ "$success" == "true" ]]; then
         # Save ban record to our tracking file
@@ -418,7 +515,7 @@ ban_player_dialog() {
         show_message "Banned '$player_name' for $human_duration" "✓ Success"
     else
         local error
-        error=$(echo "$result" | jq -r '.error // "Unknown error"')
+        error=$(json_get "$result" "error" "Unknown error")
         show_message "Failed: $error" "✗ Error"
     fi
 }
@@ -451,19 +548,33 @@ save_ban_record() {
         echo '{"bans": []}' > "$bans_file"
     fi
     
+    # Create new ban entry using Python
     local new_ban
-    new_ban=$(jq -n \
-        --arg guid "$guid" \
-        --arg name "$name" \
-        --arg reason "$reason" \
-        --arg banned_at "$now" \
-        --arg expires "$expires" \
-        --arg duration_minutes "$duration_minutes" \
-        '{guid: $guid, name: $name, reason: $reason, banned_at: $banned_at, expires: $expires, duration_minutes: ($duration_minutes | tonumber)}')
+    new_ban=$(python3 -c "
+import json
+ban = {
+    'guid': '$guid',
+    'name': '''$name''',
+    'reason': '''$reason''',
+    'banned_at': '$now',
+    'expires': '$expires',
+    'duration_minutes': $duration_minutes
+}
+print(json.dumps(ban))
+" 2>/dev/null)
     
-    # Append to bans array
-    jq --argjson ban "$new_ban" '.bans += [$ban]' "$bans_file" > "${bans_file}.tmp" && \
-        mv "${bans_file}.tmp" "$bans_file"
+    # Read existing bans and append using Python
+    python3 -c "
+import json
+try:
+    with open('$bans_file', 'r') as f:
+        data = json.load(f)
+except:
+    data = {'bans': []}
+data['bans'].append($new_ban)
+with open('$bans_file', 'w') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null
 }
 
 # =============================================================================
@@ -483,19 +594,23 @@ ban_list_menu() {
         local ban_count=0
         
         if [[ -f "$bans_file" ]]; then
-            ban_count=$(jq '.bans | length' "$bans_file")
+            # Read bans using Python
+            local bans_data
+            bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
+            ban_count=$(json_count "$bans_data" "bans")
             
             if [[ "$ban_count" -gt 0 ]]; then
                 while IFS= read -r ban; do
+                    [[ -z "$ban" ]] && continue
                     local name reason
-                    name=$(echo "$ban" | jq -r '.name')
-                    reason=$(echo "$ban" | jq -r '.reason // "No reason"')
+                    name=$(json_get "$ban" "name" "Unknown")
+                    reason=$(json_get "$ban" "reason" "No reason")
                     
                     # Truncate reason for display
                     [[ ${#reason} -gt 20 ]] && reason="${reason:0:17}..."
                     
                     items+=("🚫|${name}|${reason}")
-                done < <(jq -c '.bans[]' "$bans_file")
+                done < <(json_array "$bans_data" "bans")
             fi
         fi
         
@@ -533,9 +648,18 @@ ban_list_menu() {
                 local ban_name
                 IFS='|' read -r _ ban_name _ <<< "$selected"
                 
-                # Find full ban record
-                local ban_record
-                ban_record=$(jq -c ".bans[] | select(.name == \"$ban_name\")" "$bans_file")
+                # Find full ban record using Python
+                local ban_record bans_data
+                bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
+                while IFS= read -r b; do
+                    [[ -z "$b" ]] && continue
+                    local n
+                    n=$(json_get "$b" "name" "")
+                    if [[ "$n" == "$ban_name" ]]; then
+                        ban_record="$b"
+                        break
+                    fi
+                done < <(json_array "$bans_data" "bans")
                 
                 if [[ -n "$ban_record" ]]; then
                     ban_details_menu "$inst_dir" "$ban_record"
@@ -552,11 +676,11 @@ ban_details_menu() {
     local ban_json="$2"
     
     local name guid reason banned_at expires
-    name=$(echo "$ban_json" | jq -r '.name')
-    guid=$(echo "$ban_json" | jq -r '.guid')
-    reason=$(echo "$ban_json" | jq -r '.reason // "No reason"')
-    banned_at=$(echo "$ban_json" | jq -r '.banned_at // "Unknown"')
-    expires=$(echo "$ban_json" | jq -r '.expires // "never"')
+    name=$(json_get "$ban_json" "name" "Unknown")
+    guid=$(json_get "$ban_json" "guid" "")
+    reason=$(json_get "$ban_json" "reason" "No reason")
+    banned_at=$(json_get "$ban_json" "banned_at" "Unknown")
+    expires=$(json_get "$ban_json" "expires" "never")
     
     while true; do
         local -a items=(
@@ -610,11 +734,20 @@ unban_player() {
     local guid="$2"
     local name="$3"
     
-    # Remove from our tracking
+    # Remove from our tracking using Python
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     if [[ -f "$bans_file" ]]; then
-        jq "del(.bans[] | select(.guid == \"$guid\"))" "$bans_file" > "${bans_file}.tmp" && \
-            mv "${bans_file}.tmp" "$bans_file"
+        python3 -c "
+import json
+try:
+    with open('$bans_file', 'r') as f:
+        data = json.load(f)
+    data['bans'] = [b for b in data.get('bans', []) if b.get('guid') != '$guid']
+    with open('$bans_file', 'w') as f:
+        json.dump(data, f, indent=2)
+except:
+    pass
+" 2>/dev/null
     fi
     
     # Remove from BattlEye bans.txt
