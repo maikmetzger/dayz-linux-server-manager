@@ -136,23 +136,12 @@ get_max_players() {
     fi
 }
 
-# Check if a player GUID matches any DayZ admin in serverDZ.cfg
-# Usage: if is_dayz_admin "$inst_dir" "$player_guid"; then ...
-is_dayz_admin() {
-    local inst_dir="$1"
-    local guid="$2"
-    local config_file="${inst_dir}/data/config/serverDZ.cfg"
-    
-    [[ -z "$guid" ]] && return 1
-    [[ ! -f "$config_file" ]] && return 1
-    
-    # Check if GUID appears in the admins[] array
-    # Format: admins[] = {"76561198012345678", "76561198087654321"};
-    if grep -qE "admins\[\].*$guid" "$config_file" 2>/dev/null; then
-        return 0  # Is admin
-    fi
-    return 1  # Not admin
-}
+# NOTE: Admin detection is NOT possible via RCON because:
+# - RCON returns BattlEye GUID (32-char hex, MD5 hash)
+# - serverDZ.cfg uses Steam64 ID (17-digit number)
+# These are different formats that can't be directly compared.
+# Additionally, you cannot kick/ban yourself via RCON.
+
 
 # Fetch online players via RCON as JSON
 # Usage: json=$(fetch_online_players "$inst_dir")
@@ -444,18 +433,14 @@ kick_player_dialog() {
     local player_name="$3"
     local player_guid="${4:-}"
     
-    # Check if player is a DayZ admin
-    if [[ -n "$player_guid" ]] && is_dayz_admin "$inst_dir" "$player_guid"; then
-        show_message "Cannot kick admin players via RCON" "⚠️ Admin Detected"
-        return
-    fi
-    
     # Get reason (optional)
     local reason
     reason=$(read_input "Reason for kick (optional):" "" "Kick $player_name")
     
     # Confirm
-    if ! confirm $'Kick \'$player_name\' from server?\n\nThey can rejoin at any time.' "n"; then
+    if ! confirm "Kick '${player_name}' from server?
+
+They can rejoin at any time." "n"; then
         return
     fi
     
@@ -486,12 +471,6 @@ ban_player_dialog() {
     local player_id="$2"
     local player_name="$3"
     local player_guid="$4"
-    
-    # Check if player is a DayZ admin
-    if [[ -n "$player_guid" ]] && is_dayz_admin "$inst_dir" "$player_guid"; then
-        show_message "Cannot ban admin players via RCON" "⚠️ Admin Detected"
-        return
-    fi
     
     # Step 1: Get duration
     local duration
@@ -538,7 +517,9 @@ ban_player_dialog() {
     fi
     
     # Step 3: Confirm
-    if ! confirm $'Ban \'$player_name\' for '$human_duration'?\n\nReason: '$reason'' "y"; then
+    if ! confirm "Ban '${player_name}' for ${human_duration}?
+
+Reason: ${reason}" "y"; then
         return
     fi
     
@@ -755,7 +736,9 @@ ban_details_menu() {
         
         case "$selected" in
             "🔓|Unban Player")
-                if confirm $'Unban \'$name\'?\n\nThey will be able to rejoin immediately.' "n"; then
+                if confirm "Unban '${name}'?
+
+They will be able to rejoin immediately." "n"; then
                     unban_player "$inst_dir" "$guid" "$name"
                     return
                 fi
