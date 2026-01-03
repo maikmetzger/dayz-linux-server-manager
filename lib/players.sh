@@ -41,8 +41,12 @@ try:
                 break
     if result is None:
         print('$default')
+    elif isinstance(result, bool):
+        print('true' if result else 'false')
+    elif isinstance(result, (dict, list)):
+        print(json.dumps(result))
     else:
-        print(result if not isinstance(result, (dict, list)) else json.dumps(result))
+        print(result)
 except:
     print('$default')
 " 2>/dev/null
