@@ -18,6 +18,7 @@ declare -A CONFIG_REGISTRY=(
     ["BEServer"]="cfg|data/config/BEServer_x64.cfg|🔐|RCON Settings"
     ["types"]="xml||📦|Loot Economy"
     ["modConfigs"]="mod||📁|Mod Configs"
+    ["adminTools"]="admin||🔐|Admin Tools"
 )
 
 # Helper to find types.xml within mpmissions
@@ -573,6 +574,11 @@ config_editor_menu() {
                 # Mod configs browser - uses profile directory
                 local profile_dir="${inst_dir}/data/profile"
                 mod_config_browser "$profile_dir"
+                ;;
+            "admin")
+                # Admin tools menu - manage Steam64 IDs and passwords
+                source "${SCRIPT_DIR}/lib/admin_config.sh"
+                admin_tools_menu "$inst_dir"
                 ;;
             *)
                 case "$selected_id" in
