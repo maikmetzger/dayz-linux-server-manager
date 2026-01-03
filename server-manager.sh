@@ -1131,7 +1131,7 @@ main_menu() {
                 local profile_dir="${SELECTED_DIR}/data/profile"
                 mod_config_browser "$profile_dir" || true
                 ;;
-            "�|Admin Tools")
+            "👤|Admin Tools")
                 source "${SCRIPT_DIR}/lib/admin_config.sh"
                 admin_tools_menu "$SELECTED_DIR" || true
                 ;;
