@@ -28,7 +28,7 @@ source "${ADMIN_CONFIG_LIB_DIR}/mods.sh"
 declare -a ADMIN_TOOL_PATTERNS=(
     "1828439124|VPPAdminTools|VPPAdminTools/Permissions/SuperAdmins/SuperAdmins.txt|text_list"
     "1564026768|Community Online Tools|PermissionsFramework/Players|json_dir"
-    "1626210082|ZomBerry|Zomberry/admins.cfg|text_list"
+    "1582756848|ZomBerry|Zomberry/admins.cfg|text_list"
     "2116151222|DayZ Expansion|ExpansionMod/Settings/PermissionsSettings.json|json_array"
 )
 
