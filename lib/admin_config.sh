@@ -605,19 +605,19 @@ admin_add_steam_id() {
     local tool_name="$2"
     
     local steam_id
-    if input_dialog steam_id "Enter Steam64 ID" "Steam64 ID (17 digits):"; then
-        if [[ -z "$steam_id" ]]; then
-            return  # Cancelled/empty
-        fi
-        
-        if ! validate_steam64 "$steam_id"; then
-            show_message "Invalid Steam64 ID format.\nMust be 17 digits starting with 7656119" "Error"
-            return
-        fi
-        
-        add_tool_admin "$profile_dir" "$tool_name" "$steam_id"
-        show_message "Added $steam_id to $tool_name" "Success"
+    steam_id=$(read_input "Steam64 ID (17 digits):" "" "Add Admin")
+    
+    if [[ -z "$steam_id" ]]; then
+        return  # Cancelled/empty
     fi
+    
+    if ! validate_steam64 "$steam_id"; then
+        show_message "Invalid Steam64 ID format.\nMust be 17 digits starting with 7656119" "Error"
+        return
+    fi
+    
+    add_tool_admin "$profile_dir" "$tool_name" "$steam_id"
+    show_message "Added $steam_id to $tool_name" "Success"
 }
 
 # VPP Password dialog
@@ -628,11 +628,11 @@ admin_vpp_password_dialog() {
     current_pw=$(get_vpp_password "$profile_dir")
     
     local new_pw
-    if input_dialog new_pw "VPP Admin Password" "Current: ${current_pw:-<not set>}\n\nEnter new password:"; then
-        if [[ -n "$new_pw" ]]; then
-            set_vpp_password "$profile_dir" "$new_pw"
-            show_message "VPP password updated" "Success"
-        fi
+    new_pw=$(read_input "Enter new password:" "" "VPP Admin Password")
+    
+    if [[ -n "$new_pw" ]]; then
+        set_vpp_password "$profile_dir" "$new_pw"
+        show_message "VPP password updated" "Success"
     fi
 }
 
@@ -650,14 +650,14 @@ admin_password_dialog() {
     fi
     
     local new_pw
-    if input_dialog new_pw "$label Password" "Current: ${current_pw:-<not set>}\n\nEnter new password:"; then
-        if [[ -n "$new_pw" ]]; then
-            if [[ "$type" == "dayz" ]]; then
-                set_dayz_admin_password "$config_dir" "$new_pw"
-            else
-                set_rcon_password "$config_dir" "$new_pw"
-            fi
-            show_message "$label password updated" "Success"
+    new_pw=$(read_input "Enter new password:" "" "$label Password")
+    
+    if [[ -n "$new_pw" ]]; then
+        if [[ "$type" == "dayz" ]]; then
+            set_dayz_admin_password "$config_dir" "$new_pw"
+        else
+            set_rcon_password "$config_dir" "$new_pw"
         fi
+        show_message "$label password updated" "Success"
     fi
 }
