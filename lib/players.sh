@@ -167,15 +167,20 @@ run_rcon_action() {
     fi
     
     # Get RCON port and password from BEServer config
-    local be_config="${inst_dir}/data/profile/BattlEye/BEServer_x64.cfg"
+    # Port is calculated as DayZ port + 3
+    local marker="${inst_dir}/.dayz-instance"
+    local dz_port
+    dz_port=$(grep -oP 'DZ_PORT=\K[0-9]+' "$marker" 2>/dev/null || echo "2300")
+    local port=$((dz_port + 3))
+    
+    local be_config="${inst_dir}/data/config/BEServer_x64.cfg"
     if [[ ! -f "$be_config" ]]; then
         echo '{"success": false, "error": "BattlEye config not found"}'
         return 1
     fi
     
-    local port pass
-    port=$(grep -oP 'RConPort\s+\K[0-9]+' "$be_config" 2>/dev/null || echo "2306")
-    pass=$(grep -oP 'RConPassword\s+\K\S+' "$be_config" 2>/dev/null || echo "")
+    local pass
+    pass=$(grep "^RConPassword" "$be_config" 2>/dev/null | awk '{print $2}' | tr -d '\r' || echo "")
     
     if [[ -z "$pass" ]]; then
         echo '{"success": false, "error": "RCON password not configured"}'
