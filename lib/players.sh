@@ -474,10 +474,7 @@ They can rejoin at any time." "n"; then
     rcon_response=$(json_get "$result" "response" "")
     
     if [[ "$success" == "true" ]]; then
-        # Show RCON response for debugging
-        show_message "Kicked '$player_name'
-
-RCON Response: $rcon_response" "✓ Kick Sent"
+        show_message "Kicked '$player_name'" "✓ Kick Sent"
     else
         local error
         error=$(json_get "$result" "error" "Unknown error")

@@ -19,6 +19,7 @@ class BattlEyeRcon:
         self.password = password
         self.sock = None
         self.connected = False
+        self.sequence = 0  # BattlEye command sequence number
 
     def crc32(self, data):
         # CRC32 of data (as bytes)
@@ -45,6 +46,8 @@ class BattlEyeRcon:
     def connect(self):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Allow rapid reconnection by reusing address
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.settimeout(3.0)
             self.sock.connect((self.host, self.port))
             
@@ -96,8 +99,10 @@ class BattlEyeRcon:
         # Actually, handling semi-reliable UDP here is tricky in a small script.
         # Let's assume we can just send.
         
-        # Sequence number is technically required.
-        packet = self.create_packet(BE_COMMAND, b'\x00' + cmd.encode('utf-8'))
+        # Sequence number is required and must increment for each command
+        seq_byte = bytes([self.sequence & 0xFF])
+        self.sequence = (self.sequence + 1) % 256  # Wrap at 256
+        packet = self.create_packet(BE_COMMAND, seq_byte + cmd.encode('utf-8'))
         self.sock.send(packet)
         
         # Wait for response(s)
@@ -140,6 +145,16 @@ class BattlEyeRcon:
             
         except socket.timeout:
             return None
+    
+    def close(self):
+        """Close the RCON connection."""
+        if self.sock:
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
+            self.connected = False
 
     def parse_players_response(self, response):
         """
