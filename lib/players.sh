@@ -868,7 +868,7 @@ with open('$bans_file', 'w') as f:
 # Ban List Menu
 # =============================================================================
 
-# Show ban list and allow unbanning
+# Show ban list in table view and allow unbanning
 # Usage: ban_list_menu "$inst_dir"
 ban_list_menu() {
     local inst_dir="$1"
@@ -876,81 +876,251 @@ ban_list_menu() {
     PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     
+    local selected=0
+    local needs_refresh=1
+    
+    # Ban data arrays
+    local -a ban_names=()
+    local -a ban_reasons=()
+    local -a ban_durations=()
+    local -a ban_banned_at=()
+    local -a ban_expires=()
+    local -a ban_guids=()
+    local ban_count=0
+    
     while true; do
-        local -a items=()
-        local ban_count=0
-        
-        if [[ -f "$bans_file" ]]; then
-            # Read bans using Python
-            local bans_data
-            bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
-            ban_count=$(json_count "$bans_data" "bans")
+        # Refresh ban data if needed
+        if [[ $needs_refresh -eq 1 ]]; then
+            ban_names=()
+            ban_reasons=()
+            ban_durations=()
+            ban_banned_at=()
+            ban_expires=()
+            ban_guids=()
             
-            if [[ "$ban_count" -gt 0 ]]; then
+            if [[ -f "$bans_file" ]]; then
+                local bans_data
+                bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
+                
                 while IFS= read -r ban; do
                     [[ -z "$ban" ]] && continue
-                    local name reason
-                    name=$(json_get "$ban" "name" "Unknown")
-                    reason=$(json_get "$ban" "reason" "No reason")
-                    
-                    # Truncate reason for display
-                    [[ ${#reason} -gt 20 ]] && reason="${reason:0:17}..."
-                    
-                    items+=("🚫|${name}|${reason}")
+                    ban_names+=("$(json_get "$ban" "name" "Unknown")")
+                    ban_reasons+=("$(json_get "$ban" "reason" "-")")
+                    ban_durations+=("$(json_get "$ban" "duration_minutes" "0")")
+                    ban_banned_at+=("$(json_get "$ban" "banned_at" "-")")
+                    ban_expires+=("$(json_get "$ban" "expires" "never")")
+                    ban_guids+=("$(json_get "$ban" "guid" "-")")
                 done < <(json_array "$bans_data" "bans")
             fi
+            
+            ban_count=${#ban_names[@]}
+            needs_refresh=0
         fi
         
-        if [[ "$ban_count" -eq 0 ]]; then
-            items+=("ℹ️|No bans recorded")
-        fi
+        local total_items=$((ban_count + 2))  # Bans + Refresh + Back
+        [[ $selected -lt 0 ]] && selected=0
+        [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
         
-        items+=("--------------------")
-        items+=("🔄|Refresh")
-        items+=("←|Back")
-        
-        # Header
+        # Get terminal size
         get_term_size
-        printf "%s" "$CLEAR_SCREEN"
-        move_to 1 1
-        printf "%s%s" "$BG_RED" "$WHITE$BOLD"
-        printf " 🚫 Ban List - %d bans%*s" "$ban_count" "$((TERM_COLS - 25))" ""
-        printf "%s\n" "$RESET"
         
-        if ! run_menu items "Ban List" 3; then
-            return
+        # Draw screen
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+        
+        # Header bar
+        move_to 1 1
+        local header_title="Ban List - ${ban_count} bans"
+        printf "%s%s 🚫 %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
+        
+        # Table header - calculate column positions
+        local table_start=3
+        local col_status=2
+        local col_name=6
+        local col_reason=$((col_name + 22))
+        local col_duration=$((col_reason + 22))
+        local col_banned=$((col_duration + 10))
+        local col_expires=$((col_banned + 18))
+        local col_guid=$((col_expires + 18))
+        
+        move_to $table_start 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        
+        move_to $((table_start + 1)) $col_status
+        printf "%s%s  %s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_name
+        printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_reason
+        printf "%s%sREASON%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_duration
+        printf "%s%sDURATION%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_banned
+        printf "%s%sBANNED AT%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_expires
+        printf "%s%sEXPIRES%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_guid
+        printf "%s%sGUID%s" "$DIM" "$WHITE" "$RESET"
+        
+        move_to $((table_start + 2)) 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        
+        # Ban rows
+        local row=$((table_start + 3))
+        
+        if [[ $ban_count -eq 0 ]]; then
+            move_to $row 1
+            printf "%s  ℹ️  No bans recorded (press R to refresh)%s" "$DIM" "$RESET"
+            row=$((row + 1))
+        else
+            for i in "${!ban_names[@]}"; do
+                local bname="${ban_names[$i]}"
+                local breason="${ban_reasons[$i]}"
+                local bduration="${ban_durations[$i]}"
+                local bbanned="${ban_banned_at[$i]}"
+                local bexpires="${ban_expires[$i]}"
+                local bguid="${ban_guids[$i]}"
+                
+                # Format duration
+                local duration_str
+                if [[ "$bduration" == "0" || -z "$bduration" ]]; then
+                    duration_str="Permanent"
+                else
+                    duration_str="${bduration}m"
+                fi
+                
+                # Format timestamps (convert ISO to DD/MM HH:MM)
+                local banned_str expires_str
+                if [[ "$bbanned" != "-" && "$bbanned" != "null" ]]; then
+                    banned_str=$(echo "$bbanned" | sed 's/T/ /' | sed 's/Z//' | cut -c1-16 || echo "$bbanned")
+                else
+                    banned_str="-"
+                fi
+                if [[ "$bexpires" == "never" ]]; then
+                    expires_str="Never"
+                elif [[ "$bexpires" != "-" && "$bexpires" != "null" ]]; then
+                    expires_str=$(echo "$bexpires" | sed 's/T/ /' | sed 's/Z//' | cut -c1-16 || echo "$bexpires")
+                else
+                    expires_str="-"
+                fi
+                
+                # Truncate fields
+                [[ ${#bname} -gt 20 ]] && bname="${bname:0:17}..."
+                [[ ${#breason} -gt 20 ]] && breason="${breason:0:17}..."
+                [[ ${#bguid} -gt 16 ]] && bguid="${bguid:0:13}..."
+                
+                move_to $row 1
+                if [[ $i -eq $selected ]]; then
+                    # Selected row
+                    printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
+                    move_to $row $col_status
+                    printf "▶ 🚫"
+                    move_to $row $col_name
+                    printf "%s" "$bname"
+                    move_to $row $col_reason
+                    printf "%s" "$breason"
+                    move_to $row $col_duration
+                    printf "%s" "$duration_str"
+                    move_to $row $col_banned
+                    printf "%s" "$banned_str"
+                    move_to $row $col_expires
+                    printf "%s" "$expires_str"
+                    move_to $row $col_guid
+                    printf "%s" "$bguid"
+                    printf "%s" "$RESET"
+                else
+                    # Normal row
+                    printf "%s" "${ESC}[K"
+                    move_to $row $col_status
+                    printf "  %s🚫%s" "$RED" "$RESET"
+                    move_to $row $col_name
+                    printf "%s" "$bname"
+                    move_to $row $col_reason
+                    printf "%s%s%s" "$DIM" "$breason" "$RESET"
+                    move_to $row $col_duration
+                    printf "%s%s%s" "$DIM" "$duration_str" "$RESET"
+                    move_to $row $col_banned
+                    printf "%s%s%s" "$DIM" "$banned_str" "$RESET"
+                    move_to $row $col_expires
+                    printf "%s%s%s" "$DIM" "$expires_str" "$RESET"
+                    move_to $row $col_guid
+                    printf "%s%s%s" "$DIM" "$bguid" "$RESET"
+                fi
+                row=$((row + 1))
+            done
         fi
         
-        local selected="${items[$MENU_RESULT]}"
+        # Separator
+        move_to $row 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        ((row++))
         
-        case "$selected" in
-            "🔄|Refresh")
-                continue
+        # Action bar
+        local action_row=$row
+        local actions=("[R] Refresh" "[Q] Back")
+        
+        move_to $action_row 2
+        for a in "${!actions[@]}"; do
+            local action_idx=$((ban_count + a))
+            local action_label="${actions[$a]}"
+            
+            if [[ $selected -eq $action_idx ]]; then
+                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
+            else
+                printf "  %s " "$action_label"
+            fi
+            printf " "
+        done
+        
+        # Footer help
+        move_to $TERM_ROWS 1
+        printf "%s%s [↑↓] Select  [Enter] Ban Details  [U] Unban  [R] Refresh  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
+        
+        # Read input
+        IFS= read -rsn1 key
+        
+        case "$key" in
+            $'\x1b')
+                read -rsn2 -t 0.1 seq || true
+                case "$seq" in
+                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
+                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
+                esac
                 ;;
-            "←|Back"|"----"*|"ℹ️|"*)
-                [[ "$selected" == "←|Back" ]] && return
-                ;;
-            "🚫|"*)
-                # Parse ban info and show details
-                local ban_name
-                IFS='|' read -r _ ban_name _ <<< "$selected"
-                
-                # Find full ban record using Python
-                local ban_record bans_data
-                bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
-                while IFS= read -r b; do
-                    [[ -z "$b" ]] && continue
-                    local n
-                    n=$(json_get "$b" "name" "")
-                    if [[ "$n" == "$ban_name" ]]; then
-                        ban_record="$b"
-                        break
-                    fi
-                done < <(json_array "$bans_data" "bans")
-                
-                if [[ -n "$ban_record" ]]; then
+            '') # Enter
+                if [[ $selected -lt $ban_count ]]; then
+                    # Build ban record JSON for details menu
+                    local ban_record="{\"name\": \"${ban_names[$selected]}\", \"reason\": \"${ban_reasons[$selected]}\", \"duration_minutes\": ${ban_durations[$selected]}, \"banned_at\": \"${ban_banned_at[$selected]}\", \"expires\": \"${ban_expires[$selected]}\", \"guid\": \"${ban_guids[$selected]}\"}"
                     ban_details_menu "$inst_dir" "$ban_record"
+                    needs_refresh=1
+                elif [[ $selected -eq $ban_count ]]; then
+                    # Refresh
+                    needs_refresh=1
+                elif [[ $selected -eq $((ban_count + 1)) ]]; then
+                    # Back
+                    return 0
                 fi
+                ;;
+            'r'|'R')
+                needs_refresh=1
+                ;;
+            'u'|'U')
+                if [[ $selected -lt $ban_count ]]; then
+                    local unban_guid="${ban_guids[$selected]}"
+                    local unban_name="${ban_names[$selected]}"
+                    if confirm "Unban '${unban_name}'?" "n"; then
+                        unban_player "$inst_dir" "$unban_guid"
+                        show_message "Unbanned: $unban_name" "Success"
+                        needs_refresh=1
+                    fi
+                fi
+                ;;
+            'q'|'Q')
+                return 0
                 ;;
         esac
     done
