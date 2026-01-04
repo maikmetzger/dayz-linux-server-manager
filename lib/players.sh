@@ -545,23 +545,30 @@ Reason: ${reason}" "y"; then
         return
     fi
     
-    # Execute ban via RCON: kick + addBan GUID + writeBans
-    # Kick is reliable, addBan adds GUID to bans.txt for when they try to rejoin
-    local result
-    result=$(run_rcon_action "$inst_dir" "ban" --player-name "$player_name" --player-guid "$player_guid")
+    # Get container name for direct file write
+    local marker="${inst_dir}/.dayz-instance"
+    local container_name
+    container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
     
-    local success
-    success=$(json_get "$result" "success" "false")
-    
-    if [[ "$success" == "true" ]]; then
-        # Save ban record to our tracking file (includes duration, reason, timestamps)
-        save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"
-        show_message "Banned '$player_name' for $human_duration" "✓ Success"
-    else
-        local error
-        error=$(json_get "$result" "error" "Unknown error")
-        show_message "Failed: $error" "✗ Error"
+    if [[ -z "$container_name" ]]; then
+        show_message "No container found" "✗ Error"
+        return
     fi
+    
+    # Step 1: Kick the player via RCON (this works!)
+    run_rcon_action "$inst_dir" "kick" --player-name "$player_name" >/dev/null 2>&1
+    
+    # Step 2: Write GUID directly to bans.txt (RCON addBan fails silently)
+    # Format: GUID -1 (permanent ban, -1 = no expiry timestamp)
+    local bans_file="/dayz/serverfiles/battleye/bans.txt"
+    docker exec "$container_name" bash -c "echo '${player_guid} -1' >> ${bans_file}" 2>/dev/null
+    
+    # Step 3: Reload bans via RCON
+    run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
+    
+    # Save ban record to our tracking file (includes duration, reason, timestamps)
+    save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"
+    show_message "Banned '$player_name' for $human_duration" "✓ Success"
 }
 
 # =============================================================================
