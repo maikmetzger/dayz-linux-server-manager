@@ -208,31 +208,31 @@ class BattlEyeRcon:
         return self.parse_players_response(resp)
     
     def action_kick(self, player_name, reason=""):
-        """Kick a player by NAME (not ID)."""
+        """Kick a player by NAME."""
         import json
-        # BattlEye #kick uses player name
+        # BattlEye #kick uses player name (reason not supported)
         cmd = f"#kick {player_name}"
-        if reason:
-            cmd += f" {reason}"
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban(self, player_guid, reason=""):
-        """Ban a player by GUID/Steam64ID (permanent via RCON)."""
+    def action_ban(self, player_id):
+        """Ban a player permanently by their player number (from 'players' command).
+        
+        Args:
+            player_id: Player number from 'players' list (0, 1, 2, etc.)
+        
+        Note: Duration/reason tracking is handled locally, not by BattlEye.
+        """
         import json
-        # BattlEye uses #exec ban with Steam64ID
-        cmd = f"#exec ban {player_guid}"
-        if reason:
-            cmd += f" {reason}"
+        # BattlEye ban syntax: ban [player#] [time] - time 0 = permanent
+        cmd = f"ban {player_id} 0"
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban_by_name(self, player_name, reason=""):
-        """Ban a player by NAME (not GUID)."""
+    def action_ban_by_guid(self, player_guid):
+        """Ban a player by GUID (for bans.txt management)."""
         import json
-        cmd = f"#ban {player_name}"
-        if reason:
-            cmd += f" {reason}"
+        cmd = f"addBan {player_guid} -1"
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
@@ -325,14 +325,15 @@ if __name__ == "__main__":
     
     # Action-based interface for TUI integration
     parser.add_argument('--action', 
-                        choices=['players', 'kick', 'ban', 'ban_by_name', 'unban', 
+                        choices=['players', 'kick', 'ban', 'ban_by_guid', 'unban', 
                                  'say', 'loadbans', 'shutdown', 'lock', 'unlock', 'monitor'],
                         help='Predefined action with JSON output')
     parser.add_argument('--player-id', type=str, help='Player ID (deprecated)')
     parser.add_argument('--player-name', type=str, help='Player name for kick/ban_by_name')
     parser.add_argument('--player-guid', type=str, help='Player GUID/Steam64ID for ban/unban')
     parser.add_argument('--message', type=str, help='Message for say action')
-    parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
+    parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban (not used)')
+    parser.add_argument('--duration-minutes', type=int, default=0, help='Ban duration in minutes (0 = permanent)')
     parser.add_argument('--seconds', type=int, default=5, help='Seconds for monitor action')
     parser.add_argument('--admin-password', type=str, help='DayZ admin password (passwordAdmin from serverDZ.cfg) for #login command')
     parser.add_argument('--debug', action='store_true', help='Enable debug output to stderr')
@@ -355,19 +356,19 @@ if __name__ == "__main__":
                 if not name:
                     print('{"success": false, "error": "Missing --player-name"}')
                     sys.exit(1)
-                print(client.action_kick(name, args.reason))
+                print(client.action_kick(name))
             elif args.action == 'ban':
-                guid = args.player_guid or args.player_id
+                player_id = args.player_id
+                if not player_id:
+                    print('{"success": false, "error": "Missing --player-id"}')
+                    sys.exit(1)
+                print(client.action_ban(player_id))
+            elif args.action == 'ban_by_guid':
+                guid = args.player_guid
                 if not guid:
                     print('{"success": false, "error": "Missing --player-guid"}')
                     sys.exit(1)
-                print(client.action_ban(guid, args.reason))
-            elif args.action == 'ban_by_name':
-                name = args.player_name or args.player_id
-                if not name:
-                    print('{"success": false, "error": "Missing --player-name"}')
-                    sys.exit(1)
-                print(client.action_ban_by_name(name, args.reason))
+                print(client.action_ban_by_guid(guid))
             elif args.action == 'unban':
                 guid = args.player_guid or args.player_id
                 if not guid:

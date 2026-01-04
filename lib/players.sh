@@ -450,17 +450,13 @@ send_message_dialog() {
     fi
 }
 
-# Kick player dialog with reason
+# Kick player dialog
 # Usage: kick_player_dialog "$inst_dir" "$player_id" "$player_name" "$player_guid"
 kick_player_dialog() {
     local inst_dir="$1"
     local player_id="$2"
     local player_name="$3"
     local player_guid="${4:-}"
-    
-    # Get reason (optional)
-    local reason
-    reason=$(read_input "Reason for kick (optional):" "" "Kick $player_name")
     
     # Confirm
     if ! confirm "Kick '${player_name}' from server?
@@ -470,12 +466,9 @@ They can rejoin at any time." "n"; then
     fi
     
     # Execute kick - uses player NAME (not ID)
+    # Note: BattlEye #kick doesn't support reason field
     local result
-    if [[ -n "$reason" ]]; then
-        result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name" --reason "$reason")
-    else
-        result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name")
-    fi
+    result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name")
     
     local success
     success=$(json_get "$result" "success" "false")
@@ -552,15 +545,16 @@ Reason: ${reason}" "y"; then
         return
     fi
     
-    # Execute ban via RCON - uses GUID/Steam64ID
+    # Execute ban via RCON - uses player NUMBER (not GUID)
+    # Duration/reason are tracked locally, not sent to BattlEye
     local result
-    result=$(run_rcon_action "$inst_dir" "ban" --player-guid "$player_guid" --reason "$reason")
+    result=$(run_rcon_action "$inst_dir" "ban" --player-id "$player_id")
     
     local success
     success=$(json_get "$result" "success" "false")
     
     if [[ "$success" == "true" ]]; then
-        # Save ban record to our tracking file
+        # Save ban record to our tracking file (includes duration, reason, timestamps)
         save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"
         show_message "Banned '$player_name' for $human_duration" "✓ Success"
     else
