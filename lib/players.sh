@@ -940,7 +940,7 @@ ban_list_menu() {
         local col_duration=$((col_reason + 22))
         local col_banned=$((col_duration + 10))
         local col_expires=$((col_banned + 18))
-        local col_guid=$((col_expires + 18))
+        local col_guid=$((TERM_COLS - 38))
         
         move_to $table_start 1
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
@@ -1006,10 +1006,9 @@ ban_list_menu() {
                     expires_str="-"
                 fi
                 
-                # Truncate fields
+                # Truncate fields (but not GUID)
                 [[ ${#bname} -gt 20 ]] && bname="${bname:0:17}..."
                 [[ ${#breason} -gt 20 ]] && breason="${breason:0:17}..."
-                [[ ${#bguid} -gt 16 ]] && bguid="${bguid:0:13}..."
                 
                 move_to $row 1
                 if [[ $i -eq $selected ]]; then
