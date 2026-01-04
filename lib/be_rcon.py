@@ -215,17 +215,17 @@ class BattlEyeRcon:
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban(self, player_id):
-        """Ban a player permanently by their player number (from 'players' command).
+    def action_ban(self, player_guid):
+        """Ban a player permanently using their BattlEye GUID.
         
         Args:
-            player_id: Player number from 'players' list (0, 1, 2, etc.)
+            player_guid: BattlEye GUID (32-char hex from 'players' command)
         
         Note: Duration/reason tracking is handled locally, not by BattlEye.
         """
         import json
-        # BattlEye ban syntax: ban [player#] [time] - time 0 = permanent
-        cmd = f"ban {player_id} 0"
+        # BattlEye addBan syntax: addBan [GUID] 0 - 0 = permanent
+        cmd = f"addBan {player_guid} 0"
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
@@ -358,11 +358,11 @@ if __name__ == "__main__":
                     sys.exit(1)
                 print(client.action_kick(name))
             elif args.action == 'ban':
-                player_id = args.player_id
-                if not player_id:
-                    print('{"success": false, "error": "Missing --player-id"}')
+                guid = args.player_guid
+                if not guid:
+                    print('{"success": false, "error": "Missing --player-guid"}')
                     sys.exit(1)
-                print(client.action_ban(player_id))
+                print(client.action_ban(guid))
             elif args.action == 'ban_by_guid':
                 guid = args.player_guid
                 if not guid:
