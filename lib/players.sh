@@ -234,7 +234,15 @@ run_rcon_action() {
     
     # Copy script to container and execute
     docker cp "$python_src" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-    docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+    
+    # Add --debug flag if DEBUG_RCON is set
+    if [[ -n "${DEBUG_RCON:-}" ]]; then
+        rcon_args+=(--debug)
+        # Run with stderr visible for debugging
+        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}"
+    else
+        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+    fi
 }
 
 # =============================================================================

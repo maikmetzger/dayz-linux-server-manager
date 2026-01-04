@@ -13,13 +13,14 @@ BE_COMMAND = 0x01
 BE_MESSAGE = 0x02
 
 class BattlEyeRcon:
-    def __init__(self, host, port, password):
+    def __init__(self, host, port, password, debug=False):
         self.host = host
         self.port = int(port)
         self.password = password
         self.sock = None
         self.connected = False
         self.sequence = 0  # BattlEye command sequence number
+        self.debug = debug
 
     def crc32(self, data):
         # CRC32 of data (as bytes)
@@ -67,6 +68,8 @@ class BattlEyeRcon:
             result = resp[8]
             if result == 0x01:
                 self.connected = True
+                if self.debug:
+                    print(f"[DEBUG] BE protocol login successful", file=sys.stderr)
                 return True
             else:
                 print("Login Failed: Incorrect password or banned IP.", file=sys.stderr)
@@ -101,6 +104,8 @@ class BattlEyeRcon:
         
         # Sequence number is required and must increment for each command
         seq_byte = bytes([self.sequence & 0xFF])
+        if self.debug:
+            print(f"[DEBUG] Sending command (seq={self.sequence}): {cmd}", file=sys.stderr)
         self.sequence = (self.sequence + 1) % 256  # Wrap at 256
         packet = self.create_packet(BE_COMMAND, seq_byte + cmd.encode('utf-8'))
         self.sock.send(packet)
@@ -144,6 +149,8 @@ class BattlEyeRcon:
             return "".join(responses)
             
         except socket.timeout:
+            if self.debug:
+                print(f"[DEBUG] Socket timeout waiting for response", file=sys.stderr)
             return None
     
     def close(self):
@@ -285,6 +292,8 @@ class BattlEyeRcon:
         #       RConPassword (BEServer_x64.cfg) is for protocol auth.
         password = admin_password if admin_password else self.password
         resp = self.send_command(f"#login {password}")
+        if self.debug:
+            print(f"[DEBUG] #login response: {resp}", file=sys.stderr)
         return json.dumps({"success": True, "response": resp, "error": None})
 
     def interactive(self):
@@ -326,10 +335,11 @@ if __name__ == "__main__":
     parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
     parser.add_argument('--seconds', type=int, default=5, help='Seconds for monitor action')
     parser.add_argument('--admin-password', type=str, help='DayZ admin password (passwordAdmin from serverDZ.cfg) for #login command')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output to stderr')
     
     args = parser.parse_args()
     
-    client = BattlEyeRcon(args.host, args.port, args.password)
+    client = BattlEyeRcon(args.host, args.port, args.password, debug=args.debug)
     if client.connect():
         if args.action:
             # Auto-login before action commands using DayZ admin password
