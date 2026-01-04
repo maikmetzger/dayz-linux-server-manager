@@ -715,6 +715,18 @@ run_cli_mode() {
     ok "CLI install complete!"
     info "Instance directory: ${inst_dir}"
     info "Container name: dayz-${name}"
+    
+    # Setup ban expiry timer if setup script exists
+    local timer_setup="${SCRIPT_DIR}/lib/setup_ban_expiry_timer.sh"
+    if [[ -f "${timer_setup}" ]]; then
+        step "Step: Setting up ban expiry timer"
+        if bash "${timer_setup}" "${inst_dir}" 2>/dev/null; then
+            ok "Ban expiry timer enabled (checks every minute)"
+        else
+            warn "Could not setup ban expiry timer. Run manually: ${timer_setup} ${inst_dir}"
+        fi
+    fi
+    
     info ""
     info "Manage with: ./server-manager.sh"
 }
