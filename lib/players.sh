@@ -252,7 +252,7 @@ run_rcon_action() {
 # Players Menu
 # =============================================================================
 
-# Main players menu showing online player list
+# Main players menu showing online player list in table view
 # Usage: players_menu "$inst_dir"
 players_menu() {
     local inst_dir="$1"
@@ -261,91 +261,223 @@ players_menu() {
     PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
     mkdir -p "$PLAYERS_STATE_DIR" 2>/dev/null
     
+    local selected=0
+    local needs_refresh=1
+    
+    # Player data arrays
+    local -a player_ids=()
+    local -a player_names=()
+    local -a player_pings=()
+    local -a player_guids=()
+    local player_count=0
+    local max_players=0
+    local error=""
+    
     while true; do
-        local max_players
-        max_players=$(get_max_players "$inst_dir")
-        
-        # Fetch player data
-        local player_json
-        player_json=$(fetch_online_players "$inst_dir")
-        
-        local player_count
-        player_count=$(json_get "$player_json" "count" "0")
-        
-        local error
-        error=$(json_get "$player_json" "error" "")
-        
-        # Build menu items
-        local -a items=()
-        
-        if [[ -n "$error" && "$error" != "null" ]]; then
-            # Error state
-            items+=("⚠️|Error: $error")
-        elif [[ "$player_count" -eq 0 ]]; then
-            # No players
-            items+=("ℹ️|No players online")
-        else
-            # Add each player as menu item
-            while IFS= read -r player; do
-                [[ -z "$player" ]] && continue
-                local name ping pid
-                name=$(json_get "$player" "name" "Unknown")
-                ping=$(json_get "$player" "ping" "0")
-                pid=$(json_get "$player" "id" "0")
-                
-                # Format: "👤|Name|Ping|#ID"
-                items+=("👤|${name}|${ping}ms|#${pid}")
-            done < <(json_array "$player_json" "players")
+        # Refresh player data if needed
+        if [[ $needs_refresh -eq 1 ]]; then
+            max_players=$(get_max_players "$inst_dir")
+            
+            local player_json
+            player_json=$(fetch_online_players "$inst_dir")
+            
+            player_count=$(json_get "$player_json" "count" "0")
+            error=$(json_get "$player_json" "error" "")
+            
+            # Clear and rebuild arrays
+            player_ids=()
+            player_names=()
+            player_pings=()
+            player_guids=()
+            
+            if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
+                while IFS= read -r player; do
+                    [[ -z "$player" ]] && continue
+                    player_ids+=("$(json_get "$player" "id" "0")")
+                    player_names+=("$(json_get "$player" "name" "Unknown")")
+                    player_pings+=("$(json_get "$player" "ping" "0")")
+                    player_guids+=("$(json_get "$player" "guid" "")")
+                done < <(json_array "$player_json" "players")
+            fi
+            
+            player_count=${#player_ids[@]}
+            needs_refresh=0
         fi
         
-        items+=("--------------------")
-        items+=("🔄|Refresh")
-        items+=("←|Back")
+        local total_items=$((player_count + 2))  # Players + Refresh + Back
+        [[ $selected -lt 0 ]] && selected=0
+        [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
         
-        # Draw custom header with player count
+        # Get terminal size
         get_term_size
-        printf "%s" "$CLEAR_SCREEN"
+        
+        # Draw screen
+        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
         
         # Header bar
         move_to 1 1
-        printf "%s%s" "$BG_RED" "$WHITE$BOLD"
-        printf " 👥 Players - Online: %d / %d%*s" "$player_count" "$max_players" "$((TERM_COLS - 30))" ""
-        printf "%s\n" "$RESET"
+        local header_title="Players - Online: ${player_count} / ${max_players}"
+        printf "%s%s 👥 %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
         
-        if ! run_menu items "Players" 3; then
-            return
+        # Table header
+        local table_start=3
+        local col_status=2
+        local col_id=6
+        local col_name=12
+        local col_ping=$((TERM_COLS - 25))
+        local col_guid=$((TERM_COLS - 18))
+        
+        move_to $table_start 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        
+        move_to $((table_start + 1)) $col_status
+        printf "%s%s  %s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_id
+        printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_name
+        printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_ping
+        printf "%s%sPING%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_guid
+        printf "%s%sGUID%s" "$DIM" "$WHITE" "$RESET"
+        
+        move_to $((table_start + 2)) 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        
+        # Player rows
+        local row=$((table_start + 3))
+        
+        if [[ -n "$error" && "$error" != "null" ]]; then
+            move_to $row 1
+            printf "%s%s  ⚠️  Error: %s%s" "$BG_RED" "$WHITE" "$error" "$RESET"
+            row=$((row + 1))
+        elif [[ $player_count -eq 0 ]]; then
+            move_to $row 1
+            printf "%s  ℹ️  No players online (press R to refresh)%s" "$DIM" "$RESET"
+            row=$((row + 1))
+        else
+            for i in "${!player_ids[@]}"; do
+                local pid="${player_ids[$i]}"
+                local pname="${player_names[$i]}"
+                local pping="${player_pings[$i]}"
+                local pguid="${player_guids[$i]:-?}"
+                
+                # Truncate name if too long
+                local max_name_len=$((col_ping - col_name - 2))
+                [[ ${#pname} -gt $max_name_len ]] && pname="${pname:0:$((max_name_len-3))}..."
+                
+                move_to $row 1
+                if [[ $i -eq $selected ]]; then
+                    # Selected row
+                    printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
+                    move_to $row $col_status
+                    printf "▶ 👤"
+                    move_to $row $col_id
+                    printf "#%-4s" "$pid"
+                    move_to $row $col_name
+                    printf "%s" "$pname"
+                    move_to $row $col_ping
+                    printf "%sms" "$pping"
+                    move_to $row $col_guid
+                    printf "%s" "${pguid:0:12}..."
+                    printf "%s" "$RESET"
+                else
+                    # Normal row
+                    printf "%s" "${ESC}[K"
+                    move_to $row $col_status
+                    printf "  %s👤%s" "$GREEN" "$RESET"
+                    move_to $row $col_id
+                    printf "%s#%-4s%s" "$DIM" "$pid" "$RESET"
+                    move_to $row $col_name
+                    printf "%s" "$pname"
+                    move_to $row $col_ping
+                    printf "%s%sms%s" "$DIM" "$pping" "$RESET"
+                    move_to $row $col_guid
+                    printf "%s%s...%s" "$DIM" "${pguid:0:12}" "$RESET"
+                fi
+                row=$((row + 1))
+            done
         fi
         
-        local selected="${items[$MENU_RESULT]}"
+        # Separator
+        move_to $row 1
+        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+        printf "%.0s-" $(seq 1 $TERM_COLS)
+        printf "%s" "$RESET"
+        ((row++))
         
-        case "$selected" in
-            "🔄|Refresh")
-                continue
+        # Action bar
+        local action_row=$row
+        local actions=("[R] Refresh" "[Q] Back")
+        
+        move_to $action_row 2
+        for a in "${!actions[@]}"; do
+            local action_idx=$((player_count + a))
+            local action_label="${actions[$a]}"
+            
+            if [[ $selected -eq $action_idx ]]; then
+                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
+            else
+                printf "  %s " "$action_label"
+            fi
+            printf " "
+        done
+        
+        # Footer help
+        move_to $TERM_ROWS 1
+        printf "%s%s [↑↓] Select  [Enter] Player Actions  [R] Refresh  [K] Kick  [B] Ban  [M] Message  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
+        
+        # Read input
+        IFS= read -rsn1 key
+        
+        case "$key" in
+            $'\x1b')
+                read -rsn2 -t 0.1 seq || true
+                case "$seq" in
+                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
+                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
+                esac
                 ;;
-            "←|Back"|"----"*|"⚠️|"*|"ℹ️|"*)
-                [[ "$selected" == "←|Back" ]] && return
+            '') # Enter
+                if [[ $selected -lt $player_count ]]; then
+                    # Open player details
+                    local full_player_data="{\"id\": ${player_ids[$selected]}, \"name\": \"${player_names[$selected]}\", \"ping\": ${player_pings[$selected]}, \"guid\": \"${player_guids[$selected]}\"}"
+                    player_details_menu "$inst_dir" "$full_player_data"
+                    needs_refresh=1
+                elif [[ $selected -eq $player_count ]]; then
+                    # Refresh
+                    needs_refresh=1
+                elif [[ $selected -eq $((player_count + 1)) ]]; then
+                    # Back
+                    return 0
+                fi
                 ;;
-            "👤|"*)
-                # Parse player data from selection
-                local player_name player_ping player_id
-                IFS='|' read -r _ player_name player_ping player_id <<< "$selected"
-                player_id="${player_id#\#}"  # Remove # prefix
-                
-                # Get full player data - construct it from known values
-                local full_player_data
-                full_player_data="{\"id\": ${player_id}, \"name\": \"${player_name}\", \"ping\": ${player_ping%ms}}"
-                
-                # Try to get GUID from the original JSON
-                while IFS= read -r p; do
-                    local pid
-                    pid=$(json_get "$p" "id" "-1")
-                    if [[ "$pid" == "$player_id" ]]; then
-                        full_player_data="$p"
-                        break
-                    fi
-                done < <(json_array "$player_json" "players")
-                
-                player_details_menu "$inst_dir" "$full_player_data"
+            'r'|'R')
+                needs_refresh=1
+                ;;
+            'k'|'K')
+                if [[ $selected -lt $player_count ]]; then
+                    kick_player_dialog "$inst_dir" "${player_ids[$selected]}" "${player_names[$selected]}" "${player_guids[$selected]}"
+                    needs_refresh=1
+                fi
+                ;;
+            'b'|'B')
+                if [[ $selected -lt $player_count ]]; then
+                    ban_player_dialog "$inst_dir" "${player_ids[$selected]}" "${player_names[$selected]}" "${player_guids[$selected]}"
+                    needs_refresh=1
+                fi
+                ;;
+            'm'|'M')
+                if [[ $selected -lt $player_count ]]; then
+                    send_message_dialog "$inst_dir" "${player_names[$selected]}"
+                fi
+                ;;
+            'q'|'Q')
+                return 0
                 ;;
         esac
     done
