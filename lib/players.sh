@@ -269,9 +269,13 @@ players_menu() {
     local -a player_names=()
     local -a player_pings=()
     local -a player_guids=()
+    local -a player_times=()  # Time on server in minutes
     local player_count=0
     local max_players=0
     local error=""
+    
+    # Session tracking file
+    local sessions_file="${PLAYERS_STATE_DIR}/sessions.json"
     
     while true; do
         # Refresh player data if needed
@@ -289,15 +293,84 @@ players_menu() {
             player_names=()
             player_pings=()
             player_guids=()
+            player_times=()
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
+                # Update session tracking and get times
+                local now_ts
+                now_ts=$(date +%s)
+                
                 while IFS= read -r player; do
                     [[ -z "$player" ]] && continue
-                    player_ids+=("$(json_get "$player" "id" "0")")
-                    player_names+=("$(json_get "$player" "name" "Unknown")")
-                    player_pings+=("$(json_get "$player" "ping" "0")")
-                    player_guids+=("$(json_get "$player" "guid" "")")
+                    local pid pname pping pguid
+                    pid=$(json_get "$player" "id" "0")
+                    pname=$(json_get "$player" "name" "Unknown")
+                    pping=$(json_get "$player" "ping" "0")
+                    pguid=$(json_get "$player" "guid" "")
+                    
+                    player_ids+=("$pid")
+                    player_names+=("$pname")
+                    player_pings+=("$pping")
+                    player_guids+=("$pguid")
+                    
+                    # Get or set join time from sessions.json
+                    local join_ts
+                    join_ts=$(python3 << PYTHON_SESSION
+import json
+import os
+
+sessions_file = "${sessions_file}"
+guid = "${pguid}"
+now = ${now_ts}
+
+# Load or create sessions
+sessions = {}
+if os.path.exists(sessions_file):
+    try:
+        with open(sessions_file, 'r') as f:
+            sessions = json.load(f)
+    except: pass
+
+# Get or set join time for this player
+if guid and guid in sessions:
+    print(sessions[guid])
+else:
+    # New player - record join time
+    if guid:
+        sessions[guid] = now
+        with open(sessions_file, 'w') as f:
+            json.dump(sessions, f, indent=2)
+    print(now)
+PYTHON_SESSION
+                    )
+                    
+                    # Calculate time on server
+                    local time_on_server_mins=0
+                    if [[ -n "$join_ts" && "$join_ts" =~ ^[0-9]+$ ]]; then
+                        time_on_server_mins=$(( (now_ts - join_ts) / 60 ))
+                        [[ $time_on_server_mins -lt 0 ]] && time_on_server_mins=0
+                    fi
+                    player_times+=("$time_on_server_mins")
                 done < <(json_array "$player_json" "players")
+                
+                # Clean up departed players from sessions.json
+                if [[ -f "$sessions_file" ]]; then
+                    local current_guids
+                    current_guids=$(printf '%s\n' "${player_guids[@]}" | tr '\n' '|')
+                    python3 << PYTHON_CLEANUP
+import json
+sessions_file = "${sessions_file}"
+current_guids = set("${current_guids}".strip('|').split('|'))
+try:
+    with open(sessions_file, 'r') as f:
+        sessions = json.load(f)
+    # Remove GUIDs not in current player list
+    sessions = {k: v for k, v in sessions.items() if k in current_guids}
+    with open(sessions_file, 'w') as f:
+        json.dump(sessions, f, indent=2)
+except: pass
+PYTHON_CLEANUP
+                fi
             fi
             
             player_count=${#player_ids[@]}
@@ -324,8 +397,9 @@ players_menu() {
         local col_status=2
         local col_id=6
         local col_name=12
-        local col_ping=$((TERM_COLS - 25))
-        local col_guid=$((TERM_COLS - 18))
+        local col_time=$((TERM_COLS - 52))
+        local col_ping=$((TERM_COLS - 45))
+        local col_guid=$((TERM_COLS - 38))
         
         move_to $table_start 1
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
@@ -338,6 +412,8 @@ players_menu() {
         printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_name
         printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_time
+        printf "%s%sTIME%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_ping
         printf "%s%sPING%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_guid
@@ -366,8 +442,18 @@ players_menu() {
                 local pping="${player_pings[$i]}"
                 local pguid="${player_guids[$i]:-?}"
                 
+                local ptime="${player_times[$i]:-0}"
+                
+                # Format time as HH:MM
+                local time_str
+                if [[ $ptime -ge 60 ]]; then
+                    time_str=$(printf "%dh%02dm" $((ptime / 60)) $((ptime % 60)))
+                else
+                    time_str=$(printf "%dm" $ptime)
+                fi
+                
                 # Truncate name if too long
-                local max_name_len=$((col_ping - col_name - 2))
+                local max_name_len=$((col_time - col_name - 2))
                 [[ ${#pname} -gt $max_name_len ]] && pname="${pname:0:$((max_name_len-3))}..."
                 
                 move_to $row 1
@@ -380,10 +466,12 @@ players_menu() {
                     printf "#%-4s" "$pid"
                     move_to $row $col_name
                     printf "%s" "$pname"
+                    move_to $row $col_time
+                    printf "%s" "$time_str"
                     move_to $row $col_ping
                     printf "%sms" "$pping"
                     move_to $row $col_guid
-                    printf "%s" "${pguid:0:12}..."
+                    printf "%s" "$pguid"
                     printf "%s" "$RESET"
                 else
                     # Normal row
@@ -394,10 +482,12 @@ players_menu() {
                     printf "%s#%-4s%s" "$DIM" "$pid" "$RESET"
                     move_to $row $col_name
                     printf "%s" "$pname"
+                    move_to $row $col_time
+                    printf "%s%s%s" "$DIM" "$time_str" "$RESET"
                     move_to $row $col_ping
                     printf "%s%sms%s" "$DIM" "$pping" "$RESET"
                     move_to $row $col_guid
-                    printf "%s%s...%s" "$DIM" "${pguid:0:12}" "$RESET"
+                    printf "%s%s%s" "$DIM" "$pguid" "$RESET"
                 fi
                 row=$((row + 1))
             done
