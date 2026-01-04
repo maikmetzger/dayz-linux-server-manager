@@ -262,10 +262,14 @@ class BattlEyeRcon:
         resp = self.send_command(f"#monitor {seconds}")
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_login(self):
-        """Explicit RCON admin login (some servers require this)."""
+    def action_login(self, admin_password=None):
+        """Explicit RCON admin login using DayZ passwordAdmin (not RCON password)."""
         import json
-        resp = self.send_command(f"#login {self.password}")
+        # Use admin_password if provided, otherwise fall back to RCON password
+        # NOTE: These are different! passwordAdmin (serverDZ.cfg) is for #login,
+        #       RConPassword (BEServer_x64.cfg) is for protocol auth.
+        password = admin_password if admin_password else self.password
+        resp = self.send_command(f"#login {password}")
         return json.dumps({"success": True, "response": resp, "error": None})
 
     def interactive(self):
@@ -306,14 +310,17 @@ if __name__ == "__main__":
     parser.add_argument('--message', type=str, help='Message for say action')
     parser.add_argument('--reason', type=str, default='', help='Reason for kick/ban')
     parser.add_argument('--seconds', type=int, default=5, help='Seconds for monitor action')
+    parser.add_argument('--admin-password', type=str, help='DayZ admin password (passwordAdmin from serverDZ.cfg) for #login command')
     
     args = parser.parse_args()
     
     client = BattlEyeRcon(args.host, args.port, args.password)
     if client.connect():
         if args.action:
-            # Auto-login before action commands (some servers require this)
-            client.action_login()
+            # Auto-login before action commands using DayZ admin password
+            # This is passwordAdmin from serverDZ.cfg, NOT the RCON password
+            if args.admin_password:
+                client.action_login(args.admin_password)
             
             # Action-based mode with JSON output
             if args.action == 'players':

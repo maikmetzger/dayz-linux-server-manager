@@ -179,7 +179,6 @@ run_rcon_action() {
     
     # Get RCON port and password from BEServer config
     # Port is calculated as DayZ port + 3
-    local marker="${inst_dir}/.dayz-instance"
     local dz_port
     dz_port=$(grep -oP 'DZ_PORT=\K[0-9]+' "$marker" 2>/dev/null || echo "2300")
     local port=$((dz_port + 3))
@@ -198,6 +197,16 @@ run_rcon_action() {
         return 1
     fi
     
+    # Get DayZ admin password from serverDZ.cfg for #login command
+    # NOTE: This is DIFFERENT from RCON password!
+    # - RConPassword (BEServer_x64.cfg) = BattlEye protocol auth
+    # - passwordAdmin (serverDZ.cfg) = DayZ in-game admin auth (#login)
+    local server_cfg="${inst_dir}/data/config/serverDZ.cfg"
+    local admin_pass=""
+    if [[ -f "$server_cfg" ]]; then
+        admin_pass=$(grep -oP 'passwordAdmin\s*=\s*"\K[^"]*' "$server_cfg" 2>/dev/null || echo "")
+    fi
+    
     # Build RCON command arguments
     local rcon_args=(
         --host "127.0.0.1"
@@ -205,6 +214,11 @@ run_rcon_action() {
         --password "$pass"
         --action "$action"
     )
+    
+    # Add admin password if available (required for kick/ban commands)
+    if [[ -n "$admin_pass" ]]; then
+        rcon_args+=(--admin-password "$admin_pass")
+    fi
     
     # Add extra arguments
     for arg in "${extra_args[@]}"; do
