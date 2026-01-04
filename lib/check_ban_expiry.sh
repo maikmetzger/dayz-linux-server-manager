@@ -72,20 +72,19 @@ check_expired_bans() {
     
     # Find expired bans using Python
     local expired_guids
-    expired_guids=$(python3 << 'PYTHON_SCRIPT'
+    expired_guids=$(python3 << PYTHON_SCRIPT
 import json
-import sys
 from datetime import datetime
 
-bans_file = sys.argv[1] if len(sys.argv) > 1 else ""
+bans_file = "${bans_json}"
 if not bans_file:
-    sys.exit(0)
+    exit(0)
 
 try:
     with open(bans_file, 'r') as f:
         data = json.load(f)
 except:
-    sys.exit(0)
+    exit(0)
 
 now = datetime.utcnow()
 expired = []
@@ -105,7 +104,7 @@ for guid in expired:
     if guid:
         print(guid)
 PYTHON_SCRIPT
-    "$bans_json" 2>/dev/null)
+    )
     
     # Process expired bans
     if [[ -z "$expired_guids" ]]; then
