@@ -270,6 +270,7 @@ players_menu() {
     local -a player_pings=()
     local -a player_guids=()
     local -a player_times=()  # Time on server in minutes
+    local -a player_joined=() # Formatted join timestamp
     local player_count=0
     local max_players=0
     local error=""
@@ -346,11 +347,15 @@ PYTHON_SESSION
                     
                     # Calculate time on server
                     local time_on_server_mins=0
+                    local joined_str=""
                     if [[ -n "$join_ts" && "$join_ts" =~ ^[0-9]+$ ]]; then
                         time_on_server_mins=$(( (now_ts - join_ts) / 60 ))
                         [[ $time_on_server_mins -lt 0 ]] && time_on_server_mins=0
+                        # Format join timestamp as DD/MM/YYYY HH:MM
+                        joined_str=$(date -d "@${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || date -r "${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || echo "?")
                     fi
                     player_times+=("$time_on_server_mins")
+                    player_joined+=("$joined_str")
                 done < <(json_array "$player_json" "players")
                 
                 # Clean up departed players from sessions.json
@@ -397,6 +402,7 @@ PYTHON_CLEANUP
         local col_status=2
         local col_id=6
         local col_name=12
+        local col_joined=$((TERM_COLS - 70))
         local col_time=$((TERM_COLS - 52))
         local col_ping=$((TERM_COLS - 45))
         local col_guid=$((TERM_COLS - 38))
@@ -412,6 +418,8 @@ PYTHON_CLEANUP
         printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_name
         printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
+        move_to $((table_start + 1)) $col_joined
+        printf "%s%sJOINED%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_time
         printf "%s%sTIME%s" "$DIM" "$WHITE" "$RESET"
         move_to $((table_start + 1)) $col_ping
@@ -452,8 +460,10 @@ PYTHON_CLEANUP
                     time_str=$(printf "%dm" $ptime)
                 fi
                 
+                local pjoined="${player_joined[$i]:-?}"
+                
                 # Truncate name if too long
-                local max_name_len=$((col_time - col_name - 2))
+                local max_name_len=$((col_joined - col_name - 2))
                 [[ ${#pname} -gt $max_name_len ]] && pname="${pname:0:$((max_name_len-3))}..."
                 
                 move_to $row 1
@@ -466,6 +476,8 @@ PYTHON_CLEANUP
                     printf "#%-4s" "$pid"
                     move_to $row $col_name
                     printf "%s" "$pname"
+                    move_to $row $col_joined
+                    printf "%s" "$pjoined"
                     move_to $row $col_time
                     printf "%s" "$time_str"
                     move_to $row $col_ping
@@ -482,6 +494,8 @@ PYTHON_CLEANUP
                     printf "%s#%-4s%s" "$DIM" "$pid" "$RESET"
                     move_to $row $col_name
                     printf "%s" "$pname"
+                    move_to $row $col_joined
+                    printf "%s%s%s" "$DIM" "$pjoined" "$RESET"
                     move_to $row $col_time
                     printf "%s%s%s" "$DIM" "$time_str" "$RESET"
                     move_to $row $col_ping
