@@ -787,7 +787,17 @@ unban_player() {
     local guid="$2"
     local name="$3"
     
-    # Remove from our tracking using Python
+    # Get container name
+    local marker="${inst_dir}/.dayz-instance"
+    local container_name
+    container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
+    
+    if [[ -z "$container_name" ]]; then
+        show_message "No container found" "✗ Error"
+        return
+    fi
+    
+    # Remove from our tracking (bans.json)
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     if [[ -f "$bans_file" ]]; then
         python3 -c "
@@ -803,12 +813,9 @@ except:
 " 2>/dev/null
     fi
     
-    # Remove from BattlEye bans.txt
-    local be_bans="${inst_dir}/data/profile/BattlEye/bans.txt"
-    if [[ -f "$be_bans" ]]; then
-        grep -v "^${guid}" "$be_bans" > "${be_bans}.tmp" 2>/dev/null && \
-            mv "${be_bans}.tmp" "$be_bans"
-    fi
+    # Remove from BattlEye bans.txt INSIDE the container
+    local bans_txt="/dayz/serverfiles/battleye/bans.txt"
+    docker exec "$container_name" bash -c "sed -i '/^${guid}/d' ${bans_txt}" 2>/dev/null || true
     
     # Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
