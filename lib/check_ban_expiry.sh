@@ -31,7 +31,7 @@ check_expired_bans() {
         exit 1
     fi
     
-    local state_dir="${inst_dir}/data/state"
+    local state_dir="${inst_dir}/data/state/players"
     local bans_json="${state_dir}/bans.json"
     
     # Check if bans.json exists

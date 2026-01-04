@@ -493,6 +493,7 @@ remove_tool_admin() {
 
 admin_tools_menu() {
     local inst_dir="$1"
+    local last_selected=0
     
     while true; do
         local -a items=(
@@ -503,10 +504,11 @@ admin_tools_menu() {
             "←|Back"
         )
         
-        if ! run_menu items "Admin Tools"; then
+        if ! run_menu items "Admin Tools" "$last_selected"; then
             return
         fi
         
+        last_selected=$MENU_RESULT
         local selected_item="${items[$MENU_RESULT]}"
         
         case "$selected_item" in
@@ -534,6 +536,7 @@ passwords_menu() {
     local inst_dir="$1"
     local profile_dir="${inst_dir}/data/profile"
     local config_dir="${inst_dir}/data/config"
+    local last_selected=0
     
     while true; do
         local -a items=()
@@ -584,10 +587,11 @@ passwords_menu() {
         tool_data+=("")
         tool_data+=("")
         
-        if ! run_menu items "Passwords - Admin IDs & Server Passwords"; then
+        if ! run_menu items "Passwords - Admin IDs & Server Passwords" "$last_selected"; then
             return
         fi
         
+        last_selected=$MENU_RESULT
         local selected_item="${items[$MENU_RESULT]}"
         local selected_data="${tool_data[$MENU_RESULT]}"
         
