@@ -34,7 +34,20 @@ Edit server settings without touching raw files.
 - **Globals**: Tweak `globals.xml` values easily.
 
 ### Admin Tools
-Manage admin permissions across all your mods from one place.
+Comprehensive player and server administration from one place.
+
+#### Player Management
+- **Real-time Player List**: Table view showing ID, Name, Join Time, Session Duration, Ping, and GUID.
+- **Session Tracking**: Automatically tracks when players join and how long they've been online.
+- **Quick Actions**: Kick [K], Ban [B], or Message [M] players directly from the list.
+
+#### Ban System
+- **Ban List Table**: View all bans with Name, Reason, Duration, Banned At, Expires, and GUID columns.
+- **Timed Bans**: Set ban duration in minutes (or permanent).
+- **Auto-Expiry**: Expired bans are automatically removed via systemd timer (checks every minute).
+- **Quick Unban**: Press [U] to unban a player directly from the list.
+
+#### Admin Passwords & IDs
 - **Centralized Passwords**: Set DayZ Admin password (`passwordAdmin`), RCON, and VPP credentials.
 - **Steam64 ID Management**: Add/remove admin Steam64 IDs for VPPAdminTools, COT, ZomBerry, and DayZ Expansion.
 - **Auto-Detection**: Only shows admin mods that are actually installed.
@@ -92,10 +105,13 @@ Launch the TUI to manage your servers:
 - **[L]**: Live Tail (when viewing logs)
 - **[W]**: Open Workshop Browser
 - **[I]**: Browse mod images (in Workshop details)
-- **[B]**: Open Steam Workshop page in browser
-- **[M]**: Register as Modular Loot (in the editor)
+- **[B]**: Open Steam Workshop page in browser / Ban player (in Player List)
+- **[M]**: Register as Modular Loot (in editor) / Message player (in Player List)
 - **[S]**: Sync All Mods (Download → Casing → Keys)
 - **[F]**: Fast Fix (Fixes casing/keys without a slow Steam update)
+- **[K]**: Kick player (in Player List)
+- **[U]**: Unban player (in Ban List)
+- **[R]**: Refresh (in Player List / Ban List)
 - **[Q]**: Quit / Back (with confirmation if sync needed)
 
 ---
