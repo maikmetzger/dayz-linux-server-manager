@@ -215,18 +215,21 @@ class BattlEyeRcon:
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban(self, player_guid):
-        """Ban a player permanently using their BattlEye GUID.
+    def action_ban(self, player_id):
+        """Ban an ONLINE player permanently using their player number.
         
         Args:
-            player_guid: BattlEye GUID (32-char hex from 'players' command)
+            player_id: Player number from 'players' list (0, 1, 2, etc.)
         
-        Note: Duration/reason tracking is handled locally, not by BattlEye.
+        Note: For online players use player#, addBan is for offline players.
+              Duration/reason tracking is handled locally, not by BattlEye.
         """
         import json
-        # BattlEye addBan syntax: addBan [GUID] 0 - 0 = permanent
-        cmd = f"addBan {player_guid} 0"
+        # BattlEye 'ban' syntax for online players: ban [player#] [time] - 0 = permanent
+        cmd = f"ban {player_id} 0"
         resp = self.send_command(cmd)
+        # Persist bans to bans.txt
+        self.send_command("writeBans")
         return json.dumps({"success": True, "response": resp, "error": None})
     
     def action_ban_by_guid(self, player_guid):
@@ -358,11 +361,11 @@ if __name__ == "__main__":
                     sys.exit(1)
                 print(client.action_kick(name))
             elif args.action == 'ban':
-                guid = args.player_guid
-                if not guid:
-                    print('{"success": false, "error": "Missing --player-guid"}')
+                player_id = args.player_id
+                if not player_id:
+                    print('{"success": false, "error": "Missing --player-id"}')
                     sys.exit(1)
-                print(client.action_ban(guid))
+                print(client.action_ban(player_id))
             elif args.action == 'ban_by_guid':
                 guid = args.player_guid
                 if not guid:
