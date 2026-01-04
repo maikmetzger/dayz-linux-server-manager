@@ -545,10 +545,10 @@ Reason: ${reason}" "y"; then
         return
     fi
     
-    # Execute ban via RCON - uses player NUMBER for online players
-    # Duration/reason are tracked locally, not sent to BattlEye
+    # Execute ban via RCON: kick + addBan GUID + writeBans
+    # Kick is reliable, addBan adds GUID to bans.txt for when they try to rejoin
     local result
-    result=$(run_rcon_action "$inst_dir" "ban" --player-id "$player_id")
+    result=$(run_rcon_action "$inst_dir" "ban" --player-name "$player_name" --player-guid "$player_guid")
     
     local success
     success=$(json_get "$result" "success" "false")

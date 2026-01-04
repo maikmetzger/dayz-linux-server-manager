@@ -215,22 +215,32 @@ class BattlEyeRcon:
         resp = self.send_command(cmd)
         return json.dumps({"success": True, "response": resp, "error": None})
     
-    def action_ban(self, player_id):
-        """Ban an ONLINE player permanently using their player number.
+    def action_ban(self, player_name, player_guid):
+        """Ban an ONLINE player: kick them, then add GUID to ban list.
         
         Args:
-            player_id: Player number from 'players' list (0, 1, 2, etc.)
+            player_name: Player name for kick
+            player_guid: BattlEye GUID for ban list
         
-        Note: For online players use player#, addBan is for offline players.
-              Duration/reason tracking is handled locally, not by BattlEye.
+        Strategy: Kick first (reliable), then addBan GUID, then persist.
         """
         import json
-        # BattlEye 'ban' syntax for online players: ban [player#] [time] - 0 = permanent
-        cmd = f"ban {player_id} 0"
-        resp = self.send_command(cmd)
-        # Persist bans to bans.txt
+        # Step 1: Kick the player (this works!)
+        kick_cmd = f"#kick {player_name}"
+        kick_resp = self.send_command(kick_cmd)
+        
+        # Step 2: Add GUID to ban list (for when they try to rejoin)
+        ban_cmd = f"addBan {player_guid} 0"
+        ban_resp = self.send_command(ban_cmd)
+        
+        # Step 3: Persist bans to bans.txt
         self.send_command("writeBans")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        
+        return json.dumps({
+            "success": True, 
+            "response": f"Kicked: {kick_resp}, Banned: {ban_resp}", 
+            "error": None
+        })
     
     def action_ban_by_guid(self, player_guid):
         """Ban a player by GUID (for bans.txt management)."""
@@ -361,11 +371,12 @@ if __name__ == "__main__":
                     sys.exit(1)
                 print(client.action_kick(name))
             elif args.action == 'ban':
-                player_id = args.player_id
-                if not player_id:
-                    print('{"success": false, "error": "Missing --player-id"}')
+                name = args.player_name
+                guid = args.player_guid
+                if not name or not guid:
+                    print('{"success": false, "error": "Missing --player-name and --player-guid"}')
                     sys.exit(1)
-                print(client.action_ban(player_id))
+                print(client.action_ban(name, guid))
             elif args.action == 'ban_by_guid':
                 guid = args.player_guid
                 if not guid:
