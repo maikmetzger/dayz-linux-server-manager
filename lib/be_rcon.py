@@ -266,7 +266,8 @@ class BattlEyeRcon:
     def action_loadbans(self):
         """Reload bans.txt file."""
         import json
-        resp = self.send_command("#exec loadBans")
+        # BattlEye command to reload bans from bans.txt
+        resp = self.send_command("loadBans")
         return json.dumps({"success": True, "response": resp, "error": None})
     
     # ==========================================================================
