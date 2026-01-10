@@ -504,6 +504,32 @@ start_foreground() {
   if [[ -n "${servermods_arg}" ]]; then args+=("-serverMod=${servermods_arg}"); fi
   if [[ -n "${DZ_EXTRA_PARAMS}" ]]; then args+=(${DZ_EXTRA_PARAMS}); fi
 
+  # -------------------------------------------------------------------------
+  # Start ban expiry daemon in background (if enabled and available)
+  # -------------------------------------------------------------------------
+  if [[ "${DZ_BAN_EXPIRY_DAEMON:-1}" != "0" ]] && [[ -f "/dayz/lib/ban_expiry_daemon.sh" ]]; then
+    log "Starting ban expiry daemon..."
+
+    # Get RCON password for ban reload
+    local rcon_pass=""
+    if [[ -f "${DZ_CONFIG_DIR}/BEServer_x64.cfg" ]]; then
+      rcon_pass=$(grep "^RConPassword" "${DZ_CONFIG_DIR}/BEServer_x64.cfg" 2>/dev/null | awk '{print $2}' | tr -d '\r' || true)
+    fi
+
+    # Calculate RCON port (game port + 3)
+    local rcon_port=$((DZ_PORT + 3))
+
+    # Start daemon with environment variables
+    DZ_STATE="/dayz/state" \
+    DZ_SERVERFILES="${DZ_SERVERFILES}" \
+    DZ_LIB_DIR="/dayz/lib" \
+    DZ_RCON_PORT="${rcon_port}" \
+    RCON_PASSWORD="${rcon_pass}" \
+    bash /dayz/lib/ban_expiry_daemon.sh &
+
+    log "Ban expiry daemon started (PID: $!)"
+  fi
+
   log "Launching DayZ server..."
   log "  Command: ./$(basename "${bin}") ${args[*]}"
 
