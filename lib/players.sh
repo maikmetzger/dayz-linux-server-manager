@@ -234,74 +234,31 @@ players_menu() {
                     player_pings+=("$pping")
                     player_guids+=("$pguid")
                     
-                    # Get or set join time from sessions.json
-                    # SECURITY: Pass data via command line args to avoid heredoc injection
-                    local join_ts
-                    join_ts=$(python3 -c '
-import json
-import os
-import sys
+                    # Get or set join time from sessions.json using player_manager.py
+                    local session_result
+                    session_result=$(python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                        --file "$sessions_file" \
+                        --action get \
+                        --guid "$pguid" \
+                        --now "$now_ts" 2>/dev/null || echo '{}')
 
-sessions_file = sys.argv[1]
-guid = sys.argv[2]
-now = int(sys.argv[3])
-
-# Load or create sessions
-sessions = {}
-if os.path.exists(sessions_file):
-    try:
-        with open(sessions_file, "r") as f:
-            sessions = json.load(f)
-    except: pass
-
-# Get or set join time for this player
-if guid and guid in sessions:
-    print(sessions[guid])
-else:
-    # New player - record join time
-    if guid:
-        sessions[guid] = now
-        with open(sessions_file, "w") as f:
-            json.dump(sessions, f, indent=2)
-    print(now)
-' "$sessions_file" "$pguid" "$now_ts" 2>/dev/null)
-                    
-                    # Calculate time on server
                     local time_on_server_mins=0
                     local joined_str=""
-                    if [[ -n "$join_ts" && "$join_ts" =~ ^[0-9]+$ ]]; then
-                        time_on_server_mins=$(( (now_ts - join_ts) / 60 ))
-                        [[ $time_on_server_mins -lt 0 ]] && time_on_server_mins=0
-                        # Format join timestamp as DD/MM/YYYY HH:MM
-                        joined_str=$(date -d "@${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || date -r "${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || echo "?")
-                    fi
+                    time_on_server_mins=$(json_get "$session_result" "time_minutes" "0")
+                    joined_str=$(json_get "$session_result" "joined_at" "?")
+
                     player_times+=("$time_on_server_mins")
                     player_joined+=("$joined_str")
                 done < <(json_array "$player_json" "players")
                 
-                # Clean up departed players from sessions.json
-                # SECURITY: Pass data via stdin to avoid heredoc injection
+                # Clean up departed players from sessions.json using player_manager.py
                 if [[ -f "$sessions_file" ]]; then
                     local current_guids
-                    current_guids=$(printf '%s\n' "${player_guids[@]}" | tr '\n' '|')
-                    echo "$current_guids" | python3 -c '
-import json
-import sys
-import os
-
-sessions_file = sys.argv[1]
-current_guids_str = sys.stdin.read().strip()
-current_guids = set(current_guids_str.strip("|").split("|")) if current_guids_str else set()
-
-try:
-    with open(sessions_file, "r") as f:
-        sessions = json.load(f)
-    # Remove GUIDs not in current player list
-    sessions = {k: v for k, v in sessions.items() if k in current_guids}
-    with open(sessions_file, "w") as f:
-        json.dump(sessions, f, indent=2)
-except: pass
-' "$sessions_file" 2>/dev/null
+                    current_guids=$(IFS=','; echo "${player_guids[*]}")
+                    python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                        --file "$sessions_file" \
+                        --action cleanup \
+                        --guids "$current_guids" >/dev/null 2>&1 || true
                 fi
             fi
             
@@ -740,7 +697,7 @@ Reason: ${reason}" "y"; then
 
 # Save ban record to JSON file for tracking
 # Usage: save_ban_record "$inst_dir" "$guid" "$name" "$duration_minutes" "$reason"
-# SECURITY: Uses json_file_array_append to safely pass data without heredoc injection
+# Uses ban_manager.py for safe JSON handling
 save_ban_record() {
     local inst_dir="$1"
     local guid="$2"
@@ -749,33 +706,19 @@ save_ban_record() {
     local reason="$5"
 
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
-    local now
-    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-    # Calculate expiry
-    local expires="never"
+    # Format duration for ban_manager.py
+    local duration_arg="perm"
     if [[ "$duration_minutes" -gt 0 ]]; then
-        expires=$(date -u -d "+${duration_minutes} minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
+        duration_arg="${duration_minutes}m"
     fi
 
-    # Create bans file if it doesn't exist
-    if [[ ! -f "$bans_file" ]]; then
-        echo '{"bans": []}' > "$bans_file"
-    fi
-
-    # Create new ban entry using json_create (from json_helpers.sh)
-    # SECURITY: This properly escapes all values
-    local new_ban
-    new_ban=$(json_create \
-        "guid" "$guid" \
-        "name" "$name" \
-        "reason" "$reason" \
-        "banned_at" "$now" \
-        "expires" "$expires" \
-        "duration_minutes" "$duration_minutes")
-
-    # Append to bans array using json_file_array_append (from json_helpers.sh)
-    json_file_array_append "$bans_file" ".bans" "$new_ban"
+    # Use ban_manager.py to safely add the ban record
+    python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" add \
+        --guid "$guid" \
+        --name "$name" \
+        --reason "$reason" \
+        --duration "$duration_arg" >/dev/null 2>&1 || true
 }
 
 # =============================================================================
@@ -1105,30 +1048,30 @@ unban_player() {
     local inst_dir="$1"
     local guid="$2"
     local name="$3"
-    
+
     # Get container name
     local marker="${inst_dir}/.dayz-instance"
     local container_name
     container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
-    
+
     if [[ -z "$container_name" ]]; then
         show_message "No container found" "✗ Error"
         return
     fi
-    
-    # Remove from our tracking (bans.json)
-    # SECURITY: Use json_file_array_remove to safely remove without heredoc injection
+
+    # Remove from our tracking (bans.json) using ban_manager.py
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     if [[ -f "$bans_file" ]]; then
-        json_file_array_remove "$bans_file" ".bans" "guid" "$guid"
+        python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" remove \
+            --guid "$guid" >/dev/null 2>&1 || true
     fi
-    
+
     # Remove from BattlEye bans.txt INSIDE the container
     # SECURITY: Use safe_container_remove_line to prevent command injection
     safe_container_remove_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "$guid"
-    
+
     # Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
-    
+
     show_message "Unbanned '$name'" "✓ Success"
 }

@@ -79,51 +79,29 @@ check_expired_bans() {
         exit 1
     fi
     
-    # Find expired bans using Python
+    # Find expired bans using ban_manager.py
+    local expired_result
+    expired_result=$(python3 "${SCRIPT_DIR}/ban_manager.py" --file "$bans_json" expired 2>/dev/null || echo '{"count":0,"bans":[]}')
+
+    # Extract expired GUIDs
     local expired_guids
-    expired_guids=$(python3 << PYTHON_SCRIPT
-import json
-from datetime import datetime
-
-bans_file = "${bans_json}"
-if not bans_file:
-    exit(0)
-
-try:
-    with open(bans_file, 'r') as f:
-        data = json.load(f)
-except:
-    exit(0)
-
-now = datetime.utcnow()
-expired = []
-
-for ban in data.get('bans', []):
-    expires = ban.get('expires', 'never')
-    if expires and expires != 'never' and expires != 'unknown':
-        try:
-            exp_dt = datetime.strptime(expires, '%Y-%m-%dT%H:%M:%SZ')
-            if exp_dt <= now:
-                expired.append(ban.get('guid', ''))
-        except:
-            pass
-
-# Print expired GUIDs, one per line
-for guid in expired:
+    expired_guids=$(echo "$expired_result" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for ban in data.get("bans", []):
+    guid = ban.get("guid", "")
     if guid:
         print(guid)
-PYTHON_SCRIPT
-    )
+' 2>/dev/null)
     
     # Process expired bans
     if [[ -z "$expired_guids" ]]; then
         exit 0  # No expired bans
     fi
-    
-    echo "Found expired bans, processing..."
-    
-    local needs_reload=false
 
+    echo "Found expired bans, processing..."
+
+    # Remove each expired GUID from bans.txt in container
     while IFS= read -r guid; do
         if [[ -n "$guid" ]]; then
             echo "  Removing expired ban: $guid"
@@ -136,55 +114,33 @@ PYTHON_SCRIPT
                 # Fallback if constants not loaded
                 docker exec "$container_name" sh -c 'grep -v "^$1" "$2" > "$2.tmp" 2>/dev/null || true; mv "$2.tmp" "$2" 2>/dev/null || true' _ "$guid" "/dayz/serverfiles/battleye/bans.txt" 2>/dev/null || true
             fi
-
-            # Update bans.json - remove expired ban
-            # SECURITY: Use json_file_array_remove to prevent injection
-            if type json_file_array_remove &>/dev/null; then
-                json_file_array_remove "$bans_json" ".bans" "guid" "$guid"
-            else
-                # Fallback if json_helpers not loaded
-                python3 -c '
-import json
-import sys
-try:
-    bans_file = sys.argv[1]
-    guid = sys.argv[2]
-    with open(bans_file, "r") as f:
-        data = json.load(f)
-    data["bans"] = [b for b in data.get("bans", []) if b.get("guid") != guid]
-    with open(bans_file, "w") as f:
-        json.dump(data, f, indent=2)
-except: pass
-' "$bans_json" "$guid" 2>/dev/null
-            fi
-
-            needs_reload=true
         fi
     done <<< "$expired_guids"
 
-    # Reload bans if any were removed
-    if [[ "$needs_reload" == "true" ]]; then
-        echo "Reloading bans..."
+    # Remove all expired bans from bans.json using ban_manager.py
+    python3 "${SCRIPT_DIR}/ban_manager.py" --file "$bans_json" cleanup >/dev/null 2>&1 || true
 
-        # Use rcon_reload_bans if available, otherwise fallback
-        if type rcon_reload_bans &>/dev/null; then
-            rcon_reload_bans "$inst_dir" >/dev/null 2>&1 || true
-        else
-            # Fallback: Copy RCON script to container and execute
-            local rcon_script="${SCRIPT_DIR}/be_rcon.py"
-            if [[ -f "$rcon_script" ]]; then
-                docker cp "$rcon_script" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-                # SECURITY: Pass password via environment variable
-                docker exec -e "RCON_PASSWORD=$rcon_pass" "$container_name" python3 /tmp/rcon_client.py \
-                    --host 127.0.0.1 \
-                    --port "$rcon_port" \
-                    --password-env RCON_PASSWORD \
-                    --action loadbans 2>/dev/null || true
-            fi
+    # Reload bans
+    echo "Reloading bans..."
+
+    # Use rcon_reload_bans if available, otherwise fallback
+    if type rcon_reload_bans &>/dev/null; then
+        rcon_reload_bans "$inst_dir" >/dev/null 2>&1 || true
+    else
+        # Fallback: Copy RCON script to container and execute
+        local rcon_script="${SCRIPT_DIR}/be_rcon.py"
+        if [[ -f "$rcon_script" ]]; then
+            docker cp "$rcon_script" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
+            # SECURITY: Pass password via environment variable
+            docker exec -e "RCON_PASSWORD=$rcon_pass" "$container_name" python3 /tmp/rcon_client.py \
+                --host 127.0.0.1 \
+                --port "$rcon_port" \
+                --password-env RCON_PASSWORD \
+                --action loadbans 2>/dev/null || true
         fi
-
-        echo "Done - expired bans removed"
     fi
+
+    echo "Done - expired bans removed"
 }
 
 # =============================================================================
