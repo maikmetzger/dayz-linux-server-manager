@@ -16,99 +16,19 @@ source "${PLAYERS_LIB_DIR}/colors.sh"
 source "${PLAYERS_LIB_DIR}/tui.sh"
 source "${PLAYERS_LIB_DIR}/dialogs.sh"
 source "${PLAYERS_LIB_DIR}/utils.sh"
+source "${PLAYERS_LIB_DIR}/constants.sh"
+source "${PLAYERS_LIB_DIR}/json_helpers.sh"
+source "${PLAYERS_LIB_DIR}/rcon_lib.sh"
 
 # =============================================================================
-# JSON Parsing Helpers (uses python3, no jq dependency)
+# JSON Parsing Helpers - Now provided by lib/json_helpers.sh
 # =============================================================================
-
-# Parse JSON field using Python
-# Usage: value=$(json_get "$json" ".field" "default")
-json_get() {
-    local json="$1"
-    local path="$2"
-    local default="${3:-}"
-    
-    python3 -c "
-import json, sys
-try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
-        if key:
-            result = result.get(key, None) if isinstance(result, dict) else None
-            if result is None:
-                break
-    if result is None:
-        print('$default')
-    elif isinstance(result, bool):
-        print('true' if result else 'false')
-    elif isinstance(result, (dict, list)):
-        print(json.dumps(result))
-    else:
-        print(result)
-except:
-    print('$default')
-" 2>/dev/null
-}
-
-# Parse JSON array to lines using Python
-# Usage: while IFS= read -r item; do ... done < <(json_array "$json" ".players")
-json_array() {
-    local json="$1"
-    local path="$2"
-    
-    python3 -c "
-import json, sys
-try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
-        if key:
-            result = result.get(key, []) if isinstance(result, dict) else []
-    if isinstance(result, list):
-        for item in result:
-            print(json.dumps(item))
-except:
-    pass
-" 2>/dev/null
-}
-
-# Count JSON array length
-# Usage: count=$(json_count "$json" ".players")
-json_count() {
-    local json="$1"
-    local path="$2"
-    
-    python3 -c "
-import json
-try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
-        if key:
-            result = result.get(key, []) if isinstance(result, dict) else []
-    print(len(result) if isinstance(result, list) else 0)
-except:
-    print(0)
-" 2>/dev/null
-}
-
-# Create JSON object using Python
-# Usage: json=$(json_create key1 val1 key2 val2 ...)
-json_create() {
-    local args=("$@")
-    local pairs=""
-    for ((i=0; i<${#args[@]}; i+=2)); do
-        local key="${args[$i]}"
-        local val="${args[$((i+1))]}"
-        [[ -n "$pairs" ]] && pairs+=", "
-        pairs+="\"$key\": \"$val\""
-    done
-    echo "{$pairs}"
-}
+# The following functions are now available from json_helpers.sh:
+# - json_get "$json" ".field" "default"
+# - json_array "$json" ".players"
+# - json_count "$json" ".players"
+# - json_create "key1" "val1" "key2" "val2"
+# =============================================================================
 
 # =============================================================================
 # Configuration
@@ -315,20 +235,22 @@ players_menu() {
                     player_guids+=("$pguid")
                     
                     # Get or set join time from sessions.json
+                    # SECURITY: Pass data via command line args to avoid heredoc injection
                     local join_ts
-                    join_ts=$(python3 << PYTHON_SESSION
+                    join_ts=$(python3 -c '
 import json
 import os
+import sys
 
-sessions_file = "${sessions_file}"
-guid = "${pguid}"
-now = ${now_ts}
+sessions_file = sys.argv[1]
+guid = sys.argv[2]
+now = int(sys.argv[3])
 
 # Load or create sessions
 sessions = {}
 if os.path.exists(sessions_file):
     try:
-        with open(sessions_file, 'r') as f:
+        with open(sessions_file, "r") as f:
             sessions = json.load(f)
     except: pass
 
@@ -339,11 +261,10 @@ else:
     # New player - record join time
     if guid:
         sessions[guid] = now
-        with open(sessions_file, 'w') as f:
+        with open(sessions_file, "w") as f:
             json.dump(sessions, f, indent=2)
     print(now)
-PYTHON_SESSION
-                    )
+' "$sessions_file" "$pguid" "$now_ts" 2>/dev/null)
                     
                     # Calculate time on server
                     local time_on_server_mins=0
@@ -359,22 +280,28 @@ PYTHON_SESSION
                 done < <(json_array "$player_json" "players")
                 
                 # Clean up departed players from sessions.json
+                # SECURITY: Pass data via stdin to avoid heredoc injection
                 if [[ -f "$sessions_file" ]]; then
                     local current_guids
                     current_guids=$(printf '%s\n' "${player_guids[@]}" | tr '\n' '|')
-                    python3 << PYTHON_CLEANUP
+                    echo "$current_guids" | python3 -c '
 import json
-sessions_file = "${sessions_file}"
-current_guids = set("${current_guids}".strip('|').split('|'))
+import sys
+import os
+
+sessions_file = sys.argv[1]
+current_guids_str = sys.stdin.read().strip()
+current_guids = set(current_guids_str.strip("|").split("|")) if current_guids_str else set()
+
 try:
-    with open(sessions_file, 'r') as f:
+    with open(sessions_file, "r") as f:
         sessions = json.load(f)
     # Remove GUIDs not in current player list
     sessions = {k: v for k, v in sessions.items() if k in current_guids}
-    with open(sessions_file, 'w') as f:
+    with open(sessions_file, "w") as f:
         json.dump(sessions, f, indent=2)
 except: pass
-PYTHON_CLEANUP
+' "$sessions_file" 2>/dev/null
                 fi
             fi
             
@@ -796,8 +723,8 @@ Reason: ${reason}" "y"; then
     
     # Step 2: Write GUID directly to bans.txt (RCON addBan fails silently)
     # Format: GUID -1 (permanent ban, -1 = no expiry timestamp)
-    local bans_file="/dayz/serverfiles/battleye/bans.txt"
-    docker exec "$container_name" bash -c "echo '${player_guid} -1' >> ${bans_file}" 2>/dev/null
+    # SECURITY: Use safe_container_append_line to prevent command injection
+    safe_container_append_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "${player_guid} ${BAN_PERMANENT_MARKER}"
     
     # Step 3: Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
@@ -813,55 +740,42 @@ Reason: ${reason}" "y"; then
 
 # Save ban record to JSON file for tracking
 # Usage: save_ban_record "$inst_dir" "$guid" "$name" "$duration_minutes" "$reason"
+# SECURITY: Uses json_file_array_append to safely pass data without heredoc injection
 save_ban_record() {
     local inst_dir="$1"
     local guid="$2"
     local name="$3"
     local duration_minutes="$4"
     local reason="$5"
-    
+
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
+
     # Calculate expiry
     local expires="never"
     if [[ "$duration_minutes" -gt 0 ]]; then
         expires=$(date -u -d "+${duration_minutes} minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
     fi
-    
-    # Create or update bans file
+
+    # Create bans file if it doesn't exist
     if [[ ! -f "$bans_file" ]]; then
         echo '{"bans": []}' > "$bans_file"
     fi
-    
-    # Create new ban entry using Python
+
+    # Create new ban entry using json_create (from json_helpers.sh)
+    # SECURITY: This properly escapes all values
     local new_ban
-    new_ban=$(python3 -c "
-import json
-ban = {
-    'guid': '$guid',
-    'name': '''$name''',
-    'reason': '''$reason''',
-    'banned_at': '$now',
-    'expires': '$expires',
-    'duration_minutes': $duration_minutes
-}
-print(json.dumps(ban))
-" 2>/dev/null)
-    
-    # Read existing bans and append using Python
-    python3 -c "
-import json
-try:
-    with open('$bans_file', 'r') as f:
-        data = json.load(f)
-except:
-    data = {'bans': []}
-data['bans'].append($new_ban)
-with open('$bans_file', 'w') as f:
-    json.dump(data, f, indent=2)
-" 2>/dev/null
+    new_ban=$(json_create \
+        "guid" "$guid" \
+        "name" "$name" \
+        "reason" "$reason" \
+        "banned_at" "$now" \
+        "expires" "$expires" \
+        "duration_minutes" "$duration_minutes")
+
+    # Append to bans array using json_file_array_append (from json_helpers.sh)
+    json_file_array_append "$bans_file" ".bans" "$new_ban"
 }
 
 # =============================================================================
@@ -1203,24 +1117,15 @@ unban_player() {
     fi
     
     # Remove from our tracking (bans.json)
+    # SECURITY: Use json_file_array_remove to safely remove without heredoc injection
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     if [[ -f "$bans_file" ]]; then
-        python3 -c "
-import json
-try:
-    with open('$bans_file', 'r') as f:
-        data = json.load(f)
-    data['bans'] = [b for b in data.get('bans', []) if b.get('guid') != '$guid']
-    with open('$bans_file', 'w') as f:
-        json.dump(data, f, indent=2)
-except:
-    pass
-" 2>/dev/null
+        json_file_array_remove "$bans_file" ".bans" "guid" "$guid"
     fi
     
     # Remove from BattlEye bans.txt INSIDE the container
-    local bans_txt="/dayz/serverfiles/battleye/bans.txt"
-    docker exec "$container_name" bash -c "sed -i '/^${guid}/d' ${bans_txt}" 2>/dev/null || true
+    # SECURITY: Use safe_container_remove_line to prevent command injection
+    safe_container_remove_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "$guid"
     
     # Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
