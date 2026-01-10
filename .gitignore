@@ -16,3 +16,6 @@ lib/__pycache__/
 
 # System Files
 .DS_Store
+
+# Auto Claude data directory
+.auto-claude/
