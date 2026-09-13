@@ -73,5 +73,44 @@ class ActionResultTest(unittest.TestCase):
         self.assertEqual(r['response'], 'FPS 42')
 
 
+PLAYERS_REPLY = (
+    "Players on server:\n"
+    "[#] [IP Address]:[Port] [Ping] [GUID] [Name]\n"
+    "--------------------------------------------------\n"
+    "0   10.0.0.1:2304     45   0123456789abcdef0123456789abcdef(OK) Survivor One\n"
+    "1   10.0.0.2:2304     -1   -(?) Lobby Guy (Lobby)\n"
+    "2   10.0.0.3:2304     12   fedcba9876543210fedcba9876543210(OK) Jo\"hn 'Quote' O'Brien\n"
+    "(3 players in total)"
+)
+
+
+class PlayerParsingTest(unittest.TestCase):
+    def setUp(self):
+        self.client = be_rcon.BattlEyeRcon('127.0.0.1', 1, 'x')
+
+    def test_lobby_players_are_counted(self):
+        r = json.loads(self.client.parse_players_response(PLAYERS_REPLY))
+        self.assertEqual(r['count'], 3)
+        lobby = r['players'][1]
+        self.assertEqual(lobby['name'], 'Lobby Guy')
+        self.assertEqual(lobby['status'], 'Lobby')
+        self.assertEqual(lobby['guid'], '')
+        self.assertEqual(lobby['ping'], -1)
+
+    def test_verified_player_fields(self):
+        r = json.loads(self.client.parse_players_response(PLAYERS_REPLY))
+        p = r['players'][0]
+        self.assertEqual((p['id'], p['ip'], p['ping'], p['status']), (0, '10.0.0.1', 45, 'OK'))
+        self.assertEqual(p['guid'], '0123456789abcdef0123456789abcdef')
+
+    def test_names_with_quotes_survive(self):
+        r = json.loads(self.client.parse_players_response(PLAYERS_REPLY))
+        self.assertEqual(r['players'][2]['name'], "Jo\"hn 'Quote' O'Brien")
+
+    def test_header_and_footer_lines_are_ignored(self):
+        r = json.loads(self.client.parse_players_response("Players on server:\n(0 players in total)"))
+        self.assertEqual(r['count'], 0)
+
+
 if __name__ == '__main__':
     unittest.main()

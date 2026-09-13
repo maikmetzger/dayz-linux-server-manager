@@ -6,11 +6,43 @@ import argparse
 import time
 import select
 import hashlib
+import re
 
 # BattlEye RCON Protocol Constants
 BE_LOGIN = 0x00
 BE_COMMAND = 0x01
 BE_MESSAGE = 0x02
+
+# One row of the BE 'players' reply, e.g.
+#   0   1.2.3.4:2304   45   0123...cdef(OK) Name
+#   1   1.2.3.4:2304   -1   -(?) Name (Lobby)
+# Lobby/unverified players have no GUID yet ('-'), a '?' status and may
+# report a negative ping, so all three are optional here.
+PLAYER_LINE_RE = re.compile(
+    r'^\s*(?P<id>\d+)\s+(?P<ip>\S+)\s+(?P<ping>-?\d+)\s+'
+    r'(?P<guid>[a-f0-9]+|-)(?:\((?P<status>[^)]*)\))?\s+(?P<name>.+?)\s*$',
+    re.IGNORECASE)
+LOBBY_SUFFIX = '(Lobby)'
+
+
+def player_from_match(match):
+    """Turn a PLAYER_LINE_RE match into the player dict used by the TUI."""
+    name = match.group('name')
+    status = match.group('status') or ''
+    if name.endswith(LOBBY_SUFFIX):
+        name = name[:-len(LOBBY_SUFFIX)].rstrip()
+        status = 'Lobby'
+    guid = match.group('guid')
+    ip_port = match.group('ip')
+    return {
+        "id": int(match.group('id')),
+        "name": name,
+        "ping": int(match.group('ping')),
+        "guid": '' if guid == '-' else guid,
+        "ip": ip_port.split(':')[0] if ':' in ip_port else ip_port,
+        "status": status,
+    }
+
 
 class ResponseAssembler:
     """Collects the command-response packets for one command.
@@ -199,23 +231,9 @@ class BattlEyeRcon:
         for line in lines:
             # Match pattern: ID  IP:Port  Ping  GUID  Name
             # Example: 0   127.0.0.1:2304  45    abc123def456789abc123def45(OK) PlayerName
-            match = re.match(r'^\s*(\d+)\s+(\S+)\s+(\d+)\s+([a-f0-9]+)\((\w+)\)\s+(.+)$', line, re.IGNORECASE)
+            match = PLAYER_LINE_RE.match(line)
             if match:
-                player_id = match.group(1)
-                ip_port = match.group(2)
-                ping = match.group(3)
-                guid = match.group(4)
-                status = match.group(5)
-                name = match.group(6).strip()
-                
-                players.append({
-                    "id": int(player_id),
-                    "name": name,
-                    "ping": int(ping),
-                    "guid": guid,
-                    "ip": ip_port.split(':')[0] if ':' in ip_port else ip_port,
-                    "status": status
-                })
+                players.append(player_from_match(match))
         
         return json.dumps({"count": len(players), "players": players, "error": None})
 
