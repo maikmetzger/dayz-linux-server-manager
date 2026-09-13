@@ -307,6 +307,7 @@ players_menu() {
             player_pings=()
             player_guids=()
             player_times=()
+            player_joined=()
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
                 # Update session tracking and get times
