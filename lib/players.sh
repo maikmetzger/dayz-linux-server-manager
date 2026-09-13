@@ -27,29 +27,43 @@ json_get() {
     local json="$1"
     local path="$2"
     local default="${3:-}"
-    
-    python3 -c "
+
+    # Data is passed as arguments, never pasted into Python source:
+    # player names from RCON may contain quotes or backslashes.
+    python3 - "$json" "$path" "$default" <<'PY_JSON_GET'
 import json, sys
+raw, path, default = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
+    result = json.loads(raw)
+    for key in path.lstrip('.').split('.'):
         if key:
-            result = result.get(key, None) if isinstance(result, dict) else None
-            if result is None:
-                break
+            result = result.get(key) if isinstance(result, dict) else None
+        if result is None:
+            break
     if result is None:
-        print('$default')
+        print(default)
     elif isinstance(result, bool):
         print('true' if result else 'false')
     elif isinstance(result, (dict, list)):
         print(json.dumps(result))
     else:
         print(result)
-except:
-    print('$default')
-" 2>/dev/null
+except Exception:
+    print(default)
+PY_JSON_GET
+}
+
+# Build one player object as JSON.
+# Usage: json=$(player_to_json "$id" "$name" "$ping" "$guid")
+player_to_json() {
+    python3 - "$@" <<'PY_PLAYER_JSON'
+import json, sys
+pid, name, ping, guid = sys.argv[1:5]
+def num(v):
+    try: return int(v)
+    except ValueError: return 0
+print(json.dumps({"id": num(pid), "name": name, "ping": num(ping), "guid": guid}))
+PY_PLAYER_JSON
 }
 
 # Parse JSON array to lines using Python
@@ -57,22 +71,21 @@ except:
 json_array() {
     local json="$1"
     local path="$2"
-    
-    python3 -c "
+
+    python3 - "$json" "$path" <<'PY_JSON_ARRAY' 2>/dev/null
 import json, sys
+raw, path = sys.argv[1], sys.argv[2]
 try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
+    result = json.loads(raw)
+    for key in path.lstrip('.').split('.'):
         if key:
             result = result.get(key, []) if isinstance(result, dict) else []
     if isinstance(result, list):
         for item in result:
             print(json.dumps(item))
-except:
+except Exception:
     pass
-" 2>/dev/null
+PY_JSON_ARRAY
 }
 
 # Count JSON array length
@@ -80,20 +93,19 @@ except:
 json_count() {
     local json="$1"
     local path="$2"
-    
-    python3 -c "
-import json
+
+    python3 - "$json" "$path" <<'PY_JSON_COUNT' 2>/dev/null
+import json, sys
+raw, path = sys.argv[1], sys.argv[2]
 try:
-    data = json.loads('''$json''')
-    keys = '$path'.lstrip('.').split('.')
-    result = data
-    for key in keys:
+    result = json.loads(raw)
+    for key in path.lstrip('.').split('.'):
         if key:
             result = result.get(key, []) if isinstance(result, dict) else []
     print(len(result) if isinstance(result, list) else 0)
-except:
+except Exception:
     print(0)
-" 2>/dev/null
+PY_JSON_COUNT
 }
 
 # Create JSON object using Python
@@ -549,7 +561,8 @@ PYTHON_CLEANUP
             '') # Enter
                 if [[ $selected -lt $player_count ]]; then
                     # Open player details
-                    local full_player_data="{\"id\": ${player_ids[$selected]}, \"name\": \"${player_names[$selected]}\", \"ping\": ${player_pings[$selected]}, \"guid\": \"${player_guids[$selected]}\"}"
+                    local full_player_data
+                    full_player_data=$(player_to_json "${player_ids[$selected]}" "${player_names[$selected]}" "${player_pings[$selected]}" "${player_guids[$selected]}")
                     player_details_menu "$inst_dir" "$full_player_data"
                     needs_refresh=1
                 elif [[ $selected -eq $player_count ]]; then
@@ -835,33 +848,27 @@ save_ban_record() {
         echo '{"bans": []}' > "$bans_file"
     fi
     
-    # Create new ban entry using Python
-    local new_ban
-    new_ban=$(python3 -c "
-import json
-ban = {
-    'guid': '$guid',
-    'name': '''$name''',
-    'reason': '''$reason''',
-    'banned_at': '$now',
-    'expires': '$expires',
-    'duration_minutes': $duration_minutes
-}
-print(json.dumps(ban))
-" 2>/dev/null)
-    
-    # Read existing bans and append using Python
-    python3 -c "
-import json
+    # Append the record. Values are passed as arguments so a name or
+    # reason containing quotes can neither break the JSON nor run code.
+    python3 - "$bans_file" "$guid" "$name" "$reason" "$now" "$expires" "$duration_minutes" <<'PY_SAVE_BAN' 2>/dev/null
+import json, sys
+bans_file, guid, name, reason, now, expires, duration = sys.argv[1:8]
 try:
-    with open('$bans_file', 'r') as f:
+    with open(bans_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
-except:
+except (OSError, ValueError):
     data = {'bans': []}
-data['bans'].append($new_ban)
-with open('$bans_file', 'w') as f:
+data.setdefault('bans', []).append({
+    'guid': guid,
+    'name': name,
+    'reason': reason,
+    'banned_at': now,
+    'expires': expires,
+    'duration_minutes': int(duration),
+})
+with open(bans_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=2)
-" 2>/dev/null
+PY_SAVE_BAN
 }
 
 # =============================================================================
