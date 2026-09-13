@@ -124,7 +124,7 @@ main_menu() {
     while true; do
         draw_header "DayZ RCON Console"
         
-        local scan_root="${invoking_home}/servers"
+        local scan_root="${INVOKING_HOME}/servers"
         mapfile -t markers < <(discover_instances_under "${scan_root}")
         
         if [[ ${#markers[@]} -eq 0 ]]; then
