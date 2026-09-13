@@ -255,9 +255,9 @@ fb_browse_dir() {
                 # Human readable size
                 local size_str
                 if [[ $size_raw -gt 1048576 ]]; then
-                    size_str="$(echo "scale=1; $size_raw/1048576" | bc)M"
+                    size_str="$(printf '%d.%d' $((size_raw / 1048576)) $((size_raw % 1048576 * 10 / 1048576)))M"
                 elif [[ $size_raw -gt 1024 ]]; then
-                    size_str="$(echo "scale=1; $size_raw/1024" | bc)K"
+                    size_str="$(printf '%d.%d' $((size_raw / 1024)) $((size_raw % 1024 * 10 / 1024)))K"
                 else
                     size_str="${size_raw}B"
                 fi

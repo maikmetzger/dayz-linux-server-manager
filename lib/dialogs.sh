@@ -273,7 +273,8 @@ show_progress_end() {
     show_progress_update "$final_message" 100
     
     # Brief pause so user sees completion
-    sleep "$(echo "scale=3; $wait_ms / 1000" | bc)"
+    # Integer arithmetic only: bc is not a dependency of this project
+    sleep "$(printf '%d.%03d' $((wait_ms / 1000)) $((wait_ms % 1000)))"
 }
 
 # -----------------------------------------------------------------------------
