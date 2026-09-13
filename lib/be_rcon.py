@@ -12,6 +12,44 @@ BE_LOGIN = 0x00
 BE_COMMAND = 0x01
 BE_MESSAGE = 0x02
 
+class ResponseAssembler:
+    """Collects the command-response packets for one command.
+
+    BE packet layout: 'BE' + CRC32 (4) + 0xFF + type + sequence + payload.
+    A multipart reply marks the payload with 0x00 followed by the total
+    number of parts and the index of this part; the text follows after.
+    """
+    MULTIPART_MARKER = 0x00
+    HEADER_LEN = 9  # 'BE' + CRC32 + 0xFF + type + sequence
+
+    def __init__(self):
+        self.single = None
+        self.parts = {}
+        self.total = None
+
+    @property
+    def started(self):
+        return self.single is not None or bool(self.parts)
+
+    def feed(self, data):
+        """Feed one raw packet. Returns True once the reply is complete."""
+        if len(data) < self.HEADER_LEN or data[7] != BE_COMMAND:
+            # Too short, or a server message (chat) that is not our reply
+            return False
+        payload = data[self.HEADER_LEN:]
+        if len(payload) >= 3 and payload[0] == self.MULTIPART_MARKER:
+            self.total = payload[1]
+            self.parts[payload[2]] = payload[3:].decode('utf-8', errors='ignore')
+            return len(self.parts) >= self.total
+        self.single = payload.decode('utf-8', errors='ignore')
+        return True
+
+    def text(self):
+        if self.parts:
+            return "".join(self.parts[i] for i in sorted(self.parts))
+        return self.single or ""
+
+
 class BattlEyeRcon:
     def __init__(self, host, port, password, debug=False):
         self.host = host
@@ -110,44 +148,23 @@ class BattlEyeRcon:
         packet = self.create_packet(BE_COMMAND, seq_byte + cmd.encode('utf-8'))
         self.sock.send(packet)
         
-        # Wait for response(s)
-        # Responses might be multipart or simple ACK.
+        # Wait for the reply. It is one packet, or a multipart set that we
+        # reassemble. Returns None when no reply arrived at all.
         try:
-            responses = []
+            reply = ResponseAssembler()
             start_time = time.time()
             while time.time() - start_time < 2.0:
                 ready = select.select([self.sock], [], [], 0.5)
-                if ready[0]:
-                    data = self.sock.recv(4096)
-                    if len(data) < 7: continue
-                    
-                    # Header analysis
-                    # 'BE' + CRC + 0xFF + Type
-                    msg_type = data[7]
-                    
-                    if msg_type == BE_COMMAND:
-                        # This is likely the command response
-                        # Payload: [Sequence] [Text]
-                        text = data[9:].decode('utf-8', errors='ignore')
-                        responses.append(text)
-                        
-                        # Assuming single response for now, but loop to be safe for multipart
-                        # BE doesn't strictly signal "end of message" perfectly in UDP.
-                        # Break if we got something substantial?
-                        if len(text) > 0:
-                            # Heuristic: break after receiving data
-                            break
-                    elif msg_type == BE_MESSAGE:
-                        # Server message/Chat
-                        # [Sequence] [Text]
-                        text = data[9:].decode('utf-8', errors='ignore')
-                        # print(f"(Stream) {text}", file=sys.stderr) 
-                        pass
-                else:
-                    if responses: break
-                    
-            return "".join(responses)
-            
+                if not ready[0]:
+                    # Silence after a partial reply: return what we have
+                    if reply.started:
+                        break
+                    continue
+                if reply.feed(self.sock.recv(4096)):
+                    break
+
+            return reply.text() if reply.started else None
+
         except socket.timeout:
             if self.debug:
                 print(f"[DEBUG] Socket timeout waiting for response", file=sys.stderr)
