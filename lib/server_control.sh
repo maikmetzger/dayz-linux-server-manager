@@ -64,7 +64,6 @@ server_rcon_action() {
     local rcon_args=(
         --host "127.0.0.1"
         --port "$port"
-        --password "$pass"
         --action "$action"
     )
     
@@ -80,7 +79,8 @@ server_rcon_action() {
     fi
     
     docker cp "$python_src" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-    docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+    # Password via environment: command lines are visible in /proc and docker inspect
+    docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
 }
 
 # =============================================================================

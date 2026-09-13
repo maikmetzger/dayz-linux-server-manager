@@ -84,11 +84,11 @@ run_rcon() {
     while true; do
         set +e
         if [[ -n "${cmd}" ]]; then
-            $DOCKER exec "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}" --command "${cmd}"
+            $DOCKER exec -e "RCON_PASSWORD=${pass}" "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --command "${cmd}"
             local ret=$?
         else
             # Interactive mode needs -it
-            $DOCKER exec -it "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}" --password "${pass}"
+            $DOCKER exec -it -e "RCON_PASSWORD=${pass}" "${container_name}" python3 /tmp/rcon_client.py --host "${host}" --port "${port}"
             local ret=$?
         fi
         set -e

@@ -223,7 +223,6 @@ run_rcon_action() {
     local rcon_args=(
         --host "127.0.0.1"
         --port "$port"
-        --password "$pass"
         --action "$action"
     )
     
@@ -254,9 +253,9 @@ run_rcon_action() {
         rcon_args+=(--debug)
         echo "--- $(date) ---" >> "$debug_log"
         echo "Action: $action" >> "$debug_log"
-        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
+        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
     else
-        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
     fi
 }
 

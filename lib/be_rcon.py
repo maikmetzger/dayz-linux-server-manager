@@ -6,6 +6,7 @@ import argparse
 import time
 import select
 import hashlib
+import os
 import re
 
 # BattlEye RCON Protocol Constants
@@ -385,7 +386,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='BattlEye RCON Client for DayZ')
     parser.add_argument('--host', required=True, help='Server IP')
     parser.add_argument('--port', required=True, type=int, help='RCON Port')
-    parser.add_argument('--password', required=True, help='RCON Password')
+    parser.add_argument('--password', help='RCON password (prefer the RCON_PASSWORD env var: argv is readable by other processes)')
     parser.add_argument('--command', help='Single raw command to execute')
     
     # Action-based interface for TUI integration
@@ -404,8 +405,13 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='Enable debug output to stderr')
     
     args = parser.parse_args()
+
+    password = args.password or os.environ.get('RCON_PASSWORD', '')
+    if not password:
+        print('{"success": false, "error": "Missing RCON password (RCON_PASSWORD env var or --password)"}')
+        sys.exit(1)
     
-    client = BattlEyeRcon(args.host, args.port, args.password, debug=args.debug)
+    client = BattlEyeRcon(args.host, args.port, password, debug=args.debug)
     if client.connect():
         if args.action:
             # Auto-login before action commands using DayZ admin password

@@ -153,10 +153,9 @@ PYTHON_UPDATE
         local rcon_script="${SCRIPT_DIR}/be_rcon.py"
         if [[ -f "$rcon_script" ]]; then
             docker cp "$rcon_script" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-            docker exec "$container_name" python3 /tmp/rcon_client.py \
+            docker exec -e "RCON_PASSWORD=$rcon_pass" "$container_name" python3 /tmp/rcon_client.py \
                 --host 127.0.0.1 \
                 --port "$rcon_port" \
-                --password "$rcon_pass" \
                 --action loadbans 2>/dev/null || true
         fi
         
