@@ -35,7 +35,7 @@ server_rcon_action() {
     fi
     
     local container_name
-    container_name=$(grep -oP 'CONTAINER=\K.*' "$marker" 2>/dev/null || echo "")
+    container_name=$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")
     if [[ -z "$container_name" ]]; then
         echo '{"success": false, "error": "Container name not found"}'
         return 1
