@@ -889,9 +889,6 @@ except: pass
              local fn="${sfile_names[$midx]}"
              
              # Call Rollback UI (Phase 4)
-             local target_xml="${inst_dir}/serverfiles/mpmissions/dayzOffline.chernarusplus/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
-             # Fix path resolution (quick hack, ideally use get_mission_path)
-             # But prompt_rollback expects args...
              show_rollback_menu "$inst_dir" "${smod_names[$midx]}_${fn}" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
              
         elif [[ "$key" == "d" || "$key" == "D" ]]; then
@@ -937,9 +934,11 @@ except: pass
                 
                 # Check for merge-only types
                 if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    local target_file="db/cfgrandompresets.xml"
-                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    local target_xml
+                    if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                        show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                        continue
+                    fi
                     
                     unmerge_ce_file_python "$inst_dir" "$target_xml" "${smod_ids[$midx]}"
                     # Force re-scan to update status
@@ -970,10 +969,11 @@ except: pass
                     if confirm "Merge entries from '$fn' into main $ct?" "y"; then
                         # Call Python Merge Logic
                         # Phase 2 Implementation
-                        local target_file="db/cfgrandompresets.xml"
-                        if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                        
-                        local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                        local target_xml
+                        if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                            show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                            continue
+                        fi
                         
                         merge_ce_file_python "$inst_dir" "$target_xml" "$src" "${smod_ids[$midx]}" "${smod_names[$midx]}"
                         # Force re-scan to update status
@@ -1493,9 +1493,11 @@ cleanup_mod_ce_files() {
             if confirm "${action_label} '${fn}'?" "y"; then
                 # Check for merge-only types
                 if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    local target_file="db/cfgrandompresets.xml"
-                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    local target_xml
+                    if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                        show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                        continue
+                    fi
                     
                     unmerge_ce_file_python "$inst_dir" "$target_xml" "$mid"
                     count=$((count + 1))
@@ -1522,6 +1524,18 @@ cleanup_mod_ce_files() {
 # =============================================================================
 # Merge Tracking Wrappers (Phase 2)
 # =============================================================================
+
+# Resolve the merge target for merge-only CE types inside the active mission
+# (randompresets -> db/cfgrandompresets.xml, eventgroups -> db/cfgeventgroups.xml).
+# Usage: target_xml=$(ce_merge_target "$inst_dir" "$ce_type") || <no mission found>
+ce_merge_target() {
+    local inst_dir="$1" ce_type="$2"
+    local mission_path
+    mission_path=$(get_mission_path "$inst_dir") || return 1
+    local target_file="db/cfgrandompresets.xml"
+    [[ "$ce_type" == "eventgroups" ]] && target_file="db/cfgeventgroups.xml"
+    echo "${mission_path}/${target_file}"
+}
 
 # merge_ce_file_python "$inst_dir" "$target_xml" "$source_xml" "$mod_id" "$mod_name"
 merge_ce_file_python() {
