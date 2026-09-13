@@ -682,6 +682,9 @@ parse_scan_result() {
     smodified=()
     signored=()
     
+    # Keep the loop variables local: with bash's dynamic scoping an unqualified
+    # read would overwrite a caller's 'mid' (e.g. the mod being removed).
+    local sp mid mn fn ct st ln md
     while IFS='|' read -r sp mid mn fn ct st ln md; do
         [[ -z "$sp" ]] && continue
         src_paths+=("$sp")
