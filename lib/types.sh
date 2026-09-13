@@ -242,8 +242,8 @@ config_xml_editor() {
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -332,8 +332,8 @@ _draw_xml_filter_dialog() {
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || true
             case "$s" in
-                "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 4 ]] && ((d_sel++)) ;;
+                "[A") [[ $d_sel -gt 0 ]] && d_sel=$((d_sel - 1)) ;;
+                "[B") [[ $d_sel -lt 4 ]] && d_sel=$((d_sel + 1)) ;;
                 "") return ;;
             esac
         elif [[ "$k" == "" ]]; then
@@ -399,8 +399,8 @@ _edit_xml_item() {
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || true
             case "$s" in
-                "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 3 ]] && ((d_sel++)) ;;
+                "[A") [[ $d_sel -gt 0 ]] && d_sel=$((d_sel - 1)) ;;
+                "[B") [[ $d_sel -lt 3 ]] && d_sel=$((d_sel + 1)) ;;
                 "") return ;;
             esac
         elif [[ "$k" == "" ]]; then

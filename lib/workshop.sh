@@ -635,25 +635,25 @@ _draw_workshop_details_screen() {
     
     for ((i=0; i<display_authors; i++)); do
          move_to $a_row 15; printf "%s" "${authors_list[$i]:0:22}" # Truncate name width too
-         ((a_row++))
+         a_row=$((a_row + 1))
     done
     
     if [[ -n "$show_more_msg" ]]; then
          move_to $a_row 15; printf "%s%s%s" "$DIM" "$show_more_msg" "$RESET"
-         ((a_row++))
+         a_row=$((a_row + 1))
     fi
     
     # Continue after authors (Fixed fields)
     move_to $a_row 4; printf "%sSize     :%s %s" "$DIM" "$RESET" "$msize"
-    ((a_row++))
+    a_row=$((a_row + 1))
     move_to $a_row 4; printf "%sSubs     :%s %s" "$DIM" "$RESET" "$msubs"
-    ((a_row++))
+    a_row=$((a_row + 1))
     move_to $a_row 4; printf "%sType     :%s %s" "$DIM" "$RESET" "$mtype"
-    ((a_row++))
+    a_row=$((a_row + 1))
     move_to $a_row 4; printf "%sUpdated  :%s %s" "$DIM" "$RESET" "$mupdated"
-    ((a_row++))
+    a_row=$((a_row + 1))
     move_to $a_row 4; printf "%sReleased :%s %s" "$DIM" "$RESET" "$mreleased"
-    ((a_row++))
+    a_row=$((a_row + 1))
     
     # Rating Display
     local r_disp="-"
@@ -663,16 +663,16 @@ _draw_workshop_details_screen() {
          r_disp="? ($mrating_count)"
     fi
     move_to $a_row 4; printf "%sRating   :%s %s" "$DIM" "$RESET" "$r_disp"
-    ((a_row++))
+    a_row=$((a_row + 1))
     
     move_to $a_row 4; printf "%sDeps     :%s %s" "$DIM" "$RESET" "$mdeps"
-    ((a_row++))
+    a_row=$((a_row + 1))
     
     # Installed/Synced at bottom (local data)
     move_to $a_row 4; printf "%sInstalled:%s %s" "$DIM" "$RESET" "$minstalled"
-    ((a_row++))
+    a_row=$((a_row + 1))
     move_to $a_row 4; printf "%sSynced   :%s %s" "$DIM" "$RESET" "$msynced"
-    ((a_row++))
+    a_row=$((a_row + 1))
 
     # Images now accessible via 'i' key sub-pane (see input handling below)
 
@@ -921,15 +921,15 @@ except: pass
                     for ((i=img_scroll; i<${#mimages[@]} && row < TERM_ROWS - 2; i++)); do
                         move_to $row 4
                         printf "%s[%02d] %s%s" "$WHITE" "$((i+1))" "${mimages[$i]}" "$RESET"
-                        ((row++))
+                        row=$((row + 1))
                     done
                     
                     IFS= read -rsn1 ik
                     if [[ "$ik" == $'\x1b' ]]; then
                         read -rsn2 -t 0.1 is || break
                         case "$is" in
-                            "[A") [[ $img_scroll -gt 0 ]] && ((img_scroll--)) ;;
-                            "[B") [[ $img_scroll -lt $((${#mimages[@]} - img_view_height)) ]] && ((img_scroll++)) ;;
+                            "[A") [[ $img_scroll -gt 0 ]] && img_scroll=$((img_scroll - 1)) ;;
+                            "[B") [[ $img_scroll -lt $((${#mimages[@]} - img_view_height)) ]] && img_scroll=$((img_scroll + 1)) ;;
                         esac
                     elif [[ "$ik" == "q" || "$ik" == "Q" || "$ik" == " " ]]; then
                         break
@@ -995,8 +995,8 @@ _draw_workshop_filter_dialog() {
         if [[ "$k" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 s || true
             case "$s" in
-                "[A") [[ $d_sel -gt 0 ]] && ((d_sel--)) ;;
-                "[B") [[ $d_sel -lt 4 ]] && ((d_sel++)) ;;
+                "[A") [[ $d_sel -gt 0 ]] && d_sel=$((d_sel - 1)) ;;
+                "[B") [[ $d_sel -lt 4 ]] && d_sel=$((d_sel + 1)) ;;
                 "") return 1 ;;
             esac
         elif [[ "$k" == "" ]]; then
@@ -1116,11 +1116,11 @@ except Exception as e:
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || { continue; } # ESC pressed
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
-                "") [[ $count -gt 0 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right (Fallback)
-                "[D") [[ $current_page -gt 1 ]] && { ((current_page--)); selection=0; offset=0; f_changed=1; } ;; # Left
-                "[C") [[ $count -gt 0 ]] && { ((current_page++)); selection=0; offset=0; f_changed=1; } ;; # Right
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
+                "") [[ $count -gt 0 ]] && { current_page=$((current_page + 1)); selection=0; offset=0; f_changed=1; } ;; # Right (Fallback)
+                "[D") [[ $current_page -gt 1 ]] && { current_page=$((current_page - 1)); selection=0; offset=0; f_changed=1; } ;; # Left
+                "[C") [[ $count -gt 0 ]] && { current_page=$((current_page + 1)); selection=0; offset=0; f_changed=1; } ;; # Right
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then return
         elif [[ "$key" == "f" || "$key" == "F" ]]; then

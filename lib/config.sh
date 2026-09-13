@@ -864,7 +864,7 @@ config_table_editor() {
                     printf "%s%s" "$DIM" "$d_memo"
                     printf "%s" "$RESET"
                 fi
-                ((row++))
+                row=$((row + 1))
             done
             
             # 4. Description Bar (Full memo at bottom)

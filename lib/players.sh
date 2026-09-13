@@ -524,7 +524,7 @@ PYTHON_CLEANUP
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row
@@ -1063,7 +1063,7 @@ ban_list_menu() {
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row

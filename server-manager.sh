@@ -538,7 +538,7 @@ END_PYTHON
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row
@@ -882,7 +882,7 @@ except: pass
                                         for ((i=0; i<ce_count; i++)); do
                                             if [[ ${ce_selected[$i]} -eq 1 ]]; then
                                                 register_modular_loot "$SELECTED_DIR" "${ce_file_paths[$i]}" "${ce_mod_ids[$i]}" 1 "${ce_types[$i]}"
-                                                ((link_count++))
+                                                link_count=$((link_count + 1))
                                             fi
                                         done
                                         [[ $link_count -gt 0 ]] && show_message "Linked $link_count CE file(s)!" "Success"

@@ -269,7 +269,7 @@ fb_browse_dir() {
                     printf "  %s %-*s %-8s %-19s %-19s" "$icon" "$((name_w-3))" "${name:0:$((name_w-4))}" "$size_str" "$btime" "$mtime"
                 fi
             fi
-            ((row++))
+            row=$((row + 1))
         done
 
         # Footer
@@ -288,8 +288,8 @@ fb_browse_dir() {
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') [[ $selected -gt 0 ]] && ((selected--)) ;;
-                    '[B') [[ $selected -lt $((count-1)) ]] && ((selected++)) ;;
+                    '[A') [[ $selected -gt 0 ]] && selected=$((selected - 1)) ;;
+                    '[B') [[ $selected -lt $((count-1)) ]] && selected=$((selected + 1)) ;;
                 esac
                 ;;
             '') # Enter

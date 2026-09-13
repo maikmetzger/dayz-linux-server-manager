@@ -560,8 +560,8 @@ workshop_folder_browser() {
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -880,8 +880,8 @@ except: pass
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -1885,7 +1885,7 @@ prompt_ce_merge() {
                 local label="${item#*|}"
                 printf "   %s %s" "$icon" "$label"
             fi
-            ((row++))
+            row=$((row + 1))
         done
         
         # Read key
@@ -1894,12 +1894,12 @@ prompt_ce_merge() {
             $'\x1b')
                 read -rsn2 -t 0.1 seq
                 case "$seq" in
-                    '[A') ((selection > 0)) && ((selection--)) ;;
-                    '[B') ((selection < ${#items[@]} - 1)) && ((selection++)) ;;
+                    '[A') ((selection > 0)) && selection=$((selection - 1)) ;;
+                    '[B') ((selection < ${#items[@]} - 1)) && selection=$((selection + 1)) ;;
                 esac
                 # Skip separators
-                while [[ "${items[$selection]}" == "----"* && $selection -gt 0 ]]; do ((selection--)); done
-                while [[ "${items[$selection]}" == "----"* && $selection -lt $((${#items[@]} - 1)) ]]; do ((selection++)); done
+                while [[ "${items[$selection]}" == "----"* && $selection -gt 0 ]]; do selection=$((selection - 1)); done
+                while [[ "${items[$selection]}" == "----"* && $selection -lt $((${#items[@]} - 1)) ]]; do selection=$((selection + 1)); done
                 ;;
             '')
                 local selected_item="${items[$selection]}"

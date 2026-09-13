@@ -156,7 +156,7 @@ _find_next_valid() {
         elif [[ $next -ge $count ]]; then
             next=0
         fi
-        ((checked++))
+        checked=$((checked + 1))
     done
     
     # Fallback (all separators?)
