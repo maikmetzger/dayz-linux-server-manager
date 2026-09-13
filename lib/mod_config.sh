@@ -665,6 +665,45 @@ view_file_content() {
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
 # Uses scan_dayz_ce_files_python to get data
+# Parse the CE scan JSON into the shared arrays (src_paths, smod_ids, states, ...).
+# Top-level on purpose: cleanup_mod_ce_files needs it too, not only the dashboard.
+parse_scan_result() {
+    local json="$1"
+    # Reset arrays
+    src_paths=()
+    smod_ids=()
+    smod_names=()
+    sfile_names=()
+    sce_types=()
+    states=()
+    slinked_names=()
+    smodified=()
+    signored=()
+    
+    while IFS='|' read -r sp mid mn fn ct st ln md; do
+        [[ -z "$sp" ]] && continue
+        src_paths+=("$sp")
+        smod_ids+=("$mid")
+        smod_names+=("$mn")
+        sfile_names+=("$fn")
+        sce_types+=("$ct")
+        states+=("$st")
+        slinked_names+=("$ln")
+        smodified+=("$md")
+        signored+=(0)  # Will be checked after
+    done < <(echo "$json" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    for i in data:
+        st = 1 if i.get('status') == 'linked' else 0
+        ln = i.get('linked_filename', '')
+        md = 1 if i.get('modified', False) else 0
+        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
+except: pass
+")
+}
+
 modular_loot_dashboard() {
     local inst_dir="$1"
     
@@ -677,43 +716,6 @@ modular_loot_dashboard() {
     # Error trap for debugging - catches which line causes exit
     trap 'echo "[CRASH] Line $LINENO: $BASH_COMMAND" >> "${SCRIPT_DIR}/loot_manager.log"' ERR
     
-    # helper to parse JSON array to bash arrays
-    parse_scan_result() {
-        local json="$1"
-        # Reset arrays
-        src_paths=()
-        smod_ids=()
-        smod_names=()
-        sfile_names=()
-        sce_types=()
-        states=()
-        slinked_names=()
-        smodified=()
-        signored=()
-        
-        while IFS='|' read -r sp mid mn fn ct st ln md; do
-            [[ -z "$sp" ]] && continue
-            src_paths+=("$sp")
-            smod_ids+=("$mid")
-            smod_names+=("$mn")
-            sfile_names+=("$fn")
-            sce_types+=("$ct")
-            states+=("$st")
-            slinked_names+=("$ln")
-            smodified+=("$md")
-            signored+=(0)  # Will be checked after
-        done < <(echo "$json" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    for i in data:
-        st = 1 if i.get('status') == 'linked' else 0
-        ln = i.get('linked_filename', '')
-        md = 1 if i.get('modified', False) else 0
-        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
-except: pass
-")
-    }
     
     # Check ignore status for all parsed files
     check_ignore_status() {
