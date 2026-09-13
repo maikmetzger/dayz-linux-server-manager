@@ -21,6 +21,7 @@ import os
 import re
 import json
 from typing import Dict, List, Tuple, Optional, Any
+from fileutil import atomic_write_text
 
 
 # =============================================================================
@@ -50,9 +51,8 @@ class CfgParser:
             self.lines = f.readlines()
     
     def save(self) -> None:
-        """Save file contents."""
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.writelines(self.lines)
+        """Save file contents (atomically, a crash cannot truncate the file)."""
+        atomic_write_text(self.path, ''.join(self.lines))
     
     def _parse_value(self, raw: str) -> str:
         """Parse a value, removing quotes if present."""
@@ -144,9 +144,8 @@ class BEServerParser:
             self.lines = f.readlines()
     
     def save(self) -> None:
-        """Save file contents."""
-        with open(self.path, 'w', encoding='utf-8') as f:
-            f.writelines(self.lines)
+        """Save file contents (atomically, a crash cannot truncate the file)."""
+        atomic_write_text(self.path, ''.join(self.lines))
     
     def list_keys(self) -> List[str]:
         """List all keys in the config file."""

@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import json
 import argparse
 from typing import Optional, Dict, Any
+from fileutil import atomic_write_text, atomic_write_tree
 
 # =============================================================================
 # CE Type Registry (Open/Closed Principle - extend here, not in logic)
@@ -390,8 +391,7 @@ def write_fragment(wrapper_root, xml_path, had_declaration=False):
             ET.indent(child, space="    ", level=0)
         chunks.append(ET.tostring(child, encoding='unicode').rstrip())
     head = '<?xml version="1.0" encoding="UTF-8"?>\n' if had_declaration else ''
-    with open(xml_path, 'w', encoding='utf-8') as f:
-        f.write(head + "\n".join(chunks) + "\n")
+    atomic_write_text(xml_path, head + "\n".join(chunks) + "\n")
 
 
 def update(xml_path, item_name, key, value):
@@ -423,7 +423,7 @@ def update(xml_path, item_name, key, value):
         else:
             if sys.version_info >= (3, 9):
                 ET.indent(tree, space="    ", level=0)
-            tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+            atomic_write_tree(tree, xml_path, encoding='utf-8', xml_declaration=True)
         print("Success")
     except Exception as e:
         print(f"Error writing XML: {e}", file=sys.stderr)
@@ -612,7 +612,7 @@ def merge_ce_files(source_path: str, local_path: str, original_path: str = None)
         # Write merged file
         if sys.version_info >= (3, 9):
             ET.indent(local_tree, space="    ", level=0)
-        local_tree.write(local_path, encoding='utf-8', xml_declaration=True)
+        atomic_write_tree(local_tree, local_path, encoding='utf-8', xml_declaration=True)
         
         return result
         

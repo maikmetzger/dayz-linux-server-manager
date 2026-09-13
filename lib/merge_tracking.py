@@ -5,6 +5,7 @@ import sys
 import xml.etree.ElementTree as ET
 import re
 from datetime import datetime
+from fileutil import atomic_write_text, atomic_write_tree
 from typing import Dict, List, Optional, Any
 
 # =============================================================================
@@ -164,7 +165,7 @@ def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: st
     indent(target_root)
     
     # Write
-    target_tree.write(target_file, encoding='utf-8', xml_declaration=True)
+    atomic_write_tree(target_tree, target_file, encoding='utf-8', xml_declaration=True)
     
     return added_entries
 
@@ -199,7 +200,7 @@ def remove_entries(target_file: str, entries_to_remove: List[Dict[str, Any]]) ->
             
     if removed_count > 0:
         indent(root)
-        tree.write(target_file, encoding='utf-8', xml_declaration=True)
+        atomic_write_tree(tree, target_file, encoding='utf-8', xml_declaration=True)
         return True
         
     return False
@@ -231,8 +232,7 @@ def save_tracking(instance_dir: str, target_file: str, data: Dict[str, Any]):
     path = get_tracking_path(instance_dir, target_file)
     data["last_updated"] = datetime.now().isoformat()
     
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_text(path, json.dumps(data, indent=2))
 
 def check_collisions(source_xml_path: str, target_xml_path: str) -> List[Dict[str, str]]:
     """
