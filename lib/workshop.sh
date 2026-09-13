@@ -1172,7 +1172,7 @@ except Exception as e:
                         fi
                     done < <(echo "$chain_json" | python3 -c "import sys, json; [print(f\"{x['id']}|{x['name']}\") for x in json.load(sys.stdin)]" 2>> /tmp/workshop_crash.log)
                     echo "INSTALL: Found ${#to_install_ids[@]} mods to install" >> /tmp/workshop_crash.log
-                    if [[ ${#to_install_ids[@]} -eq 0 ]]; then show_message "This mod (and dependencies) are already in your list." "Info"; continue; fi
+                    if [[ ${#to_install_ids[@]} -eq 0 ]]; then show_message "This mod (and dependencies) are already in your list." "Info"; set -e; continue; fi
                     local install_summary="${to_install_names[*]}"
                     [[ ${#to_install_names[@]} -gt 3 ]] && install_summary="${to_install_names[0]}, ${to_install_names[1]} and $(( ${#to_install_names[@]} - 2 )) more"
                     echo "INSTALL: About to confirm" >> /tmp/workshop_crash.log
@@ -1192,6 +1192,8 @@ except Exception as e:
                         f_changed=1; show_message "Mod(s) added to your list. Run 'Sync' to download." "Added"
                     fi
                 else show_message "This mod is already in your list." "Info"; fi
+                # Re-enable strict mode: it was only meant to be off for the install block
+                set -e
             fi
         fi
     done
