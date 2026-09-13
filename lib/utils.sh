@@ -29,6 +29,9 @@ is_cmd() { command -v "$1" >/dev/null 2>&1; }
 show_cmd() { printf '  %s$ %s%s\n' "${DIM:-}" "$*" "${RESET:-}"; }
 run_shell() { show_cmd "$*"; eval "$*"; }
 run_arr() { show_cmd "$*"; "$@"; }
+# Run a command inside a directory without eval (paths may contain quotes/spaces)
+# Usage: run_in_dir "/path/to/instance" docker compose up -d
+run_in_dir() { local dir="$1"; shift; show_cmd "cd '$dir' && $*"; (cd "$dir" && "$@"); }
 
 # -----------------------------------------------------------------------------
 # User Identity Resolution
