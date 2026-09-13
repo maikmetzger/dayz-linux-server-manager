@@ -2,6 +2,7 @@
 """Regression tests for lib/be_rcon.py (BattlEye RCON client)."""
 import os
 import sys
+import json
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'lib'))
@@ -43,6 +44,33 @@ class ResponseAssemblerTest(unittest.TestCase):
         r = be_rcon.ResponseAssembler()
         self.assertFalse(r.feed(b'BE'))
         self.assertFalse(r.started)
+
+
+class ActionResultTest(unittest.TestCase):
+    """Actions must not claim success when the server never answered."""
+
+    def _client(self, reply):
+        c = be_rcon.BattlEyeRcon('127.0.0.1', 1, 'x')
+        c.send_command = lambda cmd: reply
+        return c
+
+    def test_ban_fails_when_server_never_answers(self):
+        r = json.loads(self._client(None).action_ban('Bob', 'abc'))
+        self.assertFalse(r['success'])
+        self.assertIsNotNone(r['error'])
+
+    def test_ban_succeeds_on_empty_ack(self):
+        r = json.loads(self._client('').action_ban('Bob', 'abc'))
+        self.assertTrue(r['success'])
+        self.assertIsNone(r['error'])
+
+    def test_kick_reports_failure_without_reply(self):
+        self.assertFalse(json.loads(self._client(None).action_kick('Bob'))['success'])
+
+    def test_monitor_passes_reply_through(self):
+        r = json.loads(self._client('FPS 42').action_monitor(1))
+        self.assertTrue(r['success'])
+        self.assertEqual(r['response'], 'FPS 42')
 
 
 if __name__ == '__main__':

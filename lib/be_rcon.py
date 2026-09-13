@@ -219,6 +219,23 @@ class BattlEyeRcon:
         
         return json.dumps({"count": len(players), "players": players, "error": None})
 
+    @staticmethod
+    def _action_result(replies, response=None):
+        """Build the JSON result of an action.
+
+        replies are the raw send_command() results. None means the server
+        never answered (not connected, or timeout), so the action failed.
+        """
+        import json
+        ok = all(r is not None for r in replies)
+        if response is None:
+            response = replies[0] if len(replies) == 1 else ", ".join(str(r) for r in replies)
+        return json.dumps({
+            "success": ok,
+            "response": response,
+            "error": None if ok else "No reply from server (connection lost or timeout)"
+        })
+
     def action_players(self):
         """Get list of online players as JSON."""
         resp = self.send_command("players")
@@ -230,7 +247,7 @@ class BattlEyeRcon:
         # BattlEye #kick uses player name (reason not supported)
         cmd = f"#kick {player_name}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_ban(self, player_name, player_guid):
         """Ban an ONLINE player: kick them, then add GUID to ban list.
@@ -251,41 +268,40 @@ class BattlEyeRcon:
         ban_resp = self.send_command(ban_cmd)
         
         # Step 3: Persist bans to bans.txt
-        self.send_command("writeBans")
-        
-        return json.dumps({
-            "success": True, 
-            "response": f"Kicked: {kick_resp}, Banned: {ban_resp}", 
-            "error": None
-        })
+        write_resp = self.send_command("writeBans")
+
+        # Every step must have been answered by the server, otherwise the
+        # ban did not happen and must not be reported as success.
+        return self._action_result([kick_resp, ban_resp, write_resp],
+                                   f"Kicked: {kick_resp}, Banned: {ban_resp}")
     
     def action_ban_by_guid(self, player_guid):
         """Ban a player by GUID (for bans.txt management)."""
         import json
         cmd = f"addBan {player_guid} -1"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_unban(self, player_guid):
         """Unban a player by GUID/Steam64ID."""
         import json
         cmd = f"#exec unban {player_guid}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_say(self, message, player_id=-1):
         """Send a message to all players (-1) or specific player."""
         import json
         cmd = f"say {player_id} {message}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_loadbans(self):
         """Reload bans.txt file."""
         import json
         # BattlEye command to reload bans from bans.txt
         resp = self.send_command("loadBans")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     # ==========================================================================
     # Server Control Actions
@@ -295,25 +311,25 @@ class BattlEyeRcon:
         """Graceful server shutdown via #shutdown."""
         import json
         resp = self.send_command("#shutdown")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_lock(self):
         """Lock server - prevent new connections."""
         import json
         resp = self.send_command("#lock")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_unlock(self):
         """Unlock server - allow new connections."""
         import json
         resp = self.send_command("#unlock")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_monitor(self, seconds=5):
         """Get performance monitoring data."""
         import json
         resp = self.send_command(f"#monitor {seconds}")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_login(self, admin_password=None):
         """Explicit RCON admin login using DayZ passwordAdmin (not RCON password)."""
@@ -325,7 +341,7 @@ class BattlEyeRcon:
         resp = self.send_command(f"#login {password}")
         if self.debug:
             print(f"[DEBUG] #login response: {resp}", file=sys.stderr)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
 
     def interactive(self):
         """Interactive RCON console mode."""
