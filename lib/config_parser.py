@@ -71,10 +71,18 @@ class CfgParser:
             return f'"{value}"'
         elif original_raw.startswith("'"):
             return f"'{value}'"
-        # If it looks like a string (contains spaces or is non-numeric), quote it
-        if not value.replace('.', '').replace('-', '').isdigit() and ' ' in value:
-            return f'"{value}"'
-        return value
+        # Unquoted original: numbers and booleans stay bare, everything else is
+        # quoted. DayZ reads unquoted text such as 1-2-3 or MyServer as garbage.
+        if self._is_bare_literal(value):
+            return value
+        return f'"{value}"'
+
+    BARE_NUMBER = re.compile(r'^-?\d+(\.\d+)?$')
+
+    @classmethod
+    def _is_bare_literal(cls, value: str) -> bool:
+        """True for values DayZ accepts without quotes: numbers and booleans."""
+        return value.lower() in ('true', 'false') or bool(cls.BARE_NUMBER.match(value))
     
     def list_keys(self) -> List[str]:
         """List all keys in the config file."""
