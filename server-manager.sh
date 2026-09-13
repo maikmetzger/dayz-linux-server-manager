@@ -261,87 +261,84 @@ cache_json = os.environ.get('CACHE_JSON', '{}')
 
 try:
     data = json.loads(cache_json) if cache_json else {}
-    mods_info = data.get('mods', {})
-    
-    def fmt(ts):
-        if not ts or ts == 0: return '-'
-        # Compact format: 02.01.26 14:00
-        return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
-    
-    for mid in mod_ids:
-        if not mid: continue
-        m = mods_info.get(mid, {})
-        
-        # Check both potential workshop paths and pick the newest one
-        # to handle mirrored folders smoothly.
-        p1 = os.path.join(ws_path1, mid)
-        p2 = os.path.join(ws_path2, mid)
-        choices = [p for p in [p1, p2] if os.path.exists(p)]
-        m_path = max(choices, key=lambda x: os.path.getmtime(x)) if choices else None
-        
-        local_v = 0
-        install_ts = 0
-        
-        # Local Stats
-        if os.path.exists(m_path):
-            # SYNCED (local_v) = actual filesystem modification time
-            # We touch this on every sync/fix, so it tells us when we last processed it.
-            local_v = int(os.path.getmtime(m_path))
-            
-            # INSTALLED (install_ts) = Persistent original install date
-            f_inst = os.path.join(m_path, '.first_installed')
-            v_file = os.path.join(m_path, '.installed_version')
-            
-            if os.path.exists(f_inst):
-                 try:
-                     with open(f_inst) as f: install_ts = int(f.read().strip())
-                 except: install_ts = int(os.path.getctime(m_path))
-            elif os.path.exists(v_file):
-                 # Fallback: check .installed_version (Steam timestamp)
-                 try:
-                     with open(v_file) as f: install_ts = int(f.read().strip())
-                 except: install_ts = int(os.path.getctime(m_path))
-            else:
-                 install_ts = int(os.path.getctime(m_path))
-        
-        # Deployment Check
-        is_deployed = False
-        if m_path:
-            try:
-                check_roots = []
-                p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))
-                check_roots.append(p1)
-                
-                if 'serverfiles' in m_path:
-                    parts = m_path.split(os.sep)
-                    if 'serverfiles' in parts:
-                        idx = parts.index('serverfiles')
-                        p2 = os.sep.join(parts[:idx+1])
-                        check_roots.append(p2)
-                
-                for r in check_roots:
-                    # Use lexists for Docker symlinks
-                    if os.path.lexists(os.path.join(r, f'@{mid}')):
-                        is_deployed = True
-                        break
-            except: pass
+except Exception:
+    data = {}
+mods_info = data.get('mods', {})
 
-        # Remote Stats
-        remote_v = m.get('updated', 0)
-        if remote_v == 0: remote_v = m.get('latest', 0)
-        
-        reason = ''
-        if (remote_v > local_v): reason += 'U'
-        if (local_v == 0): reason += 'M'
-        if (not is_deployed): reason += 'D'
-        
-        has_update = (len(reason) > 0)
-        
-        # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
-        print(f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{1 if has_update else 0}|{reason}')
-except Exception as e:
-    # Fallback for ALL mods if crash
-    for _ in mod_ids: print('-|-|-|1|Err')
+def fmt(ts):
+    if not ts or ts == 0: return '-'
+    # Compact format: 02.01.26 14:00
+    return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
+
+def read_ts(path, fallback):
+    try:
+        with open(path) as f: return int(f.read().strip())
+    except Exception:
+        return int(fallback)
+
+def is_deployed_anywhere(m_path, mid):
+    # Look for the @<id> symlink next to serverfiles and next to steamapps
+    check_roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))]
+    parts = m_path.split(os.sep)
+    if 'serverfiles' in parts:
+        idx = parts.index('serverfiles')
+        check_roots.append(os.sep.join(parts[:idx+1]))
+    # Use lexists for Docker symlinks
+    return any(os.path.lexists(os.path.join(r, f'@{mid}')) for r in check_roots)
+
+def status_line(mid):
+    m = mods_info.get(mid, {})
+
+    # Check both potential workshop paths and pick the newest one
+    # to handle mirrored folders smoothly. m_path stays None when the
+    # mod has not been downloaded yet.
+    choices = [p for p in (os.path.join(ws_path1, mid), os.path.join(ws_path2, mid)) if os.path.exists(p)]
+    m_path = max(choices, key=os.path.getmtime) if choices else None
+
+    local_v = 0
+    install_ts = 0
+    is_deployed = False
+
+    if m_path:
+        # SYNCED (local_v) = actual filesystem modification time
+        # We touch this on every sync/fix, so it tells us when we last processed it.
+        local_v = int(os.path.getmtime(m_path))
+
+        # INSTALLED (install_ts) = Persistent original install date
+        f_inst = os.path.join(m_path, '.first_installed')
+        v_file = os.path.join(m_path, '.installed_version')
+        ctime = os.path.getctime(m_path)
+        if os.path.exists(f_inst):
+            install_ts = read_ts(f_inst, ctime)
+        elif os.path.exists(v_file):
+            # Fallback: check .installed_version (Steam timestamp)
+            install_ts = read_ts(v_file, ctime)
+        else:
+            install_ts = int(ctime)
+
+        try:
+            is_deployed = is_deployed_anywhere(m_path, mid)
+        except Exception:
+            is_deployed = False
+
+    # Remote Stats
+    remote_v = m.get('updated', 0) or m.get('latest', 0)
+
+    reason = ''
+    if remote_v > local_v: reason += 'U'
+    if local_v == 0: reason += 'M'
+    if not is_deployed: reason += 'D'
+
+    has_update = 1 if reason else 0
+    # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
+    return f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{has_update}|{reason}'
+
+for mid in mod_ids:
+    # Exactly one line per mod, always: one broken mod must not hide the others.
+    try:
+        print(status_line(mid))
+    except Exception:
+        print('-|-|-|1|Err')
 END_PYTHON
             )
             
