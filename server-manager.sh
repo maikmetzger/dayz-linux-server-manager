@@ -119,6 +119,50 @@ select_instance() {
 # =============================================================================
 # Mod Manager (TUI)
 # =============================================================================
+# Let the user pick one mod from the current list via a menu.
+# Uses the caller's mod_ids/mod_count. On success MENU_RESULT holds the
+# index into mod_ids; returns 1 when the user cancels.
+_mod_manager_pick_mod() {
+    local title="$1"
+    local -a pick_items=()
+    local i
+    for ((i=0; i<mod_count; i++)); do
+        pick_items+=("📦|$(get_mod_name "${mod_ids[$i]}") (${mod_ids[$i]})")
+    done
+    pick_items+=("--------------------")
+    pick_items+=("←|Cancel")
+    run_menu pick_items "$title" || return 1
+    [[ $MENU_RESULT -lt $mod_count ]] || return 1
+    return 0
+}
+
+# Remove one mod: dependency check, confirmation, CE cleanup, key cleanup.
+# Uses the caller's mod_ids/mods_file/servermods_file.
+# Returns 0 when the mod was removed, 1 otherwise.
+_mod_manager_remove_mod() {
+    local mid="$1"
+    local mname
+    mname=$(get_mod_name "$mid")
+
+    local blocker
+    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
+    if [[ -n "$blocker" ]]; then
+        show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
+        return 1
+    fi
+    confirm "Remove mod '$mname' from list?" "n" || return 1
+
+    # Auto-Cleanup CE (unlink/unmerge)
+    cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
+
+    local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
+    local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+    local removed_keys
+    removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
+    show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
+    return 0
+}
+
 mod_manager() {
     local mods_file="${SELECTED_DIR}/data/config/mods.txt"
     local servermods_file="${SELECTED_DIR}/data/config/servermods.txt"
@@ -602,25 +646,7 @@ END_PYTHON
                 ;;
             'r'|'R')
                 if [[ $selected -lt $mod_count ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    local mname=$(get_mod_name "$mid")
-                    
-                    # Dependency Protection
-                    local blocker
-                    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
-                    if [[ -n "$blocker" ]]; then
-                        show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
-                    elif confirm "Remove mod '$mname' from list?" "n"; then
-                        # Auto-Cleanup CE (unlink/unmerge)
-                        cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
-                        
-                        # Paths for key cleanup
-                        local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
-                        local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
-                        
-                        local removed_keys
-                        removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
-                        show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
+                    if _mod_manager_remove_mod "${mod_ids[$selected]}"; then
                         dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
                         [[ $selected -lt 0 ]] && selected=0
@@ -658,25 +684,14 @@ END_PYTHON
                         fi
                     fi
                 elif [[ $selected -eq $((mod_count + 1)) ]]; then
-                    # Remove
-                    if [[ $selected -lt $mod_count ]]; then
-                        local mid="${mod_ids[$selected]}"
-                        local mname=$(get_mod_name "$mid")
-                        
-                        # Dependency Protection
-                        local blocker
-                        blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
-                        if [[ -n "$blocker" ]]; then
-                            show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
-                        elif confirm "Remove mod '$mname' from list?" "n"; then
-                            # Auto-Cleanup CE (unlink/unmerge)
-                            cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
-                            removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
-                            show_message "Removed: $mname" "Success"
+                    # Remove: while the cursor sits on the action bar no mod is
+                    # highlighted, so let the user pick one from a list.
+                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Remove which mod?"; then
+                        if _mod_manager_remove_mod "${mod_ids[$MENU_RESULT]}"; then
                             dirty=1; needs_rebuild=1; touch "$needs_sync_file"
+                            # The list shrinks by one, keep the cursor on this button
+                            selected=$((selected - 1))
                         fi
-                    else
-                        show_message "Select a mod to remove first" "Info"
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Sync
@@ -704,11 +719,10 @@ END_PYTHON
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
-                     # Info
-                    if [[ $selected -lt $mod_count ]]; then
-                        local mid="${mod_ids[$selected]}"
-                         _view_mod_details "$mid" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                         needs_rebuild=1
+                    # Info: same as Remove, pick the mod from a list
+                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Show info for which mod?"; then
+                        _view_mod_details "${mod_ids[$MENU_RESULT]}" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                        needs_rebuild=1
                     fi
                 elif [[ $selected -eq $((mod_count + 5)) ]]; then
                     return 0
