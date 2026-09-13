@@ -147,13 +147,20 @@ def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: st
     if not items_to_merge:
         return []
 
+    # Names already present in the target: running the same merge twice
+    # must not duplicate entries (duplicates break the server's loot balance).
+    existing = {(child.tag, child.get('name')) for child in target_root if child.get('name')}
+
     # Adding items
+    import copy
     for item in items_to_merge:
+        if (item.tag, item.get('name')) in existing:
+            continue
         # Deep copy item to avoid weirdness
-        import copy
         new_item = copy.deepcopy(item)
         
         target_root.append(new_item)
+        existing.add((item.tag, item.get('name')))
         
         added_entries.append({
             "name": item.get('name'),
