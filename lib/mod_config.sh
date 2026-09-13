@@ -650,11 +650,13 @@ view_file_content() {
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
+            # Last valid offset; a file shorter than the window must never go negative
+            local max_offset=$(( total_lines > v_height ? total_lines - v_height : 0 ))
             case "$seq" in
-                "[A") [[ $offset -gt 0 ]] && ((offset--)) ;;
-                "[B") [[ $offset -lt $((total_lines - v_height)) ]] && ((offset++)) ;;
-                "[5") ((offset -= v_height)); [[ $offset -lt 0 ]] && offset=0 ;;  # Page Up
-                "[6") ((offset += v_height)); [[ $offset -gt $((total_lines - v_height)) ]] && offset=$((total_lines - v_height)) ;;  # Page Down
+                "[A") [[ $offset -gt 0 ]] && offset=$((offset - 1)) ;;
+                "[B") [[ $offset -lt $max_offset ]] && offset=$((offset + 1)) ;;
+                "[5") offset=$((offset - v_height)); [[ $offset -lt 0 ]] && offset=0 ;;  # Page Up
+                "[6") offset=$((offset + v_height)); [[ $offset -gt $max_offset ]] && offset=$max_offset ;;  # Page Down
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -712,9 +714,6 @@ modular_loot_dashboard() {
     local offset=0
     
     echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
-    
-    # Error trap for debugging - catches which line causes exit
-    trap 'echo "[CRASH] Line $LINENO: $BASH_COMMAND" >> "${SCRIPT_DIR}/loot_manager.log"' ERR
     
     
     # Check ignore status for all parsed files
