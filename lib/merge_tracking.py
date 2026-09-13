@@ -186,7 +186,8 @@ def remove_entries(target_file: str, entries_to_remove: List[Dict[str, Any]]) ->
     try:
         tree = ET.parse(target_file)
         root = tree.getroot()
-    except:
+    except ET.ParseError as e:
+        print(f"WARN: cannot parse {target_file}: {e}", file=sys.stderr)
         return False
         
     removed_count = 0
@@ -224,7 +225,7 @@ def load_tracking(instance_dir: str, target_file: str) -> Dict[str, Any]:
         }
     
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except json.JSONDecodeError:
         print(f"WARN: Corrupt tracking file {path}, resetting.", file=sys.stderr)
