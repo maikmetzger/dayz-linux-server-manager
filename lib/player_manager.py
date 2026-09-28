@@ -193,6 +193,33 @@ def format_timestamp(ts: int) -> str:
 # CLI Interface
 # =============================================================================
 
+def _tsv_safe(value: Any) -> str:
+    """One TSV field: tabs and newlines inside a player name must not break rows."""
+    return str(value).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
+
+
+def sync_rows(manager: 'SessionManager', players_json: Dict[str, Any], now_ts: int) -> List[List[str]]:
+    """Session bookkeeping for a whole player list, returning display rows.
+
+    Players without a verified GUID (lobby) get no session and show 0 minutes.
+    Departed players are removed from sessions.json in the same pass.
+    """
+    rows: List[List[str]] = []
+    online_guids: List[str] = []
+    for p in players_json.get('players', []) or []:
+        guid = str(p.get('guid') or '')
+        minutes, joined = 0, '?'
+        if guid:
+            online_guids.append(guid)
+            join_ts = manager.get_or_create_session(guid, now_ts)
+            minutes = manager.calculate_time_on_server(join_ts, now_ts)
+            joined = format_timestamp(join_ts)
+        rows.append([_tsv_safe(p.get('id', 0)), _tsv_safe(p.get('name', 'Unknown')),
+                     _tsv_safe(p.get('ping', 0)), guid, str(minutes), _tsv_safe(joined)])
+    manager.cleanup_departed(online_guids)
+    return rows
+
+
 def main():
     """CLI interface for player manager operations."""
     import argparse
@@ -204,8 +231,8 @@ def main():
     session_parser = subparsers.add_parser('session', help='Session management')
     session_parser.add_argument('--file', required=True, help='Path to sessions.json')
     session_parser.add_argument('--action', required=True,
-                               choices=['get', 'cleanup'],
-                               help='Action to perform')
+                               choices=['get', 'cleanup', 'sync'],
+                               help='Action to perform (sync: players JSON on stdin -> one TSV row per player)')
     session_parser.add_argument('--guid', help='Player GUID')
     session_parser.add_argument('--now', type=int, help='Current Unix timestamp')
     session_parser.add_argument('--guids', help='Comma-separated list of current GUIDs (for cleanup)')
@@ -248,6 +275,13 @@ def main():
                 current = []
             manager.cleanup_departed(current)
             print(json.dumps({'success': True, 'remaining': len(manager.sessions)}))
+
+        elif args.action == 'sync':
+            # The whole refresh in one process: read the RCON players JSON,
+            # record join times, drop departed players, emit one row per
+            # player as id<TAB>name<TAB>ping<TAB>guid<TAB>minutes<TAB>joined.
+            for row in sync_rows(manager, json.load(sys.stdin), now):
+                print('\t'.join(row))
 
     elif args.command == 'duration':
         result = parse_duration(args.input)

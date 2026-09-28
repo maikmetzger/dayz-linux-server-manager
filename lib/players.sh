@@ -156,49 +156,20 @@ players_menu() {
             player_joined=()
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
-                # Update session tracking and get times
-                local now_ts
-                now_ts=$(date +%s)
-                
-                while IFS= read -r player; do
-                    [[ -z "$player" ]] && continue
-                    local pid pname pping pguid
-                    pid=$(json_get "$player" "id" "0")
-                    pname=$(json_get "$player" "name" "Unknown")
-                    pping=$(json_get "$player" "ping" "0")
-                    pguid=$(json_get "$player" "guid" "")
-                    
+                # One python process for the whole list: session bookkeeping,
+                # cleanup of departed players and one TSV row per player.
+                # (Previously 5 processes per player, several seconds per refresh.)
+                local pid pname pping pguid ptime pjoined
+                while IFS=$'\t' read -r pid pname pping pguid ptime pjoined; do
+                    [[ -z "$pid" ]] && continue
                     player_ids+=("$pid")
                     player_names+=("$pname")
                     player_pings+=("$pping")
                     player_guids+=("$pguid")
-                    
-                    # Get or set join time from sessions.json using player_manager.py
-                    local session_result
-                    session_result=$(python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
-                        --file "$sessions_file" \
-                        --action get \
-                        --guid "$pguid" \
-                        --now "$now_ts" 2>/dev/null || echo '{}')
-
-                    local time_on_server_mins=0
-                    local joined_str=""
-                    time_on_server_mins=$(json_get "$session_result" "time_minutes" "0")
-                    joined_str=$(json_get "$session_result" "joined_at" "?")
-
-                    player_times+=("$time_on_server_mins")
-                    player_joined+=("$joined_str")
-                done < <(json_array "$player_json" "players")
-                
-                # Clean up departed players from sessions.json using player_manager.py
-                if [[ -f "$sessions_file" ]]; then
-                    local current_guids
-                    current_guids=$(IFS=','; echo "${player_guids[*]}")
-                    python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
-                        --file "$sessions_file" \
-                        --action cleanup \
-                        --guids "$current_guids" >/dev/null 2>&1 || true
-                fi
+                    player_times+=("$ptime")
+                    player_joined+=("$pjoined")
+                done < <(printf '%s' "$player_json" | python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                            --file "$sessions_file" --action sync --now "$(date +%s)" 2>/dev/null)
             fi
             
             player_count=${#player_ids[@]}
@@ -721,18 +692,17 @@ ban_list_menu() {
             ban_guids=()
             
             if [[ -f "$bans_file" ]]; then
-                local bans_data
-                bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
-                
-                while IFS= read -r ban; do
-                    [[ -z "$ban" ]] && continue
-                    ban_names+=("$(json_get "$ban" "name" "Unknown")")
-                    ban_reasons+=("$(json_get "$ban" "reason" "-")")
-                    ban_durations+=("$(json_get "$ban" "duration_minutes" "0")")
-                    ban_banned_at+=("$(json_get "$ban" "banned_at" "-")")
-                    ban_expires+=("$(json_get "$ban" "expires" "never")")
-                    ban_guids+=("$(json_get "$ban" "guid" "-")")
-                done < <(json_array "$bans_data" "bans")
+                # One process for the whole list instead of six per ban
+                local bguid bname breason bminutes bat bexp
+                while IFS=$'\t' read -r bguid bname breason bminutes bat bexp; do
+                    [[ -z "$bguid$bname" ]] && continue
+                    ban_guids+=("$bguid")
+                    ban_names+=("${bname:-Unknown}")
+                    ban_reasons+=("${breason:--}")
+                    ban_durations+=("${bminutes:-0}")
+                    ban_banned_at+=("${bat:--}")
+                    ban_expires+=("${bexp:-never}")
+                done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --tsv 2>/dev/null)
             fi
             
             ban_count=${#ban_names[@]}

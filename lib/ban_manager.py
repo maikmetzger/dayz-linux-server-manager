@@ -296,7 +296,8 @@ def main():
     get_parser.add_argument('--guid', required=True, help='Player GUID')
 
     # List bans
-    subparsers.add_parser('list', help='List all bans')
+    list_parser = subparsers.add_parser('list', help='List all bans')
+    list_parser.add_argument('--tsv', action='store_true', help='One row per ban: guid, name, reason, minutes, banned_at, expires')
 
     # Get expired bans
     subparsers.add_parser('expired', help='List expired bans')
@@ -347,10 +348,15 @@ def main():
 
     elif args.command == 'list':
         bans = manager.list_bans()
-        print(json.dumps({
-            'count': len(bans),
-            'bans': [b.to_dict() for b in bans]
-        }))
+        if args.tsv:
+            for b in bans:
+                fields = (b.guid, b.name, b.reason, b.duration_minutes, b.banned_at, b.expires)
+                print('\t'.join(str(f).replace('\t', ' ').replace('\n', ' ') for f in fields))
+        else:
+            print(json.dumps({
+                'count': len(bans),
+                'bans': [b.to_dict() for b in bans]
+            }))
 
     elif args.command == 'expired':
         expired = manager.get_expired_bans()
