@@ -94,7 +94,7 @@ except:
                 mv "${BANS_TXT}.tmp" "$BANS_TXT" 2>/dev/null || true
             fi
 
-            ((removed_count++))
+            removed_count=$((removed_count + 1))
         fi
     done <<< "$expired_guids"
 
@@ -107,7 +107,7 @@ except:
         python3 "${LIB_DIR}/be_rcon.py" \
             --host "$RCON_HOST" \
             --port "$RCON_PORT" \
-            --password "$RCON_PASSWORD" \
+            --password-env RCON_PASSWORD \
             --action loadbans >/dev/null 2>&1 || true
     fi
 
