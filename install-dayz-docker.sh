@@ -313,49 +313,32 @@ delete_container_only() {
 # =============================================================================
 # Instance Creation
 # =============================================================================
-create_instance() {
-    local inst_dir="$1" name="$2"
-    local container_name="dayz-${name}"
-    local use_host_net="$3" dz_port="$4" query_port="$5"
-    local steam_user="$6" steam_pass="$7" extra_params="$8"
-    local sync_on_start="$9" update_on_start="${10}"
-    local rcon_pass="${11}"
+# ---- instance files (used by create_instance) --------------------------------
 
-    step "Step: Creating instance files"
-    info "Instance directory: ${inst_dir}"
-    info "Container name:      ${container_name}"
-
-    if "${DOCKER_ARR[@]}" ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
-        die "Container '${container_name}' already exists."
-    fi
-    [[ -e "${inst_dir}/.dayz-instance" ]] && die "Marker exists in ${inst_dir}. Use update mode or choose a new directory."
-
-    mkdir -p "${inst_dir}/data/serverfiles" "${inst_dir}/data/config" "${inst_dir}/data/profile" "${inst_dir}/data/state" "${inst_dir}/data/backups"
-    chmod 700 "${inst_dir}/data" "${inst_dir}/data/config" "${inst_dir}/data/state" || true
-
+# run.sh and the lib files the container needs (ban expiry daemon)
+copy_runtime_files() {
+    local inst_dir="$1"
     [[ -f "${RUN_SH_SRC}" ]] || die "Missing ${RUN_SH_SRC}. Put run.sh next to install-dayz-docker.sh."
     cp -f "${RUN_SH_SRC}" "${inst_dir}/run.sh"
     chmod +x "${inst_dir}/run.sh"
     sed -i 's/\r$//' "${inst_dir}/run.sh"
 
-    # Copy lib files for in-container ban expiry daemon
     mkdir -p "${inst_dir}/lib"
-    local lib_files=("ban_manager.py" "ban_expiry_daemon.sh" "be_rcon.py" "player_manager.py")
-    for lib_file in "${lib_files[@]}"; do
-        if [[ -f "${SCRIPT_DIR}/lib/${lib_file}" ]]; then
-            cp -f "${SCRIPT_DIR}/lib/${lib_file}" "${inst_dir}/lib/${lib_file}"
-            chmod +x "${inst_dir}/lib/${lib_file}" 2>/dev/null || true
-        fi
+    local lib_file
+    for lib_file in ban_manager.py ban_expiry_daemon.sh be_rcon.py player_manager.py; do
+        [[ -f "${SCRIPT_DIR}/lib/${lib_file}" ]] || continue
+        cp -f "${SCRIPT_DIR}/lib/${lib_file}" "${inst_dir}/lib/${lib_file}"
+        chmod +x "${inst_dir}/lib/${lib_file}" 2>/dev/null || true
     done
     step "Copied lib files for in-container ban expiry daemon"
+}
 
-    # The TUI and the CLI both collect the admin password into CLI_ADMIN_PASS;
-    # it used to be ignored here and the prompt repeated (or, non-interactively,
-    # the CHANGEME default was written). Only ask when nothing was provided.
-    local admin_pw="${CLI_ADMIN_PASS:-}"
-    [[ -n "${admin_pw}" ]] || admin_pw="$(prompt_secret "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
+# serverDZ.cfg, BEServer_x64.cfg and empty mod lists, all private (0600)
+write_server_configs() {
+    local inst_dir="$1" name="$2" dz_port="$3" query_port="$4" admin_pw="$5" rcon_pass="$6"
+    local cfg_dir="${inst_dir}/data/config"
 
-    write_file "${inst_dir}/data/config/serverDZ.cfg" \
+    write_file "${cfg_dir}/serverDZ.cfg" \
 "hostname = \"DayZ ${name}\";
 password = \"\";
 passwordAdmin = \"${admin_pw}\";
@@ -369,23 +352,23 @@ steamQueryPort = ${query_port};
 
 class Missions { class DayZ { template = \"dayzOffline.chernarusplus\"; }; };
 "
-    chmod 600 "${inst_dir}/data/config/serverDZ.cfg"
+    chmod 600 "${cfg_dir}/serverDZ.cfg"
 
-    if [[ -z "${rcon_pass}" ]]; then
-        rcon_pass="CHANGEME_RCON_$(date +%s)"
-    fi
-
-    write_file "${inst_dir}/data/config/BEServer_x64.cfg" \
+    write_file "${cfg_dir}/BEServer_x64.cfg" \
 "RConPassword ${rcon_pass}
 RConPort $((dz_port+3))
 RestrictRCon 1
 "
-    chmod 600 "${inst_dir}/data/config/BEServer_x64.cfg"
+    chmod 600 "${cfg_dir}/BEServer_x64.cfg"
 
-    [[ -f "${inst_dir}/data/config/mods.txt" ]] || write_file "${inst_dir}/data/config/mods.txt" "# one Workshop ID per line\n"
-    [[ -f "${inst_dir}/data/config/servermods.txt" ]] || write_file "${inst_dir}/data/config/servermods.txt" "# one Workshop ID per line\n"
-    chmod 600 "${inst_dir}/data/config/mods.txt" "${inst_dir}/data/config/servermods.txt" || true
+    [[ -f "${cfg_dir}/mods.txt" ]] || write_file "${cfg_dir}/mods.txt" "# one Workshop ID per line\n"
+    [[ -f "${cfg_dir}/servermods.txt" ]] || write_file "${cfg_dir}/servermods.txt" "# one Workshop ID per line\n"
+    chmod 600 "${cfg_dir}/mods.txt" "${cfg_dir}/servermods.txt" || true
+}
 
+# Image: Debian + steamcmd, runs as the invoking user's UID/GID
+write_dockerfile() {
+    local inst_dir="$1"
     write_file "${inst_dir}/Dockerfile" \
 "FROM debian:bullseye-slim
 ARG PUID=1000
@@ -409,7 +392,7 @@ RUN curl -fsSL \"https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux
 && rm -f /tmp/steamcmd.tar.gz \\
 && chmod -R a+rX /opt/steamcmd \\
 && chmod +x /opt/steamcmd/steamcmd.sh \\
-&& find /opt/steamcmd -type f -name steamcmd -exec chmod +x {} \\; || true \\
+&& find /opt/steamcmd -type f -name steamcmd -exec chmod +x {} \; || true \\
 && chown -R dayz:dayz /opt/steamcmd
 ENV STEAMCMD=/opt/steamcmd/steamcmd.sh
 ENV HOME=/dayz
@@ -417,7 +400,12 @@ WORKDIR /dayz
 USER dayz
 ENTRYPOINT [\"/usr/bin/tini\",\"--\"]
 "
+}
 
+# .env for docker compose: ports, flags, no secrets
+write_env_file() {
+    local inst_dir="$1" name="$2" dz_port="$3" query_port="$4" extra_params="$5"
+    local sync_on_start="$6" update_on_start="$7"
     write_file "${inst_dir}/.env" \
 "PUID=${PUID}
 PGID=${PGID}
@@ -435,86 +423,50 @@ DZ_SYNC_ON_START=${sync_on_start}
 DZ_UPDATE_ON_START=${update_on_start}
 "
     chmod 600 "${inst_dir}/.env"
+}
 
-    # Steam credentials live in a private file inside the (0700) config dir,
-    # which run.sh reads only when it calls steamcmd. Keeping them out of the
-    # container environment keeps them out of 'docker inspect' and out of
-    # every process the game server starts.
+# Steam credentials live in a private file inside the (0700) config dir,
+# which run.sh reads only when it calls steamcmd. Keeping them out of the
+# container environment keeps them out of 'docker inspect' and out of
+# every process the game server starts.
+write_steam_env() {
+    local inst_dir="$1" steam_user="$2" steam_pass="$3"
     write_file "${inst_dir}/data/config/.steam.env" \
 "STEAM_USER=$(env_quote "${steam_user}")
 STEAM_PASS=$(env_quote "${steam_pass}")
 "
     chmod 600 "${inst_dir}/data/config/.steam.env"
+}
 
-    local restart_policy="on-failure:5"
-
+# docker-compose.yml: host networking, or the DayZ UDP ports published
+write_compose_file() {
+    local inst_dir="$1" use_host_net="$2" dz_port="$3"
+    local network_block
     if [[ "${use_host_net}" == "yes" ]]; then
-        write_file "${inst_dir}/docker-compose.yml" \
-"services:
-  dayz:
-    build:
-      context: .
-      args:
-        PUID: \${PUID}
-        PGID: \${PGID}
-    container_name: \${CONTAINER_NAME}
-    restart: ${restart_policy}
-    network_mode: host
-    stop_signal: SIGINT
-    stop_grace_period: 90s
-    user: \"\${PUID}:\${PGID}\"
-    environment:
-      HOME: /dayz
-      APPID: \${APPID}
-      WORKSHOP_APPID: \${WORKSHOP_APPID}
-      DZ_PORT: \${DZ_PORT}
-      DZ_QUERY_PORT: \${DZ_QUERY_PORT}
-      DZ_EXTRA_PARAMS: \${DZ_EXTRA_PARAMS}
-      DZ_SYNC_ON_START: \${DZ_SYNC_ON_START}
-      DZ_UPDATE_ON_START: \${DZ_UPDATE_ON_START}
-      DZ_SERVERFILES: /dayz/serverfiles
-      DZ_CONFIG_DIR: /dayz/config
-      DZ_PROFILE: /dayz/profile
-      DZ_STATE: /dayz/state
-    ulimits:
-      nofile:
-        soft: 100000
-        hard: 100000
-    volumes:
-      - ./data/serverfiles:/dayz/serverfiles
-      - ./data/config:/dayz/config
-      - ./data/profile:/dayz/profile
-      - ./data/state:/dayz/state
-      - ./data/backups:/dayz/backups
-      - ./run.sh:/dayz/run.sh:ro
-      - ./lib:/dayz/lib:ro
-    command: [\"/dayz/run.sh\",\"foreground\"]
-    healthcheck:
-      test: [\"CMD-SHELL\",\"pgrep -f DayZServer >/dev/null || exit 1\"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-"
+        network_block="    network_mode: host"
     else
-        write_file "${inst_dir}/docker-compose.yml" \
-"services:
-  dayz:
-    build:
-      context: .
-      args:
-        PUID: \${PUID}
-        PGID: \${PGID}
-    container_name: \${CONTAINER_NAME}
-    restart: ${restart_policy}
-    stop_signal: SIGINT
-    stop_grace_period: 90s
-    user: \"\${PUID}:\${PGID}\"
-    ports:
+        network_block="    ports:
       - \"\${DZ_PORT}:\${DZ_PORT}/udp\"
       - \"$((dz_port+1)):$((dz_port+1))/udp\"
       - \"$((dz_port+2)):$((dz_port+2))/udp\"
       - \"$((dz_port+3)):$((dz_port+3))/udp\"
-      - \"\${DZ_QUERY_PORT}:\${DZ_QUERY_PORT}/udp\"
+      - \"\${DZ_QUERY_PORT}:\${DZ_QUERY_PORT}/udp\""
+    fi
+
+    write_file "${inst_dir}/docker-compose.yml" \
+"services:
+  dayz:
+    build:
+      context: .
+      args:
+        PUID: \${PUID}
+        PGID: \${PGID}
+    container_name: \${CONTAINER_NAME}
+    restart: on-failure:5
+${network_block}
+    stop_signal: SIGINT
+    stop_grace_period: 90s
+    user: \"\${PUID}:\${PGID}\"
     environment:
       HOME: /dayz
       APPID: \${APPID}
@@ -547,9 +499,12 @@ STEAM_PASS=$(env_quote "${steam_pass}")
       timeout: 30s
       retries: 3
 "
-        warn "Bridge mode note: published ports can bypass UFW rules in some setups."
-    fi
+    [[ "${use_host_net}" == "yes" ]] || warn "Bridge mode note: published ports can bypass UFW rules in some setups."
+}
 
+# .dayz-instance marker the server manager discovers instances by
+write_instance_marker() {
+    local inst_dir="$1" name="$2" dz_port="$3" query_port="$4" use_host_net="$5"
     write_file "${inst_dir}/.dayz-instance" \
 "INSTANCE_NAME=${name}
 CONTAINER_NAME=dayz-${name}
@@ -559,11 +514,47 @@ DZ_QUERY_PORT=${query_port}
 HOST_NETWORK=${use_host_net}
 "
     chmod 600 "${inst_dir}/.dayz-instance" || true
+}
+
+# Create a new instance directory with all its files (no container start)
+# Usage: create_instance DIR NAME HOST_NET(yes|no) PORT QUERY_PORT STEAM_USER STEAM_PASS EXTRA_PARAMS SYNC_ON_START UPDATE_ON_START RCON_PASS
+create_instance() {
+    local inst_dir="$1" name="$2"
+    local use_host_net="$3" dz_port="$4" query_port="$5"
+    local steam_user="$6" steam_pass="$7" extra_params="$8"
+    local sync_on_start="$9" update_on_start="${10}"
+    local rcon_pass="${11}"
+    local container_name="dayz-${name}"
+
+    step "Step: Creating instance files"
+    info "Instance directory: ${inst_dir}"
+    info "Container name:      ${container_name}"
+
+    if "${DOCKER_ARR[@]}" ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
+        die "Container '${container_name}' already exists."
+    fi
+    [[ -e "${inst_dir}/.dayz-instance" ]] && die "Marker exists in ${inst_dir}. Use update mode or choose a new directory."
+
+    mkdir -p "${inst_dir}/data/serverfiles" "${inst_dir}/data/config" "${inst_dir}/data/profile" "${inst_dir}/data/state" "${inst_dir}/data/backups"
+    chmod 700 "${inst_dir}/data" "${inst_dir}/data/config" "${inst_dir}/data/state" || true
+    copy_runtime_files "${inst_dir}"
+
+    # The TUI and the CLI both collect the admin password into CLI_ADMIN_PASS;
+    # only ask when nothing was provided.
+    local admin_pw="${CLI_ADMIN_PASS:-}"
+    [[ -n "${admin_pw}" ]] || admin_pw="$(prompt_secret "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
+    [[ -n "${rcon_pass}" ]] || rcon_pass="CHANGEME_RCON_$(date +%s)"
+
+    write_server_configs "${inst_dir}" "${name}" "${dz_port}" "${query_port}" "${admin_pw}" "${rcon_pass}"
+    write_dockerfile "${inst_dir}"
+    write_env_file "${inst_dir}" "${name}" "${dz_port}" "${query_port}" "${extra_params}" "${sync_on_start}" "${update_on_start}"
+    write_steam_env "${inst_dir}" "${steam_user}" "${steam_pass}"
+    write_compose_file "${inst_dir}" "${use_host_net}" "${dz_port}"
+    write_instance_marker "${inst_dir}" "${name}" "${dz_port}" "${query_port}" "${use_host_net}"
 
     if [[ "${EUID}" -eq 0 ]]; then
         chown -R "${invoking_user}:${invoking_user}" "${inst_dir}" || true
     fi
-
     ok "Instance created."
 }
 
