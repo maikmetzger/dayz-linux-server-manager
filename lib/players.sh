@@ -16,44 +16,12 @@ source "${PLAYERS_LIB_DIR}/colors.sh"
 source "${PLAYERS_LIB_DIR}/tui.sh"
 source "${PLAYERS_LIB_DIR}/dialogs.sh"
 source "${PLAYERS_LIB_DIR}/utils.sh"
+source "${PLAYERS_LIB_DIR}/constants.sh"
+source "${PLAYERS_LIB_DIR}/json_helpers.sh"
+source "${PLAYERS_LIB_DIR}/rcon_lib.sh"
 
-# =============================================================================
-# JSON Parsing Helpers (uses python3, no jq dependency)
-# =============================================================================
-
-# Parse JSON field using Python
-# Usage: value=$(json_get "$json" ".field" "default")
-json_get() {
-    local json="$1"
-    local path="$2"
-    local default="${3:-}"
-
-    # Data is passed as arguments, never pasted into Python source:
-    # player names from RCON may contain quotes or backslashes.
-    python3 - "$json" "$path" "$default" <<'PY_JSON_GET'
-import json, sys
-raw, path, default = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    result = json.loads(raw)
-    for key in path.lstrip('.').split('.'):
-        if key:
-            result = result.get(key) if isinstance(result, dict) else None
-        if result is None:
-            break
-    if result is None:
-        print(default)
-    elif isinstance(result, bool):
-        print('true' if result else 'false')
-    elif isinstance(result, (dict, list)):
-        print(json.dumps(result))
-    else:
-        print(result)
-except Exception:
-    print(default)
-PY_JSON_GET
-}
-
-# Build one player object as JSON.
+# Build one player object as JSON. Unlike json_create this keeps the name a
+# string even when a player is called "123", "true" or "null".
 # Usage: json=$(player_to_json "$id" "$name" "$ping" "$guid")
 player_to_json() {
     python3 - "$@" <<'PY_PLAYER_JSON'
@@ -66,61 +34,15 @@ print(json.dumps({"id": num(pid), "name": name, "ping": num(ping), "guid": guid}
 PY_PLAYER_JSON
 }
 
-# Parse JSON array to lines using Python
-# Usage: while IFS= read -r item; do ... done < <(json_array "$json" ".players")
-json_array() {
-    local json="$1"
-    local path="$2"
-
-    python3 - "$json" "$path" <<'PY_JSON_ARRAY' 2>/dev/null
-import json, sys
-raw, path = sys.argv[1], sys.argv[2]
-try:
-    result = json.loads(raw)
-    for key in path.lstrip('.').split('.'):
-        if key:
-            result = result.get(key, []) if isinstance(result, dict) else []
-    if isinstance(result, list):
-        for item in result:
-            print(json.dumps(item))
-except Exception:
-    pass
-PY_JSON_ARRAY
-}
-
-# Count JSON array length
-# Usage: count=$(json_count "$json" ".players")
-json_count() {
-    local json="$1"
-    local path="$2"
-
-    python3 - "$json" "$path" <<'PY_JSON_COUNT' 2>/dev/null
-import json, sys
-raw, path = sys.argv[1], sys.argv[2]
-try:
-    result = json.loads(raw)
-    for key in path.lstrip('.').split('.'):
-        if key:
-            result = result.get(key, []) if isinstance(result, dict) else []
-    print(len(result) if isinstance(result, list) else 0)
-except Exception:
-    print(0)
-PY_JSON_COUNT
-}
-
-# Create JSON object using Python
-# Usage: json=$(json_create key1 val1 key2 val2 ...)
-json_create() {
-    local args=("$@")
-    local pairs=""
-    for ((i=0; i<${#args[@]}; i+=2)); do
-        local key="${args[$i]}"
-        local val="${args[$((i+1))]}"
-        [[ -n "$pairs" ]] && pairs+=", "
-        pairs+="\"$key\": \"$val\""
-    done
-    echo "{$pairs}"
-}
+# =============================================================================
+# JSON Parsing Helpers - Now provided by lib/json_helpers.sh
+# =============================================================================
+# The following functions are now available from json_helpers.sh:
+# - json_get "$json" ".field" "default"
+# - json_array "$json" ".players"
+# - json_count "$json" ".players"
+# - json_create "key1" "val1" "key2" "val2"
+# =============================================================================
 
 # =============================================================================
 # Configuration
@@ -255,6 +177,7 @@ run_rcon_action() {
         echo "Action: $action" >> "$debug_log"
         docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
     else
+        # Password via environment: command lines are visible in /proc and docker inspect
         docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
     fi
 }
@@ -326,67 +249,31 @@ players_menu() {
                     player_pings+=("$pping")
                     player_guids+=("$pguid")
                     
-                    # Get or set join time from sessions.json
-                    local join_ts
-                    join_ts=$(python3 << PYTHON_SESSION
-import json
-import os
+                    # Get or set join time from sessions.json using player_manager.py
+                    local session_result
+                    session_result=$(python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                        --file "$sessions_file" \
+                        --action get \
+                        --guid "$pguid" \
+                        --now "$now_ts" 2>/dev/null || echo '{}')
 
-sessions_file = "${sessions_file}"
-guid = "${pguid}"
-now = ${now_ts}
-
-# Load or create sessions
-sessions = {}
-if os.path.exists(sessions_file):
-    try:
-        with open(sessions_file, 'r') as f:
-            sessions = json.load(f)
-    except: pass
-
-# Get or set join time for this player
-if guid and guid in sessions:
-    print(sessions[guid])
-else:
-    # New player - record join time
-    if guid:
-        sessions[guid] = now
-        with open(sessions_file, 'w') as f:
-            json.dump(sessions, f, indent=2)
-    print(now)
-PYTHON_SESSION
-                    )
-                    
-                    # Calculate time on server
                     local time_on_server_mins=0
                     local joined_str=""
-                    if [[ -n "$join_ts" && "$join_ts" =~ ^[0-9]+$ ]]; then
-                        time_on_server_mins=$(( (now_ts - join_ts) / 60 ))
-                        [[ $time_on_server_mins -lt 0 ]] && time_on_server_mins=0
-                        # Format join timestamp as DD/MM/YYYY HH:MM
-                        joined_str=$(date -d "@${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || date -r "${join_ts}" +"%d/%m/%Y %H:%M" 2>/dev/null || echo "?")
-                    fi
+                    time_on_server_mins=$(json_get "$session_result" "time_minutes" "0")
+                    joined_str=$(json_get "$session_result" "joined_at" "?")
+
                     player_times+=("$time_on_server_mins")
                     player_joined+=("$joined_str")
                 done < <(json_array "$player_json" "players")
                 
-                # Clean up departed players from sessions.json
+                # Clean up departed players from sessions.json using player_manager.py
                 if [[ -f "$sessions_file" ]]; then
                     local current_guids
-                    current_guids=$(printf '%s\n' "${player_guids[@]}" | tr '\n' '|')
-                    python3 << PYTHON_CLEANUP
-import json
-sessions_file = "${sessions_file}"
-current_guids = set("${current_guids}".strip('|').split('|'))
-try:
-    with open(sessions_file, 'r') as f:
-        sessions = json.load(f)
-    # Remove GUIDs not in current player list
-    sessions = {k: v for k, v in sessions.items() if k in current_guids}
-    with open(sessions_file, 'w') as f:
-        json.dump(sessions, f, indent=2)
-except: pass
-PYTHON_CLEANUP
+                    current_guids=$(IFS=','; echo "${player_guids[*]}")
+                    python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                        --file "$sessions_file" \
+                        --action cleanup \
+                        --guids "$current_guids" >/dev/null 2>&1 || true
                 fi
             fi
             
@@ -809,8 +696,8 @@ Reason: ${reason}" "y"; then
     
     # Step 2: Write GUID directly to bans.txt (RCON addBan fails silently)
     # Format: GUID -1 (permanent ban, -1 = no expiry timestamp)
-    local bans_file="/dayz/serverfiles/battleye/bans.txt"
-    docker exec "$container_name" bash -c "echo '${player_guid} -1' >> ${bans_file}" 2>/dev/null
+    # SECURITY: Use safe_container_append_line to prevent command injection
+    safe_container_append_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "${player_guid} ${BAN_PERMANENT_MARKER}"
     
     # Step 3: Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
@@ -826,49 +713,28 @@ Reason: ${reason}" "y"; then
 
 # Save ban record to JSON file for tracking
 # Usage: save_ban_record "$inst_dir" "$guid" "$name" "$duration_minutes" "$reason"
+# Uses ban_manager.py for safe JSON handling
 save_ban_record() {
     local inst_dir="$1"
     local guid="$2"
     local name="$3"
     local duration_minutes="$4"
     local reason="$5"
-    
+
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
-    local now
-    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
-    # Calculate expiry
-    local expires="never"
+
+    # Format duration for ban_manager.py
+    local duration_arg="perm"
     if [[ "$duration_minutes" -gt 0 ]]; then
-        expires=$(date -u -d "+${duration_minutes} minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
+        duration_arg="${duration_minutes}m"
     fi
-    
-    # Create or update bans file
-    if [[ ! -f "$bans_file" ]]; then
-        echo '{"bans": []}' > "$bans_file"
-    fi
-    
-    # Append the record. Values are passed as arguments so a name or
-    # reason containing quotes can neither break the JSON nor run code.
-    python3 - "$bans_file" "$guid" "$name" "$reason" "$now" "$expires" "$duration_minutes" <<'PY_SAVE_BAN' 2>/dev/null
-import json, sys
-bans_file, guid, name, reason, now, expires, duration = sys.argv[1:8]
-try:
-    with open(bans_file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-except (OSError, ValueError):
-    data = {'bans': []}
-data.setdefault('bans', []).append({
-    'guid': guid,
-    'name': name,
-    'reason': reason,
-    'banned_at': now,
-    'expires': expires,
-    'duration_minutes': int(duration),
-})
-with open(bans_file, 'w', encoding='utf-8') as f:
-    json.dump(data, f, indent=2)
-PY_SAVE_BAN
+
+    # Use ban_manager.py to safely add the ban record
+    python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" add \
+        --guid "$guid" \
+        --name "$name" \
+        --reason "$reason" \
+        --duration "$duration_arg" >/dev/null 2>&1 || true
 }
 
 # =============================================================================
@@ -1198,39 +1064,30 @@ unban_player() {
     local inst_dir="$1"
     local guid="$2"
     local name="$3"
-    
+
     # Get container name
     local marker="${inst_dir}/.dayz-instance"
     local container_name
     container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
-    
+
     if [[ -z "$container_name" ]]; then
         show_message "No container found" "✗ Error"
         return
     fi
-    
-    # Remove from our tracking (bans.json)
+
+    # Remove from our tracking (bans.json) using ban_manager.py
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
     if [[ -f "$bans_file" ]]; then
-        python3 -c "
-import json
-try:
-    with open('$bans_file', 'r') as f:
-        data = json.load(f)
-    data['bans'] = [b for b in data.get('bans', []) if b.get('guid') != '$guid']
-    with open('$bans_file', 'w') as f:
-        json.dump(data, f, indent=2)
-except:
-    pass
-" 2>/dev/null
+        python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" remove \
+            --guid "$guid" >/dev/null 2>&1 || true
     fi
-    
+
     # Remove from BattlEye bans.txt INSIDE the container
-    local bans_txt="/dayz/serverfiles/battleye/bans.txt"
-    docker exec "$container_name" bash -c "sed -i '/^${guid}/d' ${bans_txt}" 2>/dev/null || true
-    
+    # SECURITY: Use safe_container_remove_line to prevent command injection
+    safe_container_remove_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "$guid"
+
     # Reload bans via RCON
     run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
-    
+
     show_message "Unbanned '$name'" "✓ Success"
 }

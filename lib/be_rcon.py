@@ -387,6 +387,7 @@ if __name__ == "__main__":
     parser.add_argument('--host', required=True, help='Server IP')
     parser.add_argument('--port', required=True, type=int, help='RCON Port')
     parser.add_argument('--password', help='RCON password (prefer the RCON_PASSWORD env var: argv is readable by other processes)')
+    parser.add_argument('--password-env', help='Name of the environment variable holding the RCON password (default: RCON_PASSWORD)')
     parser.add_argument('--command', help='Single raw command to execute')
     
     # Action-based interface for TUI integration
@@ -406,9 +407,14 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    password = args.password or os.environ.get('RCON_PASSWORD', '')
+    # Password sources, in order: named env var (--password-env), --password, RCON_PASSWORD
+    env_name = args.password_env or 'RCON_PASSWORD'
+    if args.password_env:
+        password = os.environ.get(args.password_env, '')
+    else:
+        password = args.password or os.environ.get('RCON_PASSWORD', '')
     if not password:
-        print('{"success": false, "error": "Missing RCON password (RCON_PASSWORD env var or --password)"}')
+        print(f'{{"success": false, "error": "Missing RCON password (env var {env_name} or --password)"}}')
         sys.exit(1)
     
     client = BattlEyeRcon(args.host, args.port, password, debug=args.debug)
