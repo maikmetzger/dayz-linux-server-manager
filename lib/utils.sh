@@ -85,7 +85,9 @@ get_user_home() {
 
 # Initialize user identity variables if not already set
 init_user_identity() {
-    INVOKING_USER="${DAYZ_USER:-${SUDO_USER:-${LOGNAME:-$USER}}}"
+    # USER/LOGNAME are not guaranteed (cron, some containers, `env -i`); with
+    # set -u the unguarded $USER aborted the script before the menu appeared.
+    INVOKING_USER="${DAYZ_USER:-${SUDO_USER:-${LOGNAME:-${USER:-$(id -un)}}}}"
     INVOKING_HOME="${DAYZ_HOME:-$(get_user_home "$INVOKING_USER")}"
     export INVOKING_USER INVOKING_HOME
 }

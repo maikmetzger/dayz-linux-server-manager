@@ -226,14 +226,6 @@ _mod_manager_load_status() {
 
 # ---- drawing -----------------------------------------------------------------
 
-# A full-width dashed line at ROW
-_mod_manager_draw_rule() {
-    move_to "$1" 1
-    printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-    printf "%.0s-" $(seq 1 "$TERM_COLS")
-    printf "%s" "$RESET"
-}
-
 # Whole screen: header, column titles, mod rows, action bar, footer
 _mod_manager_draw() {
     printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
@@ -247,13 +239,13 @@ _mod_manager_draw() {
     # column positions, shared with the row functions
     local table_start=3 col_status=2 col_type=8 col_name=15
     local col_id=$((TERM_COLS - 45)) col_wsver=$((TERM_COLS - 32)) col_synced=$((TERM_COLS - 15))
-    _mod_manager_draw_rule $table_start
+    tui_draw_rule $table_start
     local col title
     for col in "$col_status:STATUS" "$col_type:TYPE" "$col_name:MOD NAME" "$col_id:ID" "$col_wsver:WORKSHOP DATE" "$col_synced:SYNCED"; do
         move_to $((table_start + 1)) "${col%%:*}"
         printf "%s%s%s%s" "$DIM" "$WHITE" "${col#*:}" "$RESET"
     done
-    _mod_manager_draw_rule $((table_start + 2))
+    tui_draw_rule $((table_start + 2))
 
     local row=$((table_start + 3))
     if [[ $mod_count -eq 0 ]]; then
@@ -266,7 +258,7 @@ _mod_manager_draw() {
         _mod_manager_draw_row "$i" "$row"
         row=$((row + 1))
     done
-    _mod_manager_draw_rule $row
+    tui_draw_rule $row
     _mod_manager_draw_actions $((row + 1))
     _mod_manager_draw_footer
 }

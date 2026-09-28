@@ -11,6 +11,7 @@ M = mod folder missing, D = the @<id> link is not deployed. Dates are '-'
 when unknown. A mod that raises an error still yields exactly one line.
 
 Usage: get_cached_update_info DIR | mod_status.py --workshop-dir DIR [--workshop-dir DIR] ID...
+       mod_status.py --dates MOD_PATH      'installed|synced' for the details view
 """
 import argparse
 import datetime
@@ -19,6 +20,7 @@ import os
 import sys
 
 DATE_FORMAT = '%d.%m.%y %H:%M'   # compact, fits the 14 character table column
+DETAILS_DATE_FORMAT = '%d. %b %Y %H:%M'   # workshop details view
 ERROR_LINE = '-|-|-|1|Err'
 
 
@@ -111,12 +113,28 @@ def status_lines(mods_info, workshop_dirs, mod_ids):
     return lines
 
 
+def mod_dates(mod_path):
+    """'installed|synced' of one mod folder for the details view, '-|-' when absent."""
+    if not os.path.isdir(mod_path):
+        return '-|-'
+    installed = datetime.datetime.fromtimestamp(install_timestamp(mod_path)).strftime(DETAILS_DATE_FORMAT)
+    synced = datetime.datetime.fromtimestamp(os.path.getmtime(mod_path)).strftime(DETAILS_DATE_FORMAT)
+    return f'{installed}|{synced}'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--workshop-dir', action='append', default=[], required=True,
+    parser.add_argument('--workshop-dir', action='append', default=[],
                         help='workshop content dir (repeatable, newest folder wins)')
+    parser.add_argument('--dates', metavar='MOD_PATH',
+                        help="print 'installed|synced' of one mod folder and exit")
     parser.add_argument('mod_ids', nargs='*')
     args = parser.parse_args(argv)
+    if args.dates:
+        print(mod_dates(args.dates))
+        return 0
+    if not args.workshop_dir:
+        parser.error('--workshop-dir is required')
     mods_info = load_mods_info(sys.stdin)
     for line in status_lines(mods_info, args.workshop_dir, args.mod_ids):
         print(line)

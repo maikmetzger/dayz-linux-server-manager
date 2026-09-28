@@ -76,6 +76,16 @@ class ModStatusTest(unittest.TestCase):
         self.assertEqual(mod_status.load_mods_info(io.StringIO('[1,2]')), {})
         self.assertEqual(mod_status.load_mods_info(io.StringIO('{"mods": {"1": {}}}')), {'1': {}})
 
+    def test_dates(self):
+        installed, synced = mod_status.mod_dates(self.mod).split('|')
+        self.assertEqual(installed, time.strftime('%d. %b %Y %H:%M', time.localtime(1700000000)))
+        self.assertEqual(synced, time.strftime('%d. %b %Y %H:%M', time.localtime(self.sync_ts)))
+        self.assertEqual(mod_status.mod_dates(os.path.join(self.workshop, 'nope')), '-|-')
+        proc = subprocess.run([sys.executable, os.path.join(LIB, 'mod_status.py'), '--dates', self.mod],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), mod_status.mod_dates(self.mod))
+
     def test_cli(self):
         cache = json.dumps({'mods': {'111': {'updated': self.sync_ts + 500}}})
         proc = subprocess.run([sys.executable, os.path.join(LIB, 'mod_status.py'),
