@@ -191,7 +191,8 @@ class BattlEyeRcon:
         # Sequence number is required and must increment for each command
         seq_byte = bytes([self.sequence & 0xFF])
         if self.debug:
-            print(f"[DEBUG] Sending command (seq={self.sequence}): {cmd}", file=sys.stderr)
+            shown = '#login ******' if cmd.startswith('#login') else cmd
+            print(f"[DEBUG] Sending command (seq={self.sequence}): {shown}", file=sys.stderr)
         self.sequence = (self.sequence + 1) % 256  # Wrap at 256
         packet = self.create_packet(BE_COMMAND, seq_byte + cmd.encode('utf-8'))
         self.sock.send(packet)
@@ -425,6 +426,7 @@ if __name__ == "__main__":
     parser.add_argument('--duration-minutes', type=int, default=0, help='Ban duration in minutes (0 = permanent)')
     parser.add_argument('--seconds', type=int, default=5, help='Seconds for monitor action')
     parser.add_argument('--admin-password', type=str, help='DayZ admin password (passwordAdmin from serverDZ.cfg) for #login command')
+    parser.add_argument('--admin-password-env', type=str, help='Name of the environment variable holding the DayZ admin password (preferred: argv is visible to other processes)')
     parser.add_argument('--debug', action='store_true', help='Enable debug output to stderr')
     
     args = parser.parse_args()
@@ -444,8 +446,9 @@ if __name__ == "__main__":
         if args.action:
             # Auto-login before action commands using DayZ admin password
             # This is passwordAdmin from serverDZ.cfg, NOT the RCON password
-            if args.admin_password:
-                client.action_login(args.admin_password)
+            admin_password = os.environ.get(args.admin_password_env, '') if args.admin_password_env else args.admin_password
+            if admin_password:
+                client.action_login(admin_password)
             
             # Action-based mode with JSON output
             if args.action == 'players':

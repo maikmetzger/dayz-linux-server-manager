@@ -96,102 +96,13 @@ fetch_online_players() {
     local inst_dir="$1"
     local rcon_output
     
-    # Use run_rcon_action function (defined below) to execute RCON
-    rcon_output=$(run_rcon_action "$inst_dir" "players")
+    # rcon_action comes from lib/rcon_lib.sh (single RCON implementation)
+    rcon_output=$(rcon_action "$inst_dir" "players")
     
     if [[ -z "$rcon_output" ]]; then
         echo '{"count": 0, "players": [], "error": "RCON failed"}'
     else
         echo "$rcon_output"
-    fi
-}
-
-# Run RCON action and return JSON
-# Usage: result=$(run_rcon_action "$inst_dir" "action" [args...])
-run_rcon_action() {
-    local inst_dir="$1"
-    local action="$2"
-    shift 2
-    local extra_args=("$@")
-    
-    # Get RCON details from the instance
-    local marker="${inst_dir}/.dayz-instance"
-    local container_name
-    container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
-    
-    if [[ -z "$container_name" ]]; then
-        echo '{"success": false, "error": "No container found"}'
-        return 1
-    fi
-    
-    # Get RCON port and password from BEServer config
-    # Port is calculated as DayZ port + 3
-    local dz_port
-    dz_port=$(grep -oP 'DZ_PORT=\K[0-9]+' "$marker" 2>/dev/null || echo "2300")
-    local port=$((dz_port + 3))
-    
-    local be_config="${inst_dir}/data/config/BEServer_x64.cfg"
-    if [[ ! -f "$be_config" ]]; then
-        echo '{"success": false, "error": "BattlEye config not found"}'
-        return 1
-    fi
-    
-    local pass
-    pass=$(grep "^RConPassword" "$be_config" 2>/dev/null | awk '{print $2}' | tr -d '\r' || echo "")
-    
-    if [[ -z "$pass" ]]; then
-        echo '{"success": false, "error": "RCON password not configured"}'
-        return 1
-    fi
-    
-    # Get DayZ admin password from serverDZ.cfg for #login command
-    # NOTE: This is DIFFERENT from RCON password!
-    # - RConPassword (BEServer_x64.cfg) = BattlEye protocol auth
-    # - passwordAdmin (serverDZ.cfg) = DayZ in-game admin auth (#login)
-    local server_cfg="${inst_dir}/data/config/serverDZ.cfg"
-    local admin_pass=""
-    if [[ -f "$server_cfg" ]]; then
-        admin_pass=$(grep -oP 'passwordAdmin\s*=\s*"\K[^"]*' "$server_cfg" 2>/dev/null || echo "")
-    fi
-    
-    # Build RCON command arguments
-    local rcon_args=(
-        --host "127.0.0.1"
-        --port "$port"
-        --action "$action"
-    )
-    
-    # Add admin password if available (required for kick/ban commands)
-    if [[ -n "$admin_pass" ]]; then
-        rcon_args+=(--admin-password "$admin_pass")
-    fi
-    
-    # Add extra arguments
-    for arg in "${extra_args[@]}"; do
-        rcon_args+=("$arg")
-    done
-    
-    # Execute via Docker
-    local python_src="${PLAYERS_LIB_DIR}/be_rcon.py"
-    if [[ ! -f "$python_src" ]]; then
-        echo '{"success": false, "error": "RCON client not found"}'
-        return 1
-    fi
-    
-    # Copy script to container and execute
-    docker cp "$python_src" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-    
-    # Add --debug flag if DEBUG_RCON is set, log to file
-    if [[ -n "${DEBUG_RCON:-}" ]]; then
-        local debug_log="${inst_dir}/data/state/rcon_debug.log"
-        mkdir -p "$(dirname "$debug_log")" 2>/dev/null
-        rcon_args+=(--debug)
-        echo "--- $(date) ---" >> "$debug_log"
-        echo "Action: $action" >> "$debug_log"
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
-    else
-        # Password via environment: command lines are visible in /proc and docker inspect
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
     fi
 }
 
@@ -585,7 +496,7 @@ send_message_dialog() {
     
     # Send via RCON
     local result
-    result=$(run_rcon_action "$inst_dir" "say" --message "$formatted")
+    result=$(rcon_action "$inst_dir" "say" --message "$formatted")
     
     local success
     success=$(json_get "$result" "success" "false")
@@ -617,7 +528,7 @@ They can rejoin at any time." "n"; then
     # Execute kick - uses player NAME (not ID)
     # Note: BattlEye #kick doesn't support reason field
     local result
-    result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name")
+    result=$(rcon_action "$inst_dir" "kick" --player-name "$player_name")
     
     local success
     success=$(json_get "$result" "success" "false")
@@ -701,7 +612,7 @@ Wait until the player is in game, then ban." "✗ Error"
 
     # Step 1: Kick the player via RCON
     local kick_json
-    kick_json=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name" 2>/dev/null)
+    kick_json=$(rcon_action "$inst_dir" "kick" --player-name "$player_name" 2>/dev/null)
 
     # Step 2: Write GUID directly to bans.txt (RCON addBan fails silently)
     # Format: GUID -1 (permanent ban, -1 = no expiry timestamp)
@@ -713,7 +624,7 @@ Wait until the player is in game, then ban." "✗ Error"
 
     # Step 3: Reload bans via RCON
     local reload_json
-    reload_json=$(run_rcon_action "$inst_dir" "loadbans" 2>/dev/null)
+    reload_json=$(rcon_action "$inst_dir" "loadbans" 2>/dev/null)
 
     # Save ban record to our tracking file (includes duration, reason, timestamps).
     # Without it a timed ban never expires, so a failure here is not a success.
@@ -1135,7 +1046,7 @@ Remove the entry from bans.json by hand." "✗ Error"
 
     # Reload bans via RCON
     local reload_json
-    reload_json=$(run_rcon_action "$inst_dir" "loadbans" 2>/dev/null)
+    reload_json=$(rcon_action "$inst_dir" "loadbans" 2>/dev/null)
     if [[ "$(json_get "$reload_json" "success" "false")" == "true" ]]; then
         show_message "Unbanned '$name'" "✓ Success"
     else
