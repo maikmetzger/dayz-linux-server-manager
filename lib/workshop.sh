@@ -16,6 +16,11 @@
 # Cache settings
 VERSION_CACHE_TTL_SECONDS=120  # 2 minutes minimum between API checks
 
+# Debug trace of workshop fetches. Not under /tmp: a predictable path there
+# could be pre-created by another local user.
+WORKSHOP_DEBUG_LOG="${WORKSHOP_DEBUG_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/dayz-docker-hub/workshop_debug.log}"
+mkdir -p "$(dirname "$WORKSHOP_DEBUG_LOG")" 2>/dev/null || true
+
 # store_mod_version - Save the timestamp of a mod version after sync
 #
 # Usage: store_mod_version "$mod_id" "$time_updated" "$workshop_dir"
@@ -364,13 +369,13 @@ _fetch_workshop_details() {
     local ids="$1"
     local recursive="${2:-""}"
     local rules_path="${3:-""}"
-    echo "FETCH_DETAILS: ids=$ids recursive=$recursive" >> /tmp/workshop_crash.log
+    echo "FETCH_DETAILS: ids=$ids recursive=$recursive" >> "${WORKSHOP_DEBUG_LOG}"
     local cmd="timeout 90s python3 \"${SCRIPT_DIR}/lib/workshop_search.py\" --details \"$ids\""
     [[ "$recursive" == "1" ]] && cmd="$cmd --recursive"
     [[ -n "$rules_path" ]] && cmd="$cmd --update-rules \"$rules_path\""
-    echo "FETCH_DETAILS: Running cmd" >> /tmp/workshop_crash.log
+    echo "FETCH_DETAILS: Running cmd" >> "${WORKSHOP_DEBUG_LOG}"
     eval "$cmd"
-    echo "FETCH_DETAILS: Done" >> /tmp/workshop_crash.log
+    echo "FETCH_DETAILS: Done" >> "${WORKSHOP_DEBUG_LOG}"
 }
 
 # Unified Drawing Logic for the Workshop Browser
@@ -744,7 +749,7 @@ _view_mod_details() {
     # Disable exit-on-error AND exit-on-unset-variable
     set +eu
     
-    echo "STARTING DETAILS for $mid" > /tmp/workshop_crash.log
+    echo "STARTING DETAILS for $mid" > "${WORKSHOP_DEBUG_LOG}"
     
     # Fetch FRESH details (recursive=0, just this mod, but get FULL info)
     move_to $((TERM_ROWS / 2)) $((TERM_COLS / 2 - 10))
@@ -752,71 +757,76 @@ _view_mod_details() {
     
     # Use temp file to avoid subshell exit issues
     # Force unique name with timestamp to avoid collision
-    local tmp_json="/tmp/workshop_details_${mid}_$(date +%s).json"
-    echo "FETCHING PYTHON..." >> /tmp/workshop_crash.log
-    echo "XYZZY_SYNC_CHECK_2026" >> /tmp/workshop_crash.log
+    local tmp_json
+    tmp_json=$(mktemp "${TMPDIR:-/tmp}/workshop_details_XXXXXX")
+    echo "FETCHING PYTHON..." >> "${WORKSHOP_DEBUG_LOG}"
+    echo "XYZZY_SYNC_CHECK_2026" >> "${WORKSHOP_DEBUG_LOG}"
     
     # Timeout after 30s, capture stderr for debugging
-    timeout 30s python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>> /tmp/workshop_crash.log
-    echo "XYZZY_AFTER_TIMEOUT" >> /tmp/workshop_crash.log
+    timeout 30s python3 "${SCRIPT_DIR}/lib/workshop_search.py" --details "$mid" > "$tmp_json" 2>> "${WORKSHOP_DEBUG_LOG}"
+    echo "XYZZY_AFTER_TIMEOUT" >> "${WORKSHOP_DEBUG_LOG}"
     local py_exit=$?
-    echo "PYTHON EXIT CODE: $py_exit" >> /tmp/workshop_crash.log
-    echo "DEBUG: After py_exit" >> /tmp/workshop_crash.log
+    echo "PYTHON EXIT CODE: $py_exit" >> "${WORKSHOP_DEBUG_LOG}"
+    echo "DEBUG: After py_exit" >> "${WORKSHOP_DEBUG_LOG}"
     
     if [[ $py_exit -ne 0 ]]; then
-        echo "PYTHON FAILED, using defaults" >> /tmp/workshop_crash.log
+        echo "PYTHON FAILED, using defaults" >> "${WORKSHOP_DEBUG_LOG}"
     fi
     
-    echo "PARSING JSON..." >> /tmp/workshop_crash.log
+    echo "PARSING JSON..." >> "${WORKSHOP_DEBUG_LOG}"
     
     # Parse Python output
     local mname="Loading..." mauthor="Unknown" msize="0B" msubs="0" mupdated="-" mreleased="-" mdesc="Loading..." mdeps="0" mrating_stars="-" mrating_count="0"
     local -a mimages=()
     
-    local tmp_source="/tmp/workshop_source_${mid}.sh"
-    
-    # Python writes direct shell assignments to file
-    cat "$tmp_json" 2>/dev/null | python3 -c "
-import sys, json, datetime, shlex
+    # Python prints one "key<TAB>value" line per field (images one per line).
+    # Newlines inside the description arrive as the two characters \n, which
+    # the renderer expands with echo -e. Nothing is generated as shell code
+    # and nothing is sourced.
+    local key value
+    while IFS=$'\t' read -r key value; do
+        case "$key" in
+            mname) mname="$value" ;;             mauthor) mauthor="$value" ;;
+            msize) msize="$value" ;;             msubs) msubs="$value" ;;
+            mupdated) mupdated="$value" ;;       mreleased) mreleased="$value" ;;
+            mdesc) mdesc="$value" ;;             mdeps) mdeps="$value" ;;
+            mrating_stars) mrating_stars="$value" ;;
+            mrating_count) mrating_count="$value" ;;
+            mimage) mimages+=("$value") ;;
+        esac
+    done < <(python3 - "$tmp_json" <<'PY_DETAILS' 2>> "${WORKSHOP_DEBUG_LOG}"
+import sys, json, datetime
+
+def clean(s):
+    return str(s).encode('ascii', 'ignore').decode('ascii').strip().replace('\t', ' ')
+
+def emit(key, value):
+    text = clean(value).replace('\n', '\\n')
+    print(key + '\t' + text)
+
 try:
-    data = json.load(sys.stdin)
+    with open(sys.argv[1], encoding='utf-8') as f:
+        data = json.load(f)
     if data:
         x = data[0]
         ud = datetime.datetime.fromtimestamp(x.get('updated', 0)).strftime('%d. %b %Y %H:%M')
         rd = datetime.datetime.fromtimestamp(x.get('created', 0)).strftime('%d. %b %Y %H:%M')
-        
-        def clean(s): return str(s).encode('ascii', 'ignore').decode('ascii').strip()
-        
-        desc = x.get('description_clean', x.get('description', ''))
-        
-        # Write to file instead of stdout for eval
-        with open('$tmp_source', 'w') as f:
-            f.write(f'mname={shlex.quote(clean(x.get(\"name\",\"\")))}\\n')
-            f.write(f'mauthor={shlex.quote(clean(x.get(\"author\",\"Unknown\")))}\\n')
-            f.write(f'msize={shlex.quote(x.get(\"size\",\"0B\"))}\\n')
-            f.write(f'msubs={shlex.quote(x.get(\"subscribers_f\",\"0\"))}\\n')
-            f.write(f'mupdated={shlex.quote(ud)}\\n')
-            f.write(f'mreleased={shlex.quote(rd)}\\n')
-            f.write(f'mdesc={shlex.quote(clean(desc))}\\n')
-            f.write(f'mdeps={len(x.get(\"dependencies\",[]))}\\n')
-            f.write(f'mrating_stars={shlex.quote(str(x.get(\"rating_stars\",\"-\")))}\\n')
-            f.write(f'mrating_count={shlex.quote(str(x.get(\"rating_count\",\"0\")))}\\n')
-            
-            imgs = x.get('images', [])
-            img_str = ' '.join([shlex.quote(i) for i in imgs])
-            f.write(f'mimages=({img_str})\\n')
+        emit('mname', x.get('name', ''))
+        emit('mauthor', x.get('author', 'Unknown'))
+        emit('msize', x.get('size', '0B'))
+        emit('msubs', x.get('subscribers_f', '0'))
+        emit('mupdated', ud)
+        emit('mreleased', rd)
+        emit('mdesc', x.get('description_clean', x.get('description', '')))
+        emit('mdeps', len(x.get('dependencies', [])))
+        emit('mrating_stars', x.get('rating_stars', '-'))
+        emit('mrating_count', x.get('rating_count', '0'))
+        for img in x.get('images', []):
+            emit('mimage', img)
 except Exception as e:
     print(f'PARSE ERROR: {e}', file=sys.stderr)
-" 2>> /tmp/workshop_crash.log
-    rm -f "$tmp_json"
-    
-    echo "SOURCING..." >> /tmp/workshop_crash.log
-    
-    # Source the generated file (Safe loading of variables)
-    if [[ -f "$tmp_source" ]]; then
-        source "$tmp_source" 2>> /tmp/workshop_crash.log
-        rm -f "$tmp_source"
-    fi
+PY_DETAILS
+    )
     rm -f "$tmp_json"
     
     # Calculate Local Details
@@ -872,7 +882,7 @@ except: pass
         mtype="Not Installed"
     fi
     
-    echo "ENTERING UI LOOP..." >> /tmp/workshop_crash.log
+    echo "ENTERING UI LOOP..." >> "${WORKSHOP_DEBUG_LOG}"
     
     # Run UI loop in permissive mode to prevent crashes from fold/printf
     set +eu
@@ -1150,12 +1160,12 @@ except Exception as e:
                 IFS='|' read -r mid mname msubs msize mdate mdesc mchildren msubs_raw <<< "${items[$selection]:-}"
                 if [[ -z "${installed_mods[$mid]:-}" ]]; then
                     # Fetch dependencies (no visual banner - TUI conflict)
-                    echo "INSTALL: Starting for $mid" > /tmp/workshop_crash.log
+                    echo "INSTALL: Starting for $mid" > "${WORKSHOP_DEBUG_LOG}"
                     
-                    echo "INSTALL: Calling _fetch_workshop_details" >> /tmp/workshop_crash.log
+                    echo "INSTALL: Calling _fetch_workshop_details" >> "${WORKSHOP_DEBUG_LOG}"
                     local chain_json=""
                     chain_json=$(_fetch_workshop_details "$mid" "1" "$rules_json") || true
-                    echo "INSTALL: Got chain_json len=${#chain_json}" >> /tmp/workshop_crash.log
+                    echo "INSTALL: Got chain_json len=${#chain_json}" >> "${WORKSHOP_DEBUG_LOG}"
                     
                     if [[ -z "$chain_json" ]]; then
                         show_message "Failed to fetch dependencies (timeout or network error)." "Error"
@@ -1163,19 +1173,19 @@ except Exception as e:
                         continue
                     fi
                     
-                    echo "INSTALL: Parsing JSON..." >> /tmp/workshop_crash.log
+                    echo "INSTALL: Parsing JSON..." >> "${WORKSHOP_DEBUG_LOG}"
                     local -a to_install_ids=() to_install_names=() frameworks_found=()
                     while IFS='|' read -r cid cname; do
                         if [[ -n "$cid" && -z "${installed_mods[$cid]:-}" ]]; then
                             to_install_ids+=("$cid"); to_install_names+=("$cname")
                             [[ "${workshop_rules[$cid]:-}" == "framework" ]] && frameworks_found+=("$cname")
                         fi
-                    done < <(echo "$chain_json" | python3 -c "import sys, json; [print(f\"{x['id']}|{x['name']}\") for x in json.load(sys.stdin)]" 2>> /tmp/workshop_crash.log)
-                    echo "INSTALL: Found ${#to_install_ids[@]} mods to install" >> /tmp/workshop_crash.log
+                    done < <(echo "$chain_json" | python3 -c "import sys, json; [print(f\"{x['id']}|{x['name']}\") for x in json.load(sys.stdin)]" 2>> "${WORKSHOP_DEBUG_LOG}")
+                    echo "INSTALL: Found ${#to_install_ids[@]} mods to install" >> "${WORKSHOP_DEBUG_LOG}"
                     if [[ ${#to_install_ids[@]} -eq 0 ]]; then show_message "This mod (and dependencies) are already in your list." "Info"; set -e; continue; fi
                     local install_summary="${to_install_names[*]}"
                     [[ ${#to_install_names[@]} -gt 3 ]] && install_summary="${to_install_names[0]}, ${to_install_names[1]} and $(( ${#to_install_names[@]} - 2 )) more"
-                    echo "INSTALL: About to confirm" >> /tmp/workshop_crash.log
+                    echo "INSTALL: About to confirm" >> "${WORKSHOP_DEBUG_LOG}"
                     local confirm_msg="Install ${#to_install_ids[@]} mod(s): ${install_summary}"
                     if [[ ${#to_install_ids[@]} -gt 1 ]]; then
                         confirm_msg="Mod has dependencies. Install ${#to_install_ids[@]} mods: ${install_summary}"
@@ -1183,10 +1193,15 @@ except Exception as e:
                     if confirm "$confirm_msg" "y"; then
                         local auto_top=0
                         if [[ ${#frameworks_found[@]} -gt 0 ]] && confirm "Move frameworks (${frameworks_found[*]}) to top of load order?" "y"; then auto_top=1; fi
-                        for ((i=0; i<${#to_install_ids[@]}; i++)); do
-                            local cid="${to_install_ids[$i]}"
-                            if [[ $auto_top -eq 1 ]]; then sed -i "1i$cid" "$mods_txt"; else echo "$cid" >> "$mods_txt"; fi
-                        done
+                        if [[ $auto_top -eq 1 ]]; then
+                            # Prepend in dependency order. (sed 1i inserts nothing into an
+                            # empty file and per-item inserts reverse the order.)
+                            { printf '%s\n' "${to_install_ids[@]}"; cat "$mods_txt" 2>/dev/null; } > "${mods_txt}.tmp" \
+                                && mv "${mods_txt}.tmp" "$mods_txt"
+                        else
+                            local cid
+                            for cid in "${to_install_ids[@]}"; do append_line "$mods_txt" "$cid"; done
+                        fi
                         # Flag sync needed for Mod Manager
                         touch "${instance_dir}/data/config/.needs_sync"
                         f_changed=1; show_message "Mod(s) added to your list. Run 'Sync' to download." "Added"
