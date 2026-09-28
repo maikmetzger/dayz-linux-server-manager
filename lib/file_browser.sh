@@ -245,7 +245,7 @@ _fb_draw() {
     move_to "$TERM_ROWS" 1
     local hints="↑↓ Nav  Enter Select  [/] Search"
     [[ -n "$filter" ]] && hints="${hints}  [C] Clear"
-    if [[ "$mode" != "folders" ]]; then
+    if _fb_can_edit; then
         hints="${hints}  [N] New  [D] Delete  [L] Tail"
         [[ "${items[$selected]}" == *.bak ]] && hints="${hints}  [R] Restore"
     fi
@@ -262,9 +262,14 @@ _fb_key_open() {
     fi
 }
 
+# Only the "all" mode may create, delete, restore or tail entries
+_fb_can_edit() {
+    [[ "$mode" == "all" ]]
+}
+
 # [N] create a file or folder inside the current directory
 _fb_key_new() {
-    [[ "$mode" == "folders" ]] && return 0
+    _fb_can_edit || return 0
     local type name
     type=$(read_input "Type (f=File, d=Folder):" "f" "New Item")
     case "$type" in
@@ -282,7 +287,7 @@ _fb_key_new() {
 
 # [D] delete the selected entry after confirmation
 _fb_key_delete() {
-    [[ "$mode" == "folders" ]] && return 0
+    _fb_can_edit || return 0
     [[ "${items[$selected]}" != ".." ]] || return 0
     local path="${item_paths[$selected]}"
     if confirm "Delete '$(basename "$path")'?" "n"; then
@@ -292,7 +297,7 @@ _fb_key_delete() {
 
 # [R] copy a .bak over its original
 _fb_key_restore() {
-    [[ "$mode" == "folders" ]] && return 0
+    _fb_can_edit || return 0
     local path="${item_paths[$selected]}"
     [[ "$path" == *.bak ]] || return 0
     if confirm "Restore this backup? (Overwrites current file)" "n"; then
@@ -303,14 +308,15 @@ _fb_key_restore() {
 
 # [L] tail the selected file
 _fb_key_tail() {
-    [[ "$mode" == "folders" ]] && return 0
+    _fb_can_edit || return 0
     [[ "${items[$selected]}" != ".." ]] || return 0
     fb_tail_file "${item_paths[$selected]}" || true
 }
 
 # Generic Directory Browser
 # Usage: fb_browse_dir <dir> <title> <breadcrumb_prefix> [on_select_cmd] [mode] [ignore_pattern]
-# mode: "all" (default), "folders"
+# mode: "all" (default, files and folders, editable), "folders" (only
+# directories), "view" (files and folders, read-only)
 fb_browse_dir() {
     local dir="$1"
     local title="$2"
