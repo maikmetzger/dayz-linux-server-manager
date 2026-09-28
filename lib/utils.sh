@@ -33,6 +33,18 @@ run_arr() { show_cmd "$*"; "$@"; }
 # Usage: run_in_dir "/path/to/instance" docker compose up -d
 run_in_dir() { local dir="$1"; shift; show_cmd "cd '$dir' && $*"; (cd "$dir" && "$@"); }
 
+# Append one line to a file. If the file does not end with a newline the
+# line is started on a fresh line first, otherwise "123" + "456" would
+# silently become "123456".
+# Usage: append_line "$file" "$text"
+append_line() {
+    local file="$1" text="$2"
+    if [[ -s "$file" && -n "$(tail -c1 "$file")" ]]; then
+        printf '\n' >> "$file"
+    fi
+    printf '%s\n' "$text" >> "$file"
+}
+
 # -----------------------------------------------------------------------------
 # User Identity Resolution
 # -----------------------------------------------------------------------------
@@ -154,7 +166,9 @@ get_mission_path() {
     local template=""
     if [[ -n "$cfg" ]]; then
         # More flexible regex for template (handles indentation and spaces)
-        template=$(grep -i '^[[:space:]]*template' "$cfg" | sed -E 's/.*template\s*=\s*"([^"]+)".*/\1/' | head -n 1)
+        # Accept every spelling DayZ allows: indented, inside a one-line
+        # "class Missions { class DayZ { template = "..."; }; };" and any case.
+        template=$(grep -ioE 'template[[:space:]]*=[[:space:]]*"[^"]+"' "$cfg" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
     fi
     
     if [[ -n "$template" ]]; then

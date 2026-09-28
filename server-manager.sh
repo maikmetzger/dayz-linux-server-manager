@@ -632,7 +632,7 @@ END_PYTHON
                         # Show details first
                         _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
                         if [[ $? -eq 10 ]]; then
-                            echo "$new_id" >> "$mods_file"
+                            add_mod_to_file "$new_id" "$mods_file"
                             show_message "Added mod $new_id as [Client]" "Mod Added"
                             dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         fi
@@ -661,7 +661,7 @@ END_PYTHON
                         both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
                     esac
                     dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                    echo "$mid" >> "$pending_mods_file"
+                    append_line "$pending_mods_file" "$mid"
                     pending_sync_mods="$pending_sync_mods $mid"
                 elif [[ $selected -eq $mod_count ]]; then
                     # Add
@@ -672,7 +672,7 @@ END_PYTHON
                             # Show details first
                             _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
                             if [[ $? -eq 10 ]]; then
-                                echo "$new_id" >> "$mods_file"
+                                add_mod_to_file "$new_id" "$mods_file"
                                 show_message "Added mod $new_id as [Client]" "Mod Added"
                                 dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                             fi
@@ -787,9 +787,9 @@ except: pass
                          new_ce_count=0
                     else
                          # Count NEW or UNLINKED files that aren't ignored
-                         new_ce_count=$(echo "$ce_result" | python3 -c "
-import json, sys
-ignored_raw = '''$ignored_list'''
+                         new_ce_count=$(echo "$ce_result" | IGNORED_LIST="$ignored_list" python3 -c "
+import json, sys, os
+ignored_raw = os.environ.get('IGNORED_LIST', '')
 ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
 try:
     d = json.load(sys.stdin)
@@ -824,9 +824,9 @@ except: print(0)
                             ce_filenames+=("$fname")
                             ce_types+=("$cetype")
                             ce_selected+=(1)  # Pre-selected by default
-                        done < <(echo "$ce_result" | python3 -c "
-import json, sys
-ignored_raw = '''$ignored_list'''
+                        done < <(echo "$ce_result" | IGNORED_LIST="$ignored_list" python3 -c "
+import json, sys, os
+ignored_raw = os.environ.get('IGNORED_LIST', '')
 ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
 try:
     data = json.load(sys.stdin)

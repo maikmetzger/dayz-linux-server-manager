@@ -146,7 +146,7 @@ add_mod_to_file() {
     local mod_id="$1"
     local file="$2"
     if ! grep -qE "^[[:space:]]*#?[[:space:]]*${mod_id}[[:space:]]*$" "$file" 2>/dev/null; then
-        echo "$mod_id" >> "$file"
+        append_line "$file" "$mod_id"
     else
         # Enable if commented
         sed -i "s/^[[:space:]]*#[[:space:]]*${mod_id}[[:space:]]*$/${mod_id}/" "$file"

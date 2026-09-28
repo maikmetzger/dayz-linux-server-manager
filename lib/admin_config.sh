@@ -154,7 +154,7 @@ add_vpp_admin() {
         return 0  # Already exists
     fi
     
-    echo "$steam_id" >> "$file"
+    append_line "$file" "$steam_id"
 }
 
 # Remove admin from VPP
@@ -219,7 +219,7 @@ add_zomberry_admin() {
         return 0
     fi
     
-    echo "$steam_id" >> "$file"
+    append_line "$file" "$steam_id"
 }
 
 # Remove admin from ZomBerry
@@ -324,12 +324,13 @@ add_expansion_admin() {
     
     mkdir -p "$dir"
     
-    python3 << EOF
+    # Path and id travel as arguments: a quote in the profile path must not break the code
+    python3 - "$file" "$steam_id" <<'EOF'
 import json
 import os
+import sys
 
-file_path = '$file'
-steam_id = '$steam_id'
+file_path, steam_id = sys.argv[1], sys.argv[2]
 
 data = {"EnablePermissions": 1, "Admins": []}
 
@@ -357,11 +358,11 @@ remove_expansion_admin() {
     local file="${profile_dir}/ExpansionMod/Settings/PermissionsSettings.json"
     
     if [[ -f "$file" ]]; then
-        python3 << EOF
+        python3 - "$file" "$steam_id" <<'EOF'
 import json
+import sys
 
-file_path = '$file'
-steam_id = '$steam_id'
+file_path, steam_id = sys.argv[1], sys.argv[2]
 
 try:
     with open(file_path, 'r') as f:

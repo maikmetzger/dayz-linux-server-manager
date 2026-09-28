@@ -115,7 +115,7 @@ read_ids() {
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
     { print $1 }
-  ' "${file}" | awk '/^[0-9]+$/'
+  ' "${file}" | awk '/^[0-9]+$/' | awk '!seen[$0]++'
 }
 
 list_has_id_enabled() {
@@ -127,7 +127,7 @@ list_add_id() {
   local file="$1" id="$2"
   [[ "${id}" =~ ^[0-9]+$ ]] || die "Invalid workshop id: ${id}"
   if ! grep -Eq "^[[:space:]]*#?[[:space:]]*${id}[[:space:]]*$" "${file}"; then
-    echo "${id}" >> "${file}"
+    append_line "${file}" "${id}"
   else
     # if present but commented, enable it
     sed -i -E "s/^[[:space:]]*#[[:space:]]*${id}[[:space:]]*$/${id}/" "${file}" || true
@@ -148,7 +148,7 @@ list_disable_id() {
   else
     # if missing, append commented placeholder
     if ! grep -Eq "^[[:space:]]*#[[:space:]]*${id}[[:space:]]*$" "${file}"; then
-      echo "# ${id}" >> "${file}"
+      append_line "${file}" "# ${id}"
     fi
   fi
 }
@@ -160,21 +160,31 @@ list_enable_id() {
     sed -i -E "s/^[[:space:]]*#[[:space:]]*${id}[[:space:]]*$/${id}/" "${file}"
   else
     if ! grep -Eq "^[[:space:]]*${id}[[:space:]]*$" "${file}"; then
-      echo "${id}" >> "${file}"
+      append_line "${file}" "${id}"
     fi
   fi
 }
 
 parse_ids() {
-  # accepts: "1,2 3" -> lines
+  # accepts: "1,2 3" -> one id per line; fails (prints nothing) on any invalid id
   local raw="$*"
   raw="${raw//,/ }"
+  # The script sets IFS to newline+tab globally, so split on spaces explicitly here
+  local IFS=$' \t\n'
   # shellcheck disable=SC2206
   local arr=( ${raw} )
+  local x
   for x in "${arr[@]}"; do
-    [[ "${x}" =~ ^[0-9]+$ ]] || die "Invalid workshop id: ${x}"
-    echo "${x}"
+    [[ "${x}" =~ ^[0-9]+$ ]] || { warn "Invalid workshop id: ${x}"; return 1; }
   done
+  printf '%s\n' "${arr[@]}"
+}
+
+# Append one line, starting a fresh line first if the file lacks a final newline
+append_line() {
+  local file="$1" text="$2"
+  if [[ -s "${file}" && -n "$(tail -c1 "${file}")" ]]; then printf '\n' >> "${file}"; fi
+  printf '%s\n' "${text}" >> "${file}"
 }
 
 server_bin() {
@@ -613,10 +623,10 @@ case "${cmd}" in
   mod)
     sub="${1:-}"; shift || true
     case "${sub}" in
-      add)     while IFS= read -r id; do list_add_id "${MODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      remove)  while IFS= read -r id; do list_remove_id "${MODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      enable)  while IFS= read -r id; do list_enable_id "${MODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      disable) while IFS= read -r id; do list_disable_id "${MODS_FILE}" "${id}"; done < <(parse_ids "$*");;
+      add)     ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_add_id "${MODS_FILE}" "${id}"; done;;
+      remove)  ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_remove_id "${MODS_FILE}" "${id}"; done;;
+      enable)  ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_enable_id "${MODS_FILE}" "${id}"; done;;
+      disable) ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_disable_id "${MODS_FILE}" "${id}"; done;;
       list)    sed -n '1,200p' "${MODS_FILE}";;
       *) die "Usage: mod {add|remove|enable|disable|list} <ids...>" ;;
     esac
@@ -625,10 +635,10 @@ case "${cmd}" in
   servermod)
     sub="${1:-}"; shift || true
     case "${sub}" in
-      add)     while IFS= read -r id; do list_add_id "${SERVERMODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      remove)  while IFS= read -r id; do list_remove_id "${SERVERMODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      enable)  while IFS= read -r id; do list_enable_id "${SERVERMODS_FILE}" "${id}"; done < <(parse_ids "$*");;
-      disable) while IFS= read -r id; do list_disable_id "${SERVERMODS_FILE}" "${id}"; done < <(parse_ids "$*");;
+      add)     ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_add_id "${SERVERMODS_FILE}" "${id}"; done;;
+      remove)  ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_remove_id "${SERVERMODS_FILE}" "${id}"; done;;
+      enable)  ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_enable_id "${SERVERMODS_FILE}" "${id}"; done;;
+      disable) ids=$(parse_ids "$*") || exit 1; for id in ${ids}; do list_disable_id "${SERVERMODS_FILE}" "${id}"; done;;
       list)    sed -n '1,200p' "${SERVERMODS_FILE}";;
       *) die "Usage: servermod {add|remove|enable|disable|list} <ids...>" ;;
     esac
