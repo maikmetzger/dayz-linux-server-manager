@@ -16,6 +16,7 @@ _DAYZ_COLORS_LOADED=1
 ESC=$'\033'
 RESET="${ESC}[0m"
 BOLD="${ESC}[1m"
+ITALIC="${ESC}[3m"
 DIM="${ESC}[2m"
 
 # -----------------------------------------------------------------------------
@@ -53,6 +54,7 @@ BG_BLACK="${ESC}[40m"
 BG_RED="${ESC}[48;2;178;0;0m"       # #b20000 DayZ blood red
 BG_DARKGRAY="${ESC}[100m"
 BG_YELLOW="${ESC}[48;2;255;255;0m"      # highlighted [!S] Sync button (sync pending)
+BG_BLUE="${ESC}[44m"                   # workshop details header
 BG_WHITE="${ESC}[47m"
 
 # -----------------------------------------------------------------------------
