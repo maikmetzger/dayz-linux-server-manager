@@ -15,6 +15,12 @@ _DAYZ_MOD_CONFIG_LOADED=1
 MOD_CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Loot Manager debug log lives in the user's state dir, not in the repo
 LOOT_MANAGER_LOG="${LOOT_MANAGER_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/dayz-docker-hub/loot_manager.log}"
+
+# Append one line to the loot manager log (creates the directory on first use)
+_loot_log() {
+    mkdir -p "$(dirname "$LOOT_MANAGER_LOG")" 2>/dev/null || return 0
+    echo "$*" >> "$LOOT_MANAGER_LOG"
+}
 source "${MOD_CONFIG_LIB_DIR}/utils.sh"
 source "${MOD_CONFIG_LIB_DIR}/colors.sh"
 source "${MOD_CONFIG_LIB_DIR}/file_browser.sh"
@@ -95,203 +101,90 @@ EOF
 # Args: instance_dir, target_filename, ce_type (types|spawnabletypes|events|eventspawns)
 
 
-# Register a loot XML as a modular include
+# File name of the linked copy: <mod>_<file> (LOCAL files keep their name),
+# cleaned for the filesystem
+_ce_target_name() {
+    local mod_name="$1" bname="$2"
+    local name="${mod_name}_${bname}"
+    [[ "$mod_name" == "LOCAL" || "$mod_name" == "ORPHAN" ]] && name="$bname"
+    printf '%s' "$name" | tr -cd '[:alnum:]_.-'
+}
+
+# Working copy in CustomCE/<type> (asks before overwriting an existing copy)
+# and the .originals snapshot that merge tracking compares workshop updates
+# against
+# Usage: _ce_copy_with_snapshot "$source_xml" "$target_path" "$ce_folder" "$silent"
+_ce_copy_with_snapshot() {
+    local source_xml="$1" target_path="$2" ce_folder="$3" silent="$4"
+    local target_filename
+    target_filename=$(basename "$target_path")
+    if [[ -f "$target_path" && "$silent" == "0" ]] \
+        && ! confirm "File '$target_filename' already exists in $ce_folder. Overwrite?" "n"; then
+        echo "Skipping overwrite, but will ensure it is linked in XML."
+    else
+        mkdir -p "$(dirname "$target_path")"
+        cp "$source_xml" "$target_path"
+    fi
+    local originals_folder
+    originals_folder="$(dirname "$target_path")/.originals"
+    mkdir -p "$originals_folder"
+    cp "$source_xml" "$originals_folder/$target_filename"
+}
+
+# register_modular_loot - Link a CE file into the mission: copy it to
+# CustomCE/<type>, keep a snapshot for merge tracking and register it in
+# cfgeconomycore.xml (lib/xml_parser.py add-ce-file).
+# Usage: register_modular_loot "$instance_dir" "$source_xml" "$mod_name" [silent] [force_type]
 register_modular_loot() {
-    local instance_dir="$1"
-    local source_xml="$2"
-    local mod_name="$3"
-    local silent="${4:-0}"
-    local force_type="${5:-}"
-    
+    local instance_dir="$1" source_xml="$2" mod_name="$3"
+    local silent="${4:-0}" force_type="${5:-}"
+
     local mission_path
     if ! mission_path=$(get_mission_path "$instance_dir"); then
         [[ "$silent" == "0" ]] && show_message "Could not find mission path in serverDZ.cfg" "Error"
         return 1
     fi
-    
     setup_modular_loot "$mission_path"
-    
-    # Auto-detect or use forced CE file type
-    local ce_type="$force_type"
-    if [[ -z "$ce_type" ]]; then
-        ce_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$source_xml" 2>/dev/null)
-        
-        # Fallback to 'types' if detection fails or unknown format
-        if [[ -z "$ce_type" ]]; then
-            # Only warn if not silent and it doesn't look like a standard types file
-            if [[ "$silent" == "0" ]]; then
-                local b=$(basename "$source_xml")
-                if [[ "$b" != *"types"* ]]; then
-                    show_message "Could not detect CE type for '$b'. Assuming 'types'." "Warning"
-                fi
-            fi
-            ce_type="types"
-        fi
-    fi
-    
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    local bname=$(basename "$source_xml")
-    
-    local target_filename
-    if [[ "$mod_name" == "LOCAL" || "$mod_name" == "ORPHAN" ]]; then
-        target_filename="$bname"
-    else
-        target_filename="${mod_name}_${bname}"
-    fi
+    local bname
+    bname=$(basename "$source_xml")
 
-    # Clean target name for FS safety
-    target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
+    local ce_type="$force_type"
+    [[ -n "$ce_type" ]] || ce_type=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" detect-ce-type "$source_xml" 2>/dev/null) || ce_type=""
+    if [[ -z "$ce_type" ]]; then
+        [[ "$silent" == "0" && "$bname" != *types* ]] && show_message "Could not detect CE type for '$bname'. Assuming 'types'." "Warning"
+        ce_type="types"
+    fi
 
     # Never link a file the server cannot parse: one broken CE file stops CE loading
-    if ! python3 - "$source_xml" <<'PY_VALIDATE' 2>/dev/null
-import re, sys, xml.etree.ElementTree as ET
-with open(sys.argv[1], 'rb') as f:
-    data = f.read()
-try:
-    ET.fromstring(data)
-except ET.ParseError:
-    # a bare fragment (<type> without <types>) is fine once wrapped
-    body = re.sub(rb'^\s*<\?xml[^>]*\?>', b'', data)
-    ET.fromstring(b'<r>' + body + b'</r>')
-PY_VALIDATE
-    then
+    if ! python3 "${SCRIPT_DIR}/lib/xml_parser.py" validate-ce "$source_xml" >/dev/null 2>&1; then
         echo "Error: '$source_xml' is not well-formed XML, not linked" >&2
-        [[ "$silent" == "0" ]] && show_message "'$(basename "$source_xml")' is not valid XML and was not linked." "Error"
+        [[ "$silent" == "0" ]] && show_message "'$bname' is not valid XML and was not linked." "Error"
         return 1
     fi
-    
-    # Route to the correct CE folder based on detected type
-    local ce_folder="CustomCE/${ce_type}"
-    local target_path="${mission_path}/${ce_folder}/${target_filename}"
-    
-    # Original snapshot path for merge tracking (Phase 3-4)
-    local originals_folder="${mission_path}/${ce_folder}/.originals"
-    local original_path="${originals_folder}/${target_filename}"
-    
-    local skip_copy=0
-    if [[ -f "$target_path" && "$silent" == "0" ]]; then
-        if ! confirm "File '$target_filename' already exists in $ce_folder. Overwrite?" "n"; then
-            echo "Skipping overwrite, but will ensure it is linked in XML."
-            skip_copy=1
-        fi
-    fi
-    
-    # 1. Copy file to the correct CE folder (user's working copy)
-    if [[ "$skip_copy" -eq 0 ]]; then
-        mkdir -p "$(dirname "$target_path")"
-        cp "$source_xml" "$target_path"
-    fi
-    
-    # 2. Save original snapshot for merge tracking (only if not exists or overwriting)
-    #    This snapshot is compared against workshop updates to detect changes
-    mkdir -p "$originals_folder"
-    cp "$source_xml" "$original_path"
-    
-    # 3. Add to cfgeconomycore.xml using Python for correct CE block
-    python3 - "$core_xml" "$target_filename" "$ce_type" "$ce_folder" <<'EOF'
-import xml.etree.ElementTree as ET
-import sys
 
-core_path, file_to_add, ce_type, ce_folder = sys.argv[1:5]
+    local ce_folder="CustomCE/${ce_type}" target_filename
+    target_filename=$(_ce_target_name "$mod_name" "$bname")
+    _ce_copy_with_snapshot "$source_xml" "${mission_path}/${ce_folder}/${target_filename}" "$ce_folder" "$silent"
 
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    # Find the correct CE block by folder attribute
-    ce_node = None
-    for ce in root.findall('ce'):
-        if ce.get('folder') == ce_folder:
-            ce_node = ce
-            break
-    
-    # If no matching CE block, create one
-    if ce_node is None:
-        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
-    
-    # Already linked in this CustomCE block? Other blocks (e.g. a user-added
-    # db block listing the vanilla types.xml) must not count as a duplicate.
-    exists = any(f.get('name') == file_to_add for f in ce_node.findall('file'))
-
-    if not exists:
-        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
-        
-        # Pretty print/indent (Python 3.9+)
-        if hasattr(ET, 'indent'):
-            ET.indent(tree, space="\t", level=0)
-            
-        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
-        print("Success")
-    else:
-        print("Already linked")
-except Exception as e:
-    print(f"Error: {e}", file=sys.stderr)
-    sys.exit(1)
-EOF
-    local rc=$?
+    local rc=0
+    python3 "${SCRIPT_DIR}/lib/xml_parser.py" add-ce-file "${mission_path}/cfgeconomycore.xml" \
+        "$target_filename" "$ce_type" "$ce_folder" >/dev/null || rc=$?
     if [[ $rc -ne 0 ]]; then
         [[ "$silent" == "0" ]] && show_message "Could not register $target_filename in cfgeconomycore.xml" "Error"
         return $rc
     fi
-    if [[ "$silent" == "0" ]]; then
-        show_message "Registered $target_filename in cfgeconomycore.xml (${ce_type})" "Success"
-    fi
+    [[ "$silent" == "0" ]] && show_message "Registered $target_filename in cfgeconomycore.xml (${ce_type})" "Success"
     return 0
 }
 
 # Unregister a modular include (removes from any CE block)
 unregister_modular_loot() {
-    local instance_dir="$1"
-    local target_filename="$2"
-    
-    local mission_path=$(get_mission_path "$instance_dir")
-    [[ -z "$mission_path" ]] && return 1
-    
-    echo "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename" >> "$LOOT_MANAGER_LOG"
-    
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    
-    # Export vars for Python (heredoc is quoted to prevent shell issues)
-    export UNREGISTER_CORE_PATH="$core_xml"
-    export UNREGISTER_FILENAME="$target_filename"
-    
-    # Remove from cfgeconomycore.xml (searches ALL CE blocks with case-insensitive match)
-    python3 <<'PYTHON_UNREGISTER'
-import xml.etree.ElementTree as ET
-import sys
-import os
-
-core_path = os.environ.get('UNREGISTER_CORE_PATH')
-file_to_rem = os.environ.get('UNREGISTER_FILENAME')
-
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    # Search all CE blocks for the file (case-insensitive)
-    rem_count = 0
-    file_to_rem_lower = file_to_rem.lower().strip()
-    for ce_node in root.findall('ce'):
-        for f in list(ce_node.findall('file')):
-            fname = f.get('name', '')
-            if fname.lower().strip() == file_to_rem_lower:
-                ce_node.remove(f)
-                rem_count += 1
-                sys.stderr.write(f"DEBUG: Removed '{fname}' from cfgeconomycore.xml\n")
-    
-    if rem_count > 0:
-        if hasattr(ET, 'indent'):
-            ET.indent(tree, space="\t", level=0)
-        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
-        print("Success")
-    else:
-        sys.stderr.write(f"DEBUG: No match found for '{file_to_rem}' in cfgeconomycore.xml\n")
-        print("NotFound")
-except Exception as e:
-    sys.stderr.write(f"DEBUG: Error in unregister: {e}\n")
-    print(f"Error: {e}")
-    sys.exit(1)
-PYTHON_UNREGISTER
+    local instance_dir="$1" target_filename="$2"
+    local mission_path
+    mission_path=$(get_mission_path "$instance_dir") || return 1
+    _loot_log "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename"
+    # removes the entry from every ce block, case-insensitive; prints Success/NotFound
+    python3 "${SCRIPT_DIR}/lib/xml_parser.py" remove-ce-file "${mission_path}/cfgeconomycore.xml" "$target_filename"
 }
 
 # -----------------------------------------------------------------------------
@@ -375,148 +268,24 @@ except (OSError, ValueError) as e:
 PY_REMOVE_IGNORE
 }
 
-# =============================================================================
-# Workshop Folder Browser - Navigate mod folders to view README and docs
-# =============================================================================
+# Read-only browser for a mod's workshop folder: fb_browse_dir in "view"
+# mode, files open in view_file_content.
+# Usage: workshop_folder_browser "$mod_folder" "$mod_name" "$mod_id"
 workshop_folder_browser() {
-    local base_dir="$1"        # Workshop path for the mod (e.g., /path/workshop/221100/123456)
-    local mod_name="$2"        # Mod name for display
-    local mod_id="$3"          # Mod ID for display
-    local current_dir="${4:-$base_dir}"  # Current browsing directory
-    
-    local selection=0
-    local offset=0
-    
-    while true; do
-        # Get directory contents
-        local -a items=()
-        local -a item_types=()
-        local -a item_sizes=()
-        
-        # Add parent directory if not at base
-        if [[ "$current_dir" != "$base_dir" ]]; then
-            items+=("..")
-            item_types+=("dir")
-            item_sizes+=("-")
-        fi
-        
-        # List directories first, then files
-        while IFS= read -r -d '' entry; do
-            [[ -z "$entry" ]] && continue
-            local name=$(basename "$entry")
-            [[ "$name" == "." || "$name" == ".." ]] && continue
-            
-            if [[ -d "$entry" ]]; then
-                items+=("$name/")
-                item_types+=("dir")
-                item_sizes+=("-")
-            fi
-        done < <(find "$current_dir" -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
-        
-        while IFS= read -r -d '' entry; do
-            [[ -z "$entry" ]] && continue
-            local name=$(basename "$entry")
-            items+=("$name")
-            item_types+=("file")
-            # Get human-readable file size
-            local size=$(du -h "$entry" 2>/dev/null | cut -f1)
-            item_sizes+=("${size:-?}")
-        done < <(find "$current_dir" -maxdepth 1 -type f -print0 2>/dev/null | sort -z)
-        
-        local count=${#items[@]}
-        [[ $count -eq 0 ]] && { show_message "Empty folder" "Info"; return; }
-        
-        # Calculate relative path for display
-        local rel_path="${current_dir#$base_dir}"
-        [[ -z "$rel_path" ]] && rel_path="/"
-        
-        # Draw TUI
-        get_term_size
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        move_to 1 1
-        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Workshop Browser: $mod_name ($mod_id)" "$RESET"
-        
-        move_to 2 1
-        printf "%s Path: %s%s" "$DIM" "$rel_path" "$RESET"
-        
-        move_to 3 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        local v_height=$((TERM_ROWS - 8))
-        [[ $v_height -lt 5 ]] && v_height=5
-        if [[ $selection -lt $offset ]]; then offset=$selection; fi
-        if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
-        
-        for ((i=0; i<v_height; i++)); do
-            local idx=$((offset + i))
-            [[ $idx -ge $count ]] && break
-            
-            local row=$((4 + i))
-            local name="${items[$idx]}"
-            local ftype="${item_types[$idx]}"
-            local fsize="${item_sizes[$idx]}"
-            
-            # Icon based on type
-            local icon="📄"
-            local color="$WHITE"
-            if [[ "$ftype" == "dir" ]]; then
-                icon="📁"
-                color="$CYN"
-            elif [[ "$name" == *.md || "$name" == *.txt || "$name" == *README* ]]; then
-                icon="📝"
-                color="$GRN"
-            elif [[ "$name" == *.xml ]]; then
-                icon="📋"
-                color="$YLW"
-            fi
-            
-            move_to $row 1
-            if [[ $idx -eq $selection ]]; then
-                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
-                move_to $row 2
-                printf " %s  %-50s %8s" "$icon" "${name:0:50}" "$fsize"
-                printf "%s" "$RESET"
-            else
-                printf " %s  %s%-50s%s %8s" "$icon" "$color" "${name:0:50}" "$RESET" "$fsize"
-            fi
-        done
-        
-        # Footer
-        move_to $((TERM_ROWS - 1)) 1
-        printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" " [Enter] Open/View   [q] Back" "$RESET"
-        
-        # Handle input
-        IFS= read -rsn1 key
-        if [[ "$key" == $'\x1b' ]]; then
-            read -rsn2 -t 0.1 seq || true
-            case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
-            esac
-        elif [[ "$key" == "q" || "$key" == "Q" ]]; then
-            return
-        elif [[ "$key" == "" ]]; then  # Enter key
-            local selected="${items[$selection]}"
-            local selected_type="${item_types[$selection]}"
-            
-            if [[ "$selected" == ".." ]]; then
-                # Go up
-                current_dir=$(dirname "$current_dir")
-                selection=0
-                offset=0
-            elif [[ "$selected_type" == "dir" ]]; then
-                # Enter directory
-                current_dir="$current_dir/${selected%/}"
-                selection=0
-                offset=0
-            else
-                # View file
-                local file_path="$current_dir/$selected"
-                view_file_content "$file_path" "$selected"
-            fi
-        fi
-    done
+    local base_dir="$1" mod_name="$2" mod_id="$3"
+    fb_browse_dir "$base_dir" "Workshop Browser: $mod_name ($mod_id)" "Workshop" "_workshop_folder_open" "view"
+}
+
+# Enter handler of workshop_folder_browser: folders are browsed with the same
+# title and breadcrumb (read from fb_browse_dir's locals), files are viewed
+_workshop_folder_open() {
+    local path="$1"
+    if [[ -d "$path" ]]; then
+        # shellcheck disable=SC2154  # title, breadcrumb_prefix, dir_name: locals of the calling fb_browse_dir
+        fb_browse_dir "$path" "$title" "$breadcrumb_prefix > $dir_name" "_workshop_folder_open" "view"
+    else
+        view_file_content "$path" "$(basename "$path")"
+    fi
 }
 
 # View file content in a simple pager
@@ -854,8 +623,7 @@ modular_loot_dashboard() {
     local inst_dir="$1"
     local selection=0
     local offset=0
-    mkdir -p "$(dirname "$LOOT_MANAGER_LOG")"
-    echo "=== Loot Manager Session: $(date) ===" > "$LOOT_MANAGER_LOG"
+    _loot_log "=== Loot Manager Session: $(date) ==="
 
     local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
     [[ -d "$workshop_path" ]] || workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
@@ -867,10 +635,10 @@ modular_loot_dashboard() {
     local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
     while true; do
         if [[ $needs_rescan -eq 1 ]]; then
-            echo "[DEBUG] scan: workshop=$workshop_path" >> "$LOOT_MANAGER_LOG"
+            _loot_log "[DEBUG] scan: workshop=$workshop_path"
             ce_result=$(scan_ce_files "$inst_dir" "$workshop_path" 2>>"$LOOT_MANAGER_LOG")
             parse_scan_result "$ce_result"
-            echo "[DEBUG] scan done: ${#src_paths[@]} files" >> "$LOOT_MANAGER_LOG"
+            _loot_log "[DEBUG] scan done: ${#src_paths[@]} files"
             needs_rescan=0
         fi
 
