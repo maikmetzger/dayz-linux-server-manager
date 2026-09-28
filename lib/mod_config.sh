@@ -595,11 +595,11 @@ view_file_content() {
 
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
-# Uses scan_dayz_ce_files_python to get data
+# Uses scan_ce_files to get data (one 0x1F separated row per file)
 # Parse the CE scan JSON into the shared arrays (src_paths, smod_ids, states, ...).
 # Top-level on purpose: cleanup_mod_ce_files needs it too, not only the dashboard.
 parse_scan_result() {
-    local json="$1"
+    local rows="$1"
     # Reset arrays
     src_paths=()
     smod_ids=()
@@ -614,7 +614,7 @@ parse_scan_result() {
     # Keep the loop variables local: with bash's dynamic scoping an unqualified
     # read would overwrite a caller's 'mid' (e.g. the mod being removed).
     local sp mid mn fn ct st ln md
-    while IFS='|' read -r sp mid mn fn ct st ln md; do
+    while IFS=$'\x1f' read -r sp mid mn fn ct st ln md; do
         [[ -z "$sp" ]] && continue
         src_paths+=("$sp")
         smod_ids+=("$mid")
@@ -625,17 +625,7 @@ parse_scan_result() {
         slinked_names+=("$ln")
         smodified+=("$md")
         signored+=(0)  # Will be checked after
-    done < <(echo "$json" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    for i in data:
-        st = 1 if i.get('status') == 'linked' else 0
-        ln = i.get('linked_filename', '')
-        md = 1 if i.get('modified', False) else 0
-        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
-except: pass
-")
+    done <<< "$rows"
 }
 
 modular_loot_dashboard() {
@@ -676,30 +666,26 @@ except: pass
         done
     }
 
-    while true; do
-        # 1. Scan everything (calls the Python implementation)
-        echo "[DEBUG] 1. Starting scan..." >> "${SCRIPT_DIR}/loot_manager.log"
-        local ce_result
-        local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
-        if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
-        echo "[DEBUG] 2. Workshop path: $workshop_path" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>>"${SCRIPT_DIR}/loot_manager.log" | tail -n 1)
-        echo "[DEBUG] 3. Scan done, result length: ${#ce_result}" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
+    local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+    [[ -d "$workshop_path" ]] || workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
 
-        # 2. Parse result into arrays
-        echo "[DEBUG] 4. Parsing results..." >> "${SCRIPT_DIR}/loot_manager.log"
-        local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
-        parse_scan_result "$ce_result"
-        echo "[DEBUG] 5. Parse done, count: ${#src_paths[@]}" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        # 3. Check ignore status for each file
-        check_ignore_status
-        echo "[DEBUG] 6. Ignore check done" >> "${SCRIPT_DIR}/loot_manager.log"
-        
+    # The scan walks every enabled mod folder, so it runs only when an action
+    # may have changed something, not for every cursor movement.
+    local needs_rescan=1
+    local ce_result
+    local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
+    while true; do
+        if [[ $needs_rescan -eq 1 ]]; then
+            echo "[DEBUG] scan: workshop=$workshop_path" >> "${SCRIPT_DIR}/loot_manager.log"
+            ce_result=$(scan_ce_files "$inst_dir" "$workshop_path" 2>>"${SCRIPT_DIR}/loot_manager.log")
+            parse_scan_result "$ce_result"
+            check_ignore_status
+            echo "[DEBUG] scan done: ${#src_paths[@]} files" >> "${SCRIPT_DIR}/loot_manager.log"
+            needs_rescan=0
+        fi
+
         local count=${#src_paths[@]}
+        [[ $selection -ge $count ]] && selection=$((count > 0 ? count - 1 : 0))
         if [[ $count -eq 0 ]]; then
             show_message "No mod CE definitions detected." "Info"
             # Fallback to manual browse if empty
@@ -708,9 +694,7 @@ except: pass
         fi
 
         # 3. Draw TUI
-        echo "[DEBUG] 7. Drawing TUI, count=$count" >> "${SCRIPT_DIR}/loot_manager.log"
         get_term_size
-        echo "[DEBUG] 8. Term size: ${TERM_ROWS}x${TERM_COLS}" >> "${SCRIPT_DIR}/loot_manager.log"
         printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
         move_to 1 1
         printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Modular Loot Manager - $SELECTED_NAME" "$RESET"
@@ -732,13 +716,9 @@ except: pass
         if [[ $selection -lt $offset ]]; then offset=$selection; fi
         if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
 
-        echo "[DEBUG] 9. Starting row loop, v_height=$v_height, offset=$offset" >> "${SCRIPT_DIR}/loot_manager.log"
         for ((i=0; i<v_height; i++)); do
             local idx=$((offset + i))
             [[ $idx -ge $count ]] && break
-            
-            # Debug: log each row being drawn
-            echo "[DEBUG] 10. Drawing row i=$i idx=$idx ce_type=${sce_types[$idx]:-unknown}" >> "${SCRIPT_DIR}/loot_manager.log"
             
             local row=$((table_start + 3 + i))
             local status_str="[ UNLINKED ]"
@@ -780,7 +760,6 @@ except: pass
                 fi
             fi
             
-            echo "[DEBUG] 11. Case done, type_str=$type_str" >> "${SCRIPT_DIR}/loot_manager.log"
             
             # Modified indicator
             local mod_str="   "
@@ -809,7 +788,9 @@ except: pass
         
         # 3. Handle Input
         IFS= read -rsn1 key
+        needs_rescan=1  # every action below may change files; navigation resets it
         if [[ "$key" == $'\x1b' ]]; then
+            needs_rescan=0
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
                 "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
@@ -1058,331 +1039,43 @@ mod_folder_browser() {
 # CE File Detection Functions (Phase 3-4)
 # =============================================================================
 
-# get_linked_ce_files - Get list of CE files linked in cfgeconomycore.xml
-#
-# Usage: get_linked_ce_files "$instance_dir"
-#
-# Output: JSON array to stdout with file info
-get_linked_ce_files() {
+# find_mod_list_files - mods.txt and servermods.txt of an instance
+# Looks in config/ first, then data/config/, then anywhere below the instance.
+# Usage: while read -r f; do ...; done < <(find_mod_list_files "$instance_dir")
+find_mod_list_files() {
     local instance_dir="$1"
-    local mission_path
-    mission_path=$(get_mission_path "$instance_dir") || return 1
-    
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    [[ ! -f "$core_xml" ]] && echo "[]" && return 0
-    
-    python3 <<PYTHON_GET_LINKED
-import xml.etree.ElementTree as ET
-import json
-import os
-
-mission_path = "$mission_path"
-core_path = "$core_xml"
-
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    files = []
-    for ce in root.findall('ce'):
-        folder = ce.get('folder', '')
-        for f in ce.findall('file'):
-            name = f.get('name', '')
-            ce_type = f.get('type', 'types')
-            full_path = os.path.join(mission_path, folder, name)
-            original_path = os.path.join(mission_path, folder, '.originals', name)
-            
-            files.append({
-                "name": name,
-                "folder": folder,
-                "ce_type": ce_type,
-                "path": full_path,
-                "original_path": original_path,
-                "exists": os.path.exists(full_path),
-                "has_original": os.path.exists(original_path)
-            })
-    
-    print(json.dumps(files))
-except Exception as e:
-    import sys
-    sys.stderr.write(f"DEBUG: Python Error (get_linked): {e}\n")
-    print('[]')
-PYTHON_GET_LINKED
+    local base
+    for base in "${instance_dir}/config" "${instance_dir}/data/config"; do
+        if [[ -f "${base}/mods.txt" || -f "${base}/servermods.txt" ]]; then
+            printf '%s\n' "${base}/mods.txt" "${base}/servermods.txt"
+            return 0
+        fi
+    done
+    local found
+    found=$(find "$instance_dir" -path '*/config/mods.txt' 2>/dev/null | head -n 1) || true
+    [[ -n "$found" ]] && printf '%s\n' "$found" "$(dirname "$found")/servermods.txt"
+    return 0
 }
 
-# Scans mods for CE files and returns structured data (Python based)
-scan_dayz_ce_files_python() {
+# scan_ce_files - CE files of the enabled mods and their link/merge state
+# Runs lib/ce_scanner.py once and prints one row per file (fields separated
+# by 0x1F, see lib/rowfmt.py), which parse_scan_result turns into the s* arrays.
+# Usage: result=$(scan_ce_files "$instance_dir" "$workshop_dir")
+scan_ce_files() {
     local instance_dir="$1"
     local workshop_dir="$2"
-    
     local mission_path
     mission_path=$(get_mission_path "$instance_dir") || return 1
-    
-    # Locate mods.txt (Root or Data)
-    local mods_file="${instance_dir}/config/mods.txt"
-    if [[ ! -f "$mods_file" && -f "${instance_dir}/data/config/mods.txt" ]]; then
-        mods_file="${instance_dir}/data/config/mods.txt"
-    fi
-     
-    local servermods_file="${instance_dir}/config/servermods.txt"
-    if [[ ! -f "$servermods_file" && -f "${instance_dir}/data/config/servermods.txt" ]]; then
-        servermods_file="${instance_dir}/data/config/servermods.txt"
-    fi
-    
 
-    # Fallback to finding it
-    if [[ ! -f "$mods_file" ]]; then
-        local found
-        found=$(find "$instance_dir" -name "mods.txt" 2>/dev/null | grep "/config/mods.txt" | head -n 1)
-        if [[ -n "$found" ]]; then
-            mods_file="$found"
-            # Assuming servermods is sibling
-            servermods_file="$(dirname "$found")/servermods.txt"
-        fi
-    fi
+    local -a args=()
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && args+=(--mods-file "$f")
+    done < <(find_mod_list_files "$instance_dir")
 
-    # DEBUG: Print detected paths to stderr (log)
-    >&2 echo "DEBUG: scan_dayz_ce_files_python"
-    >&2 echo "DEBUG: instance_dir=$instance_dir"
-    >&2 echo "DEBUG: mission_path=$mission_path"
-    >&2 echo "DEBUG: mods_file=$mods_file"
-    >&2 echo "DEBUG: servermods_file=$servermods_file"
-    >&2 echo "DEBUG: workshop_dir=$workshop_dir"
-
-    # Get already linked files for status checking
-    local linked_json
-    linked_json=$(get_linked_ce_files "$instance_dir")
-    
-    # Pass variables to Python env
-    export DAYZ_WORKSHOP_DIR="$workshop_dir"
-    export DAYZ_MODS_FILE="$mods_file"
-    export DAYZ_SERVERMODS_FILE="$servermods_file"
-    export DAYZ_LINKED_JSON="$linked_json"
-    export DAYZ_SCRIPT_DIR="$SCRIPT_DIR"
-    export DAYZ_MISSION_PATH="$mission_path"
-    export DAYZ_INSTANCE_DIR="$instance_dir"
-    
-    python3 <<'PYTHON_CE_SCAN'
-import os
-import json
-import sys
-
-# Load Env Vars
-workshop_dir = os.environ.get('DAYZ_WORKSHOP_DIR')
-mods_file = os.environ.get('DAYZ_MODS_FILE')
-servermods_file = os.environ.get('DAYZ_SERVERMODS_FILE')
-linked_json = os.environ.get('DAYZ_LINKED_JSON')
-script_dir = os.environ.get('DAYZ_SCRIPT_DIR')
-mission_path = os.environ.get('DAYZ_MISSION_PATH')
-instance_dir = os.environ.get('DAYZ_INSTANCE_DIR')
-# Import xml_parser for fast detection
-sys.path.append(os.path.join(script_dir, 'lib'))
-try:
-    import xml_parser
-except ImportError:
-    # Fallback if import fails (should not happen)
-    xml_parser = None
-
-# Parse linked files
-try:
-    linked = {f['name']: f for f in json.loads(linked_json)}
-except:
-    linked = {}
-
-# Get all mod IDs from files
-mod_ids = set()
-mod_name_map = {} # Populated after mod_ids collected
-
-for f in [mods_file, servermods_file]:
-    if f and os.path.exists(f):
-        with open(f, errors='ignore') as fp:
-            for line in fp:
-                mid = line.strip().split('|')[0].strip()
-                if mid.isdigit():
-                    mod_ids.add(mid)
-
-def get_mod_name(workshop_dir, mod_id):
-    meta_path = os.path.join(workshop_dir, mod_id, 'meta.cpp')
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, 'r', errors='ignore') as f:
-                import re
-                match = re.search(r'name\s*=\s*"([^"]+)"', f.read())
-                if match: return match.group(1)
-        except: pass
-    return mod_id
-
-mod_name_map = {mid: get_mod_name(workshop_dir, mid) for mid in mod_ids}
-
-results = []
-scanned_files = set() # To track which files we found in mods, to identify orphans later
-
-# 1. SCAN MODS
-for mod_id in sorted(mod_ids):
-    mod_folder = os.path.join(workshop_dir, mod_id)
-    if not os.path.isdir(mod_folder):
-        continue
-    
-    # Find XML files in mod
-    for root, dirs, files in os.walk(mod_folder):
-        for fname in files:
-            lfn = fname.lower()
-            # 1. Skip core files and non-CE XMLs
-            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin', 'meta.cpp.xml']: continue
-            if not lfn.endswith('.xml'): continue
-            
-            fpath = os.path.join(root, fname)
-            
-            # 2. Detect CE type with expert fallback
-            ce_type = ""
-            if xml_parser:
-                try:
-                    res = xml_parser.detect_ce_type(fpath)
-                    if res: ce_type = res['ce_type']
-                except: pass
-            
-            if not ce_type:
-                if 'randompresets' in lfn: ce_type = 'randompresets'
-                elif 'eventgroups' in lfn: ce_type = 'eventgroups'
-                elif 'spawnable' in lfn: ce_type = 'spawnabletypes'
-                elif 'eventspawns' in lfn or 'eventpos' in lfn: ce_type = 'eventspawns'
-                elif 'events' in lfn: ce_type = 'events'
-                elif 'types' in lfn: ce_type = 'types'
-                else:
-                    # Skip common non-loot files found in mods (e.g. info, setup, core folders)
-                    rel_p = root.lower()
-                    if 'setup' in rel_p or 'info' in rel_p or 'core' in rel_p: continue
-                    continue # Skip unknown XML files (don't default to types)
-            
-            # 3. Check status - MOD-AWARE matching
-            # Priority: 1) ModID_filename, 2) Exact filename match
-            status = "new"
-            linked_name = ""
-            is_linked = False
-            
-            # MERGED STATUS CHECK (Override for merge-only types)
-            if ce_type in ['randompresets', 'eventgroups']:
-                target_file = 'cfgrandompresets' if ce_type == 'randompresets' else 'cfgeventgroups'
-                tracking_path = os.path.join(instance_dir, 'data', 'state', 'ce_merge_tracking', f'{target_file}.json')
-                
-                is_merged = False
-                if os.path.exists(tracking_path):
-                    try:
-                        with open(tracking_path, 'r') as f:
-                            tdata = json.load(f)
-                            if mod_id in tdata.get('entries', {}):
-                                is_merged = True
-                    except: pass
-                
-                if is_merged:
-                    status = "linked" # Reuse linked status for TUI to show MERGED
-                    is_linked = True
-                    linked_name = f"{mod_id}_{ce_type}" # Fake name
-                else:
-                    status = "new"
-                    is_linked = False
-            else:
-                # STANDARD LINK CHECK
-                search_name = fname.lower().strip()
-                # Cleaned version of workshop filename
-                search_name_cfn = "".join(x for x in search_name if x.isalnum() or x in "._-")
-                # Expected linked name pattern: ModID_filename
-                expected_linked = f"{mod_id}_{search_name_cfn}".lower()
-                
-                if not is_linked:
-                    for ln in linked:
-                        ln_orig = ln
-                        lnl = ln.lower().strip()
-                        if "_" in lnl:
-                            parts = lnl.split("_", 1)
-                            prefix = parts[0]
-                            suffix = parts[1]
-                            # Only match if suffix equals our filename AND prefix looks like a mod ID or known name
-                            if (suffix == search_name or suffix == search_name_cfn):
-                                # Check if this linked file is already claimed by its own mod
-                                if prefix.isdigit() and prefix != mod_id:
-                                    continue  # This linked file belongs to a different mod
-                                is_linked = True; linked_name = ln_orig; break
-            
-            if is_linked:
-                status = "linked"
-            
-            # Check if file is modified (compare against original snapshot)
-            is_modified = False
-            if is_linked and linked_name:
-                # Get linked file info from linked dict
-                li = linked.get(linked_name, {})
-                linked_path = li.get('path', '')
-                original_path = li.get('original_path', '')
-                if linked_path and original_path and os.path.exists(linked_path) and os.path.exists(original_path):
-                    try:
-                        import hashlib
-                        def file_hash(fp):
-                            with open(fp, 'rb') as f:
-                                return hashlib.md5(f.read()).hexdigest()
-                        if file_hash(linked_path) != file_hash(original_path):
-                            is_modified = True
-                    except: pass
-            
-            results.append({
-                "mod_id": mod_id,
-                "mod_name": mod_name_map.get(mod_id, mod_id),
-                "file_path": fpath,
-                "filename": fname,
-                "ce_type": ce_type,
-                "status": status,
-                "linked_filename": linked_name,
-                "modified": is_modified
-            })
-            
-            # Track for orphan detection
-            scanned_files.add(fname)
-            if linked_name: scanned_files.add(linked_name)
-
-# 2. SCAN ORPHANS (Local files in CustomCE not from mods)
-# We need to skip:
-# - Files we already scanned from workshop
-# - Files that are linked (in cfgeconomycore.xml) - these are managed by us or the mod
-# - Files with mod ID prefixes that match known mod IDs
-ce_folders = ["types", "spawnabletypes", "events", "eventspawns", "randompresets", "eventgroups"]
-for folder in ce_folders:
-    dir_path = os.path.join(mission_path, "CustomCE", folder)
-    if not os.path.isdir(dir_path): continue
-    for root, dirs, files in os.walk(dir_path):
-        for fname in files:
-            lfn = fname.lower()
-            if not lfn.endswith('.xml'): continue
-            if ".originals" in root or ".backups" in root: continue
-            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin']: continue
-            
-            # If we already saw this file in mod scan, skip
-            if fname in scanned_files: continue
-            
-            # If file is already in cfgeconomycore.xml (linked), skip it
-            if fname in linked: continue
-            
-            # Check if this file looks like one we registered (ModID_filename pattern)
-            # Skip if it starts with a known mod ID prefix
-            is_registered = False
-            for mid in mod_ids:
-                if fname.startswith(f"{mid}_"):
-                    is_registered = True
-                    break
-            if is_registered: continue
-            
-            # This is a truly local/orphan file not mapped to any active mod
-            results.append({
-                "mod_id": "LOCAL",
-                "mod_name": "[ Manual / Local ]",
-                "file_path": os.path.join(root, fname),
-                "filename": fname,
-                "ce_type": folder,
-                "status": "unlinked",
-                "linked_filename": ""
-            })
-
-print(json.dumps(results))
-PYTHON_CE_SCAN
+    python3 "${MOD_CONFIG_LIB_DIR}/ce_scanner.py" scan --format rows \
+        --workshop-dir "$workshop_dir" --mission-path "$mission_path" \
+        --instance-dir "$instance_dir" ${args[@]+"${args[@]}"}
 }
 
 # -----------------------------------------------------------------------------
@@ -1403,7 +1096,7 @@ cleanup_mod_ce_files() {
     
     # 1. Scan for current status
     local ce_result
-    ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
+    ce_result=$(scan_ce_files "$inst_dir" "$workshop_path" 2>/dev/null)
     
     # 2. Parse into global arrays (smod_ids, states, etc)
     parse_scan_result "$ce_result"
