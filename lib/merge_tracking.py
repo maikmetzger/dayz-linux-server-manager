@@ -5,6 +5,7 @@ import sys
 import xml.etree.ElementTree as ET
 import re
 from datetime import datetime
+from fileutil import atomic_write_text, atomic_write_tree
 from typing import Dict, List, Optional, Any
 
 # =============================================================================
@@ -146,13 +147,20 @@ def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: st
     if not items_to_merge:
         return []
 
+    # Names already present in the target: running the same merge twice
+    # must not duplicate entries (duplicates break the server's loot balance).
+    existing = {(child.tag, child.get('name')) for child in target_root if child.get('name')}
+
     # Adding items
+    import copy
     for item in items_to_merge:
+        if (item.tag, item.get('name')) in existing:
+            continue
         # Deep copy item to avoid weirdness
-        import copy
         new_item = copy.deepcopy(item)
         
         target_root.append(new_item)
+        existing.add((item.tag, item.get('name')))
         
         added_entries.append({
             "name": item.get('name'),
@@ -164,7 +172,7 @@ def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: st
     indent(target_root)
     
     # Write
-    target_tree.write(target_file, encoding='utf-8', xml_declaration=True)
+    atomic_write_tree(target_tree, target_file, encoding='utf-8', xml_declaration=True)
     
     return added_entries
 
@@ -178,7 +186,8 @@ def remove_entries(target_file: str, entries_to_remove: List[Dict[str, Any]]) ->
     try:
         tree = ET.parse(target_file)
         root = tree.getroot()
-    except:
+    except ET.ParseError as e:
+        print(f"WARN: cannot parse {target_file}: {e}", file=sys.stderr)
         return False
         
     removed_count = 0
@@ -199,7 +208,7 @@ def remove_entries(target_file: str, entries_to_remove: List[Dict[str, Any]]) ->
             
     if removed_count > 0:
         indent(root)
-        tree.write(target_file, encoding='utf-8', xml_declaration=True)
+        atomic_write_tree(tree, target_file, encoding='utf-8', xml_declaration=True)
         return True
         
     return False
@@ -216,7 +225,7 @@ def load_tracking(instance_dir: str, target_file: str) -> Dict[str, Any]:
         }
     
     try:
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except json.JSONDecodeError:
         print(f"WARN: Corrupt tracking file {path}, resetting.", file=sys.stderr)
@@ -231,8 +240,7 @@ def save_tracking(instance_dir: str, target_file: str, data: Dict[str, Any]):
     path = get_tracking_path(instance_dir, target_file)
     data["last_updated"] = datetime.now().isoformat()
     
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_text(path, json.dumps(data, indent=2))
 
 def check_collisions(source_xml_path: str, target_xml_path: str) -> List[Dict[str, str]]:
     """

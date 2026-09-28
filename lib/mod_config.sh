@@ -560,8 +560,8 @@ workshop_folder_browser() {
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -650,11 +650,13 @@ view_file_content() {
         IFS= read -rsn1 key
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
+            # Last valid offset; a file shorter than the window must never go negative
+            local max_offset=$(( total_lines > v_height ? total_lines - v_height : 0 ))
             case "$seq" in
-                "[A") [[ $offset -gt 0 ]] && ((offset--)) ;;
-                "[B") [[ $offset -lt $((total_lines - v_height)) ]] && ((offset++)) ;;
-                "[5") ((offset -= v_height)); [[ $offset -lt 0 ]] && offset=0 ;;  # Page Up
-                "[6") ((offset += v_height)); [[ $offset -gt $((total_lines - v_height)) ]] && offset=$((total_lines - v_height)) ;;  # Page Down
+                "[A") [[ $offset -gt 0 ]] && offset=$((offset - 1)) ;;
+                "[B") [[ $offset -lt $max_offset ]] && offset=$((offset + 1)) ;;
+                "[5") offset=$((offset - v_height)); [[ $offset -lt 0 ]] && offset=0 ;;  # Page Up
+                "[6") offset=$((offset + v_height)); [[ $offset -gt $max_offset ]] && offset=$max_offset ;;  # Page Down
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -665,44 +667,36 @@ view_file_content() {
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
 # Uses scan_dayz_ce_files_python to get data
-modular_loot_dashboard() {
-    local inst_dir="$1"
+# Parse the CE scan JSON into the shared arrays (src_paths, smod_ids, states, ...).
+# Top-level on purpose: cleanup_mod_ce_files needs it too, not only the dashboard.
+parse_scan_result() {
+    local json="$1"
+    # Reset arrays
+    src_paths=()
+    smod_ids=()
+    smod_names=()
+    sfile_names=()
+    sce_types=()
+    states=()
+    slinked_names=()
+    smodified=()
+    signored=()
     
-    
-    local selection=0
-    local offset=0
-    
-    echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
-    
-    # Error trap for debugging - catches which line causes exit
-    trap 'echo "[CRASH] Line $LINENO: $BASH_COMMAND" >> "${SCRIPT_DIR}/loot_manager.log"' ERR
-    
-    # helper to parse JSON array to bash arrays
-    parse_scan_result() {
-        local json="$1"
-        # Reset arrays
-        src_paths=()
-        smod_ids=()
-        smod_names=()
-        sfile_names=()
-        sce_types=()
-        states=()
-        slinked_names=()
-        smodified=()
-        signored=()
-        
-        while IFS='|' read -r sp mid mn fn ct st ln md; do
-            [[ -z "$sp" ]] && continue
-            src_paths+=("$sp")
-            smod_ids+=("$mid")
-            smod_names+=("$mn")
-            sfile_names+=("$fn")
-            sce_types+=("$ct")
-            states+=("$st")
-            slinked_names+=("$ln")
-            smodified+=("$md")
-            signored+=(0)  # Will be checked after
-        done < <(echo "$json" | python3 -c "
+    # Keep the loop variables local: with bash's dynamic scoping an unqualified
+    # read would overwrite a caller's 'mid' (e.g. the mod being removed).
+    local sp mid mn fn ct st ln md
+    while IFS='|' read -r sp mid mn fn ct st ln md; do
+        [[ -z "$sp" ]] && continue
+        src_paths+=("$sp")
+        smod_ids+=("$mid")
+        smod_names+=("$mn")
+        sfile_names+=("$fn")
+        sce_types+=("$ct")
+        states+=("$st")
+        slinked_names+=("$ln")
+        smodified+=("$md")
+        signored+=(0)  # Will be checked after
+    done < <(echo "$json" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -713,7 +707,17 @@ try:
         print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
 except: pass
 ")
-    }
+}
+
+modular_loot_dashboard() {
+    local inst_dir="$1"
+    
+    
+    local selection=0
+    local offset=0
+    
+    echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
+    
     
     # Check ignore status for all parsed files
     check_ignore_status() {
@@ -879,8 +883,8 @@ except: pass
         if [[ "$key" == $'\x1b' ]]; then
             read -rsn2 -t 0.1 seq || true
             case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && ((selection--)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && ((selection++)) ;;
+                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
             esac
         elif [[ "$key" == "q" || "$key" == "Q" ]]; then
             return
@@ -889,9 +893,6 @@ except: pass
              local fn="${sfile_names[$midx]}"
              
              # Call Rollback UI (Phase 4)
-             local target_xml="${inst_dir}/serverfiles/mpmissions/dayzOffline.chernarusplus/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
-             # Fix path resolution (quick hack, ideally use get_mission_path)
-             # But prompt_rollback expects args...
              show_rollback_menu "$inst_dir" "${smod_names[$midx]}_${fn}" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
              
         elif [[ "$key" == "d" || "$key" == "D" ]]; then
@@ -937,9 +938,11 @@ except: pass
                 
                 # Check for merge-only types
                 if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    local target_file="db/cfgrandompresets.xml"
-                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    local target_xml
+                    if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                        show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                        continue
+                    fi
                     
                     unmerge_ce_file_python "$inst_dir" "$target_xml" "${smod_ids[$midx]}"
                     # Force re-scan to update status
@@ -970,10 +973,11 @@ except: pass
                     if confirm "Merge entries from '$fn' into main $ct?" "y"; then
                         # Call Python Merge Logic
                         # Phase 2 Implementation
-                        local target_file="db/cfgrandompresets.xml"
-                        if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                        
-                        local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                        local target_xml
+                        if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                            show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                            continue
+                        fi
                         
                         merge_ce_file_python "$inst_dir" "$target_xml" "$src" "${smod_ids[$midx]}" "${smod_names[$midx]}"
                         # Force re-scan to update status
@@ -1493,9 +1497,11 @@ cleanup_mod_ce_files() {
             if confirm "${action_label} '${fn}'?" "y"; then
                 # Check for merge-only types
                 if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    local target_file="db/cfgrandompresets.xml"
-                    if [[ "$ct" == "eventgroups" ]]; then target_file="db/cfgeventgroups.xml"; fi
-                    local target_xml="${inst_dir}/data/serverfiles/mpmissions/dayzOffline.chernarusplus/$target_file"
+                    local target_xml
+                    if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+                        show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+                        continue
+                    fi
                     
                     unmerge_ce_file_python "$inst_dir" "$target_xml" "$mid"
                     count=$((count + 1))
@@ -1522,6 +1528,18 @@ cleanup_mod_ce_files() {
 # =============================================================================
 # Merge Tracking Wrappers (Phase 2)
 # =============================================================================
+
+# Resolve the merge target for merge-only CE types inside the active mission
+# (randompresets -> db/cfgrandompresets.xml, eventgroups -> db/cfgeventgroups.xml).
+# Usage: target_xml=$(ce_merge_target "$inst_dir" "$ce_type") || <no mission found>
+ce_merge_target() {
+    local inst_dir="$1" ce_type="$2"
+    local mission_path
+    mission_path=$(get_mission_path "$inst_dir") || return 1
+    local target_file="db/cfgrandompresets.xml"
+    [[ "$ce_type" == "eventgroups" ]] && target_file="db/cfgeventgroups.xml"
+    echo "${mission_path}/${target_file}"
+}
 
 # merge_ce_file_python "$inst_dir" "$target_xml" "$source_xml" "$mod_id" "$mod_name"
 merge_ce_file_python() {
@@ -1870,7 +1888,7 @@ prompt_ce_merge() {
                 local label="${item#*|}"
                 printf "   %s %s" "$icon" "$label"
             fi
-            ((row++))
+            row=$((row + 1))
         done
         
         # Read key
@@ -1879,12 +1897,12 @@ prompt_ce_merge() {
             $'\x1b')
                 read -rsn2 -t 0.1 seq
                 case "$seq" in
-                    '[A') ((selection > 0)) && ((selection--)) ;;
-                    '[B') ((selection < ${#items[@]} - 1)) && ((selection++)) ;;
+                    '[A') ((selection > 0)) && selection=$((selection - 1)) ;;
+                    '[B') ((selection < ${#items[@]} - 1)) && selection=$((selection + 1)) ;;
                 esac
                 # Skip separators
-                while [[ "${items[$selection]}" == "----"* && $selection -gt 0 ]]; do ((selection--)); done
-                while [[ "${items[$selection]}" == "----"* && $selection -lt $((${#items[@]} - 1)) ]]; do ((selection++)); done
+                while [[ "${items[$selection]}" == "----"* && $selection -gt 0 ]]; do selection=$((selection - 1)); done
+                while [[ "${items[$selection]}" == "----"* && $selection -lt $((${#items[@]} - 1)) ]]; do selection=$((selection + 1)); done
                 ;;
             '')
                 local selected_item="${items[$selection]}"

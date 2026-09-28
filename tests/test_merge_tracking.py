@@ -105,5 +105,41 @@ class TestMergeTracking(unittest.TestCase):
         self.assertEqual(len(root), 1)
         self.assertEqual(root[0].get('name'), 'Keep')
 
+class TestInjectIsIdempotent(unittest.TestCase):
+    """Running the same merge twice must not duplicate loot entries."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.target = os.path.join(self.dir, 'cfgrandompresets.xml')
+        self.source = os.path.join(self.dir, 'mod_presets.xml')
+        with open(self.target, 'w', encoding='utf-8') as f:
+            f.write('<randompresets><cargo chance="0.1" name="Vanilla"><item name="Rag"/></cargo></randompresets>')
+        with open(self.source, 'w', encoding='utf-8') as f:
+            f.write('<randompresets>'
+                    '<cargo chance="0.5" name="ModFood"><item name="Apple"/></cargo>'
+                    '<attachments chance="0.3" name="ModAtt"><item name="Battery"/></attachments>'
+                    '</randompresets>')
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def _names(self):
+        return [(c.tag, c.get('name')) for c in ET.parse(self.target).getroot()]
+
+    def test_second_inject_adds_nothing(self):
+        first = merge_tracking.inject_entries(self.target, self.source, '111', 'Mod')
+        second = merge_tracking.inject_entries(self.target, self.source, '111', 'Mod')
+        self.assertEqual(len(first), 2)
+        self.assertEqual(second, [])
+        self.assertEqual(self._names(), [('cargo', 'Vanilla'), ('cargo', 'ModFood'), ('attachments', 'ModAtt')])
+
+    def test_existing_vanilla_entry_is_not_overwritten(self):
+        with open(self.source, 'w', encoding='utf-8') as f:
+            f.write('<randompresets><cargo chance="0.9" name="Vanilla"><item name="Gun"/></cargo></randompresets>')
+        added = merge_tracking.inject_entries(self.target, self.source, '111', 'Mod')
+        self.assertEqual(added, [])
+        self.assertEqual(ET.parse(self.target).getroot().find('cargo').get('chance'), '0.1')
+
+
 if __name__ == '__main__':
     unittest.main()

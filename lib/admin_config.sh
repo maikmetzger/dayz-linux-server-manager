@@ -399,7 +399,8 @@ set_dayz_admin_password() {
     
     if [[ -f "$file" ]]; then
         if grep -qE '^passwordAdmin\s*=' "$file"; then
-            sed -i "s/^passwordAdmin\s*=.*/passwordAdmin = \"${password}\";/" "$file"
+            # The parser writes the value verbatim; sed would choke on / & \
+            python3 "${ADMIN_CONFIG_LIB_DIR}/config_parser.py" set cfg "$file" passwordAdmin "$password" >/dev/null
         else
             echo "passwordAdmin = \"${password}\";" >> "$file"
         fi
@@ -434,11 +435,8 @@ set_rcon_password() {
         return 0
     fi
     
-    if grep -qE '^RConPassword' "$file"; then
-        sed -i "s/^RConPassword.*/RConPassword ${password}/" "$file"
-    else
-        echo "RConPassword ${password}" >> "$file"
-    fi
+    # The parser replaces the key or appends it, and writes the value verbatim
+    python3 "${ADMIN_CONFIG_LIB_DIR}/config_parser.py" set beserver "$file" RConPassword "$password" >/dev/null
 }
 
 # =============================================================================

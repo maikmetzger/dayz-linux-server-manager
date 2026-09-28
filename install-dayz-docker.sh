@@ -245,18 +245,18 @@ delete_instance_dir() {
     [[ "${confirm_input}" == "${name}" ]] || die "Confirmation did not match. Aborting."
 
     if [[ -f "${inst_dir}/docker-compose.yml" ]]; then
-        run_shell "cd '${inst_dir}' && ${DOCKER_ARR[*]} compose down --remove-orphans || true"
+        run_in_dir "${inst_dir}" "${DOCKER_ARR[@]}" compose down --remove-orphans || true
     fi
 
     if "${DOCKER_ARR[@]}" ps -a --format '{{.Names}}' | grep -qx "${container_name}"; then
-        run_shell "${DOCKER_ARR[*]} rm -f '${container_name}'"
+        run_arr "${DOCKER_ARR[@]}" rm -f "${container_name}"
     fi
 
     if rm -rf "${inst_dir}" 2>/dev/null; then
         :
     else
         warn "Direct rm failed (permissions). Retrying with sudo."
-        run_shell "${SUDO} rm -rf '${inst_dir}'"
+        run_arr ${SUDO:+"$SUDO"} rm -rf "${inst_dir}"
     fi
 
     ok "Deleted instance '${name}'."
@@ -281,18 +281,18 @@ delete_container_only() {
     workdir="$(compose_workdir_for_container "${container}")"
 
     if [[ -n "${workdir}" && -d "${workdir}" && -f "${workdir}/docker-compose.yml" ]]; then
-        run_shell "cd '${workdir}' && ${DOCKER_ARR[*]} compose down --remove-orphans || true"
+        run_in_dir "${workdir}" "${DOCKER_ARR[@]}" compose down --remove-orphans || true
     fi
 
     if "${DOCKER_ARR[@]}" ps -a --format '{{.Names}}' | grep -qx "${container}"; then
-        run_shell "${DOCKER_ARR[*]} rm -f '${container}'"
+        run_arr "${DOCKER_ARR[@]}" rm -f "${container}"
     fi
 
     if [[ -n "${workdir}" ]] && container_has_compose_dir "${workdir}"; then
         warn "Compose working directory detected: ${workdir}"
         if prompt_yn "Delete that directory as well?" "Y"; then
             if rm -rf "${workdir}" 2>/dev/null; then :
-            else run_shell "${SUDO} rm -rf '${workdir}'"; fi
+            else run_arr ${SUDO:+"$SUDO"} rm -rf "${workdir}"; fi
             ok "Deleted directory: ${workdir}"
         else
             warn "Directory kept: ${workdir}"
@@ -580,7 +580,7 @@ update_run_sh_only() {
 
     if "${DOCKER_ARR[@]}" ps --format '{{.Names}}' | grep -qx "${container_name}"; then
         if prompt_yn "Container '${container_name}' is running. Restart it now?" "Y"; then
-            run_shell "cd '${inst_dir}' && ${DOCKER_ARR[*]} compose restart"
+            run_in_dir "${inst_dir}" "${DOCKER_ARR[@]}" compose restart
             ok "Restarted ${container_name}."
         fi
     else
@@ -723,11 +723,11 @@ run_cli_mode() {
         "${rcon_pass}"
     
     step "Step: Building image"
-    run_shell "cd '${inst_dir}' && ${DOCKER_ARR[*]} compose build --no-cache"
+    run_in_dir "${inst_dir}" "${DOCKER_ARR[@]}" compose build --no-cache
     
     if [[ "${CLI_NO_START}" != "1" ]]; then
         step "Step: Starting container"
-        run_shell "cd '${inst_dir}' && ${DOCKER_ARR[*]} compose up -d"
+        run_in_dir "${inst_dir}" "${DOCKER_ARR[@]}" compose up -d
         ok "Started: dayz-${name}"
         info "Logs: cd '${inst_dir}' && ${DOCKER_ARR[*]} compose logs -f --tail=200"
     else

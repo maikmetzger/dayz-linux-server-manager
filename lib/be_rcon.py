@@ -6,11 +6,82 @@ import argparse
 import time
 import select
 import hashlib
+import os
+import re
 
 # BattlEye RCON Protocol Constants
 BE_LOGIN = 0x00
 BE_COMMAND = 0x01
 BE_MESSAGE = 0x02
+
+# One row of the BE 'players' reply, e.g.
+#   0   1.2.3.4:2304   45   0123...cdef(OK) Name
+#   1   1.2.3.4:2304   -1   -(?) Name (Lobby)
+# Lobby/unverified players have no GUID yet ('-'), a '?' status and may
+# report a negative ping, so all three are optional here.
+PLAYER_LINE_RE = re.compile(
+    r'^\s*(?P<id>\d+)\s+(?P<ip>\S+)\s+(?P<ping>-?\d+)\s+'
+    r'(?P<guid>[a-f0-9]+|-)(?:\((?P<status>[^)]*)\))?\s+(?P<name>.+?)\s*$',
+    re.IGNORECASE)
+LOBBY_SUFFIX = '(Lobby)'
+
+
+def player_from_match(match):
+    """Turn a PLAYER_LINE_RE match into the player dict used by the TUI."""
+    name = match.group('name')
+    status = match.group('status') or ''
+    if name.endswith(LOBBY_SUFFIX):
+        name = name[:-len(LOBBY_SUFFIX)].rstrip()
+        status = 'Lobby'
+    guid = match.group('guid')
+    ip_port = match.group('ip')
+    return {
+        "id": int(match.group('id')),
+        "name": name,
+        "ping": int(match.group('ping')),
+        "guid": '' if guid == '-' else guid,
+        "ip": ip_port.split(':')[0] if ':' in ip_port else ip_port,
+        "status": status,
+    }
+
+
+class ResponseAssembler:
+    """Collects the command-response packets for one command.
+
+    BE packet layout: 'BE' + CRC32 (4) + 0xFF + type + sequence + payload.
+    A multipart reply marks the payload with 0x00 followed by the total
+    number of parts and the index of this part; the text follows after.
+    """
+    MULTIPART_MARKER = 0x00
+    HEADER_LEN = 9  # 'BE' + CRC32 + 0xFF + type + sequence
+
+    def __init__(self):
+        self.single = None
+        self.parts = {}
+        self.total = None
+
+    @property
+    def started(self):
+        return self.single is not None or bool(self.parts)
+
+    def feed(self, data):
+        """Feed one raw packet. Returns True once the reply is complete."""
+        if len(data) < self.HEADER_LEN or data[7] != BE_COMMAND:
+            # Too short, or a server message (chat) that is not our reply
+            return False
+        payload = data[self.HEADER_LEN:]
+        if len(payload) >= 3 and payload[0] == self.MULTIPART_MARKER:
+            self.total = payload[1]
+            self.parts[payload[2]] = payload[3:].decode('utf-8', errors='ignore')
+            return len(self.parts) >= self.total
+        self.single = payload.decode('utf-8', errors='ignore')
+        return True
+
+    def text(self):
+        if self.parts:
+            return "".join(self.parts[i] for i in sorted(self.parts))
+        return self.single or ""
+
 
 class BattlEyeRcon:
     def __init__(self, host, port, password, debug=False):
@@ -110,44 +181,23 @@ class BattlEyeRcon:
         packet = self.create_packet(BE_COMMAND, seq_byte + cmd.encode('utf-8'))
         self.sock.send(packet)
         
-        # Wait for response(s)
-        # Responses might be multipart or simple ACK.
+        # Wait for the reply. It is one packet, or a multipart set that we
+        # reassemble. Returns None when no reply arrived at all.
         try:
-            responses = []
+            reply = ResponseAssembler()
             start_time = time.time()
             while time.time() - start_time < 2.0:
                 ready = select.select([self.sock], [], [], 0.5)
-                if ready[0]:
-                    data = self.sock.recv(4096)
-                    if len(data) < 7: continue
-                    
-                    # Header analysis
-                    # 'BE' + CRC + 0xFF + Type
-                    msg_type = data[7]
-                    
-                    if msg_type == BE_COMMAND:
-                        # This is likely the command response
-                        # Payload: [Sequence] [Text]
-                        text = data[9:].decode('utf-8', errors='ignore')
-                        responses.append(text)
-                        
-                        # Assuming single response for now, but loop to be safe for multipart
-                        # BE doesn't strictly signal "end of message" perfectly in UDP.
-                        # Break if we got something substantial?
-                        if len(text) > 0:
-                            # Heuristic: break after receiving data
-                            break
-                    elif msg_type == BE_MESSAGE:
-                        # Server message/Chat
-                        # [Sequence] [Text]
-                        text = data[9:].decode('utf-8', errors='ignore')
-                        # print(f"(Stream) {text}", file=sys.stderr) 
-                        pass
-                else:
-                    if responses: break
-                    
-            return "".join(responses)
-            
+                if not ready[0]:
+                    # Silence after a partial reply: return what we have
+                    if reply.started:
+                        break
+                    continue
+                if reply.feed(self.sock.recv(4096)):
+                    break
+
+            return reply.text() if reply.started else None
+
         except socket.timeout:
             if self.debug:
                 print(f"[DEBUG] Socket timeout waiting for response", file=sys.stderr)
@@ -182,25 +232,28 @@ class BattlEyeRcon:
         for line in lines:
             # Match pattern: ID  IP:Port  Ping  GUID  Name
             # Example: 0   127.0.0.1:2304  45    abc123def456789abc123def45(OK) PlayerName
-            match = re.match(r'^\s*(\d+)\s+(\S+)\s+(\d+)\s+([a-f0-9]+)\((\w+)\)\s+(.+)$', line, re.IGNORECASE)
+            match = PLAYER_LINE_RE.match(line)
             if match:
-                player_id = match.group(1)
-                ip_port = match.group(2)
-                ping = match.group(3)
-                guid = match.group(4)
-                status = match.group(5)
-                name = match.group(6).strip()
-                
-                players.append({
-                    "id": int(player_id),
-                    "name": name,
-                    "ping": int(ping),
-                    "guid": guid,
-                    "ip": ip_port.split(':')[0] if ':' in ip_port else ip_port,
-                    "status": status
-                })
+                players.append(player_from_match(match))
         
         return json.dumps({"count": len(players), "players": players, "error": None})
+
+    @staticmethod
+    def _action_result(replies, response=None):
+        """Build the JSON result of an action.
+
+        replies are the raw send_command() results. None means the server
+        never answered (not connected, or timeout), so the action failed.
+        """
+        import json
+        ok = all(r is not None for r in replies)
+        if response is None:
+            response = replies[0] if len(replies) == 1 else ", ".join(str(r) for r in replies)
+        return json.dumps({
+            "success": ok,
+            "response": response,
+            "error": None if ok else "No reply from server (connection lost or timeout)"
+        })
 
     def action_players(self):
         """Get list of online players as JSON."""
@@ -213,7 +266,7 @@ class BattlEyeRcon:
         # BattlEye #kick uses player name (reason not supported)
         cmd = f"#kick {player_name}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_ban(self, player_name, player_guid):
         """Ban an ONLINE player: kick them, then add GUID to ban list.
@@ -234,41 +287,40 @@ class BattlEyeRcon:
         ban_resp = self.send_command(ban_cmd)
         
         # Step 3: Persist bans to bans.txt
-        self.send_command("writeBans")
-        
-        return json.dumps({
-            "success": True, 
-            "response": f"Kicked: {kick_resp}, Banned: {ban_resp}", 
-            "error": None
-        })
+        write_resp = self.send_command("writeBans")
+
+        # Every step must have been answered by the server, otherwise the
+        # ban did not happen and must not be reported as success.
+        return self._action_result([kick_resp, ban_resp, write_resp],
+                                   f"Kicked: {kick_resp}, Banned: {ban_resp}")
     
     def action_ban_by_guid(self, player_guid):
         """Ban a player by GUID (for bans.txt management)."""
         import json
         cmd = f"addBan {player_guid} -1"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_unban(self, player_guid):
         """Unban a player by GUID/Steam64ID."""
         import json
         cmd = f"#exec unban {player_guid}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_say(self, message, player_id=-1):
         """Send a message to all players (-1) or specific player."""
         import json
         cmd = f"say {player_id} {message}"
         resp = self.send_command(cmd)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_loadbans(self):
         """Reload bans.txt file."""
         import json
         # BattlEye command to reload bans from bans.txt
         resp = self.send_command("loadBans")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     # ==========================================================================
     # Server Control Actions
@@ -278,25 +330,25 @@ class BattlEyeRcon:
         """Graceful server shutdown via #shutdown."""
         import json
         resp = self.send_command("#shutdown")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_lock(self):
         """Lock server - prevent new connections."""
         import json
         resp = self.send_command("#lock")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_unlock(self):
         """Unlock server - allow new connections."""
         import json
         resp = self.send_command("#unlock")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_monitor(self, seconds=5):
         """Get performance monitoring data."""
         import json
         resp = self.send_command(f"#monitor {seconds}")
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
     
     def action_login(self, admin_password=None):
         """Explicit RCON admin login using DayZ passwordAdmin (not RCON password)."""
@@ -308,7 +360,7 @@ class BattlEyeRcon:
         resp = self.send_command(f"#login {password}")
         if self.debug:
             print(f"[DEBUG] #login response: {resp}", file=sys.stderr)
-        return json.dumps({"success": True, "response": resp, "error": None})
+        return self._action_result([resp])
 
     def interactive(self):
         """Interactive RCON console mode."""
@@ -331,13 +383,11 @@ class BattlEyeRcon:
                 break
 
 if __name__ == "__main__":
-    import os
-
     parser = argparse.ArgumentParser(description='BattlEye RCON Client for DayZ')
     parser.add_argument('--host', required=True, help='Server IP')
     parser.add_argument('--port', required=True, type=int, help='RCON Port')
-    parser.add_argument('--password', help='RCON Password (prefer --password-env for security)')
-    parser.add_argument('--password-env', help='Environment variable containing RCON password (more secure)')
+    parser.add_argument('--password', help='RCON password (prefer the RCON_PASSWORD env var: argv is readable by other processes)')
+    parser.add_argument('--password-env', help='Name of the environment variable holding the RCON password (default: RCON_PASSWORD)')
     parser.add_argument('--command', help='Single raw command to execute')
     
     # Action-based interface for TUI integration
@@ -357,20 +407,16 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # Get password from environment variable or command line
-    # Environment variable is more secure (doesn't show in ps output)
-    password = None
+    # Password sources, in order: named env var (--password-env), --password, RCON_PASSWORD
+    env_name = args.password_env or 'RCON_PASSWORD'
     if args.password_env:
-        password = os.environ.get(args.password_env)
-        if not password:
-            print(f'{{"success": false, "error": "Environment variable {args.password_env} not set"}}')
-            sys.exit(1)
-    elif args.password:
-        password = args.password
+        password = os.environ.get(args.password_env, '')
     else:
-        print('{"success": false, "error": "Password required: use --password or --password-env"}')
+        password = args.password or os.environ.get('RCON_PASSWORD', '')
+    if not password:
+        print(f'{{"success": false, "error": "Missing RCON password (env var {env_name} or --password)"}}')
         sys.exit(1)
-
+    
     client = BattlEyeRcon(args.host, args.port, password, debug=args.debug)
     if client.connect():
         if args.action:

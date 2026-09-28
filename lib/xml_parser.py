@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import json
 import argparse
 from typing import Optional, Dict, Any
+from fileutil import atomic_write_text, atomic_write_tree
 
 # =============================================================================
 # CE Type Registry (Open/Closed Principle - extend here, not in logic)
@@ -126,11 +127,17 @@ def get_types_root(xml_path):
             
             # Check for type fragments anywhere in content
             if '<type ' in content_stripped or '<type>' in content_stripped:
-                # Wrap with types root
-                wrapped = f'<?xml version="1.0" encoding="UTF-8"?>\n<types>\n{content}\n</types>'
+                # Wrap with types root. A declaration inside the fragment would
+                # end up in the middle of the document, so drop it here.
+                had_declaration = content.lstrip().startswith('<?xml')
+                body = re.sub(r'^\s*<\?xml[^>]*\?>', '', content, count=1)
+                wrapped = f'<?xml version="1.0" encoding="UTF-8"?>\n<types>\n{body}\n</types>'
                 root = ET.fromstring(wrapped)
-                # Create a pseudo-tree
+                # Create a pseudo-tree and remember that the wrapper is synthetic,
+                # so writers can strip it again instead of changing the file format.
                 tree = ET.ElementTree(root)
+                tree.is_fragment = True
+                tree.had_declaration = had_declaration
                 return tree, root
         except Exception:
             pass
@@ -370,6 +377,23 @@ def query(xml_path, name=None, cat=None, usage=None, tier=None, vanilla_path=Non
         
     print(json.dumps(results))
 
+def write_fragment(wrapper_root, xml_path, had_declaration=False):
+    """Write the children of a synthetic wrapper back as a fragment file.
+
+    get_types_root() wraps fragment files in <types> so they can be parsed.
+    Writing that tree back would silently convert the file to the wrapped
+    format, so only the original top-level elements are serialized here.
+    """
+    chunks = []
+    for child in wrapper_root:
+        child.tail = None
+        if sys.version_info >= (3, 9):
+            ET.indent(child, space="    ", level=0)
+        chunks.append(ET.tostring(child, encoding='unicode').rstrip())
+    head = '<?xml version="1.0" encoding="UTF-8"?>\n' if had_declaration else ''
+    atomic_write_text(xml_path, head + "\n".join(chunks) + "\n")
+
+
 def update(xml_path, item_name, key, value):
     tree, root = get_types_root(xml_path)
     target = None
@@ -393,9 +417,13 @@ def update(xml_path, item_name, key, value):
     try:
         # Note: ET.write doesn't preserve custom formatting/comments perfectly
         # but for DayZ it's usually acceptable if we use indent.
-        if sys.version_info >= (3, 9):
-            ET.indent(tree, space="    ", level=0)
-        tree.write(xml_path, encoding='utf-8', xml_declaration=True)
+        if getattr(tree, 'is_fragment', False):
+            # Fragment files (a bare <type> etc.) must not gain a <types> wrapper
+            write_fragment(root, xml_path, getattr(tree, 'had_declaration', False))
+        else:
+            if sys.version_info >= (3, 9):
+                ET.indent(tree, space="    ", level=0)
+            atomic_write_tree(tree, xml_path, encoding='utf-8', xml_declaration=True)
         print("Success")
     except Exception as e:
         print(f"Error writing XML: {e}", file=sys.stderr)
@@ -584,7 +612,7 @@ def merge_ce_files(source_path: str, local_path: str, original_path: str = None)
         # Write merged file
         if sys.version_info >= (3, 9):
             ET.indent(local_tree, space="    ", level=0)
-        local_tree.write(local_path, encoding='utf-8', xml_declaration=True)
+        atomic_write_tree(local_tree, local_path, encoding='utf-8', xml_declaration=True)
         
         return result
         

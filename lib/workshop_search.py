@@ -25,14 +25,18 @@ SORT_MAP = {
 def load_cache():
     if not os.path.exists(CACHE_FILE): return {}
     try:
-        with open(CACHE_FILE, 'r') as f: return json.load(f)
-    except: return {}
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"WARN: ignoring unreadable cache {CACHE_FILE}: {e}", file=sys.stderr)
+        return {}
 
 def save_cache(cache):
     try:
         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-        with open(CACHE_FILE, 'w') as f: json.dump(cache, f, indent=2)
-    except: pass
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f: json.dump(cache, f, indent=2)
+    except OSError as e:
+        # Not fatal, but never silent: the next run will just re-fetch
+        print(f"WARN: could not write cache {CACHE_FILE}: {e}", file=sys.stderr)
 
 def fetch_mod_names(ids):
     if not ids: return {}

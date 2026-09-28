@@ -20,6 +20,20 @@ source "${PLAYERS_LIB_DIR}/constants.sh"
 source "${PLAYERS_LIB_DIR}/json_helpers.sh"
 source "${PLAYERS_LIB_DIR}/rcon_lib.sh"
 
+# Build one player object as JSON. Unlike json_create this keeps the name a
+# string even when a player is called "123", "true" or "null".
+# Usage: json=$(player_to_json "$id" "$name" "$ping" "$guid")
+player_to_json() {
+    python3 - "$@" <<'PY_PLAYER_JSON'
+import json, sys
+pid, name, ping, guid = sys.argv[1:5]
+def num(v):
+    try: return int(v)
+    except ValueError: return 0
+print(json.dumps({"id": num(pid), "name": name, "ping": num(ping), "guid": guid}))
+PY_PLAYER_JSON
+}
+
 # =============================================================================
 # JSON Parsing Helpers - Now provided by lib/json_helpers.sh
 # =============================================================================
@@ -131,7 +145,6 @@ run_rcon_action() {
     local rcon_args=(
         --host "127.0.0.1"
         --port "$port"
-        --password "$pass"
         --action "$action"
     )
     
@@ -162,9 +175,10 @@ run_rcon_action() {
         rcon_args+=(--debug)
         echo "--- $(date) ---" >> "$debug_log"
         echo "Action: $action" >> "$debug_log"
-        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
+        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
     else
-        docker exec "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
+        # Password via environment: command lines are visible in /proc and docker inspect
+        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
     fi
 }
 
@@ -215,6 +229,7 @@ players_menu() {
             player_pings=()
             player_guids=()
             player_times=()
+            player_joined=()
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
                 # Update session tracking and get times
@@ -396,7 +411,7 @@ players_menu() {
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row
@@ -433,7 +448,8 @@ players_menu() {
             '') # Enter
                 if [[ $selected -lt $player_count ]]; then
                     # Open player details
-                    local full_player_data="{\"id\": ${player_ids[$selected]}, \"name\": \"${player_names[$selected]}\", \"ping\": ${player_pings[$selected]}, \"guid\": \"${player_guids[$selected]}\"}"
+                    local full_player_data
+                    full_player_data=$(player_to_json "${player_ids[$selected]}" "${player_names[$selected]}" "${player_pings[$selected]}" "${player_guids[$selected]}")
                     player_details_menu "$inst_dir" "$full_player_data"
                     needs_refresh=1
                 elif [[ $selected -eq $player_count ]]; then
@@ -913,7 +929,7 @@ ban_list_menu() {
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row

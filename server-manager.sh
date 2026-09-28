@@ -119,6 +119,50 @@ select_instance() {
 # =============================================================================
 # Mod Manager (TUI)
 # =============================================================================
+# Let the user pick one mod from the current list via a menu.
+# Uses the caller's mod_ids/mod_count. On success MENU_RESULT holds the
+# index into mod_ids; returns 1 when the user cancels.
+_mod_manager_pick_mod() {
+    local title="$1"
+    local -a pick_items=()
+    local i
+    for ((i=0; i<mod_count; i++)); do
+        pick_items+=("📦|$(get_mod_name "${mod_ids[$i]}") (${mod_ids[$i]})")
+    done
+    pick_items+=("--------------------")
+    pick_items+=("←|Cancel")
+    run_menu pick_items "$title" || return 1
+    [[ $MENU_RESULT -lt $mod_count ]] || return 1
+    return 0
+}
+
+# Remove one mod: dependency check, confirmation, CE cleanup, key cleanup.
+# Uses the caller's mod_ids/mods_file/servermods_file.
+# Returns 0 when the mod was removed, 1 otherwise.
+_mod_manager_remove_mod() {
+    local mid="$1"
+    local mname
+    mname=$(get_mod_name "$mid")
+
+    local blocker
+    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
+    if [[ -n "$blocker" ]]; then
+        show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
+        return 1
+    fi
+    confirm "Remove mod '$mname' from list?" "n" || return 1
+
+    # Auto-Cleanup CE (unlink/unmerge)
+    cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
+
+    local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
+    local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+    local removed_keys
+    removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
+    show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
+    return 0
+}
+
 mod_manager() {
     local mods_file="${SELECTED_DIR}/data/config/mods.txt"
     local servermods_file="${SELECTED_DIR}/data/config/servermods.txt"
@@ -217,87 +261,84 @@ cache_json = os.environ.get('CACHE_JSON', '{}')
 
 try:
     data = json.loads(cache_json) if cache_json else {}
-    mods_info = data.get('mods', {})
-    
-    def fmt(ts):
-        if not ts or ts == 0: return '-'
-        # Compact format: 02.01.26 14:00
-        return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
-    
-    for mid in mod_ids:
-        if not mid: continue
-        m = mods_info.get(mid, {})
-        
-        # Check both potential workshop paths and pick the newest one
-        # to handle mirrored folders smoothly.
-        p1 = os.path.join(ws_path1, mid)
-        p2 = os.path.join(ws_path2, mid)
-        choices = [p for p in [p1, p2] if os.path.exists(p)]
-        m_path = max(choices, key=lambda x: os.path.getmtime(x)) if choices else None
-        
-        local_v = 0
-        install_ts = 0
-        
-        # Local Stats
-        if os.path.exists(m_path):
-            # SYNCED (local_v) = actual filesystem modification time
-            # We touch this on every sync/fix, so it tells us when we last processed it.
-            local_v = int(os.path.getmtime(m_path))
-            
-            # INSTALLED (install_ts) = Persistent original install date
-            f_inst = os.path.join(m_path, '.first_installed')
-            v_file = os.path.join(m_path, '.installed_version')
-            
-            if os.path.exists(f_inst):
-                 try:
-                     with open(f_inst) as f: install_ts = int(f.read().strip())
-                 except: install_ts = int(os.path.getctime(m_path))
-            elif os.path.exists(v_file):
-                 # Fallback: check .installed_version (Steam timestamp)
-                 try:
-                     with open(v_file) as f: install_ts = int(f.read().strip())
-                 except: install_ts = int(os.path.getctime(m_path))
-            else:
-                 install_ts = int(os.path.getctime(m_path))
-        
-        # Deployment Check
-        is_deployed = False
-        if m_path:
-            try:
-                check_roots = []
-                p1 = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))
-                check_roots.append(p1)
-                
-                if 'serverfiles' in m_path:
-                    parts = m_path.split(os.sep)
-                    if 'serverfiles' in parts:
-                        idx = parts.index('serverfiles')
-                        p2 = os.sep.join(parts[:idx+1])
-                        check_roots.append(p2)
-                
-                for r in check_roots:
-                    # Use lexists for Docker symlinks
-                    if os.path.lexists(os.path.join(r, f'@{mid}')):
-                        is_deployed = True
-                        break
-            except: pass
+except Exception:
+    data = {}
+mods_info = data.get('mods', {})
 
-        # Remote Stats
-        remote_v = m.get('updated', 0)
-        if remote_v == 0: remote_v = m.get('latest', 0)
-        
-        reason = ''
-        if (remote_v > local_v): reason += 'U'
-        if (local_v == 0): reason += 'M'
-        if (not is_deployed): reason += 'D'
-        
-        has_update = (len(reason) > 0)
-        
-        # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
-        print(f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{1 if has_update else 0}|{reason}')
-except Exception as e:
-    # Fallback for ALL mods if crash
-    for _ in mod_ids: print('-|-|-|1|Err')
+def fmt(ts):
+    if not ts or ts == 0: return '-'
+    # Compact format: 02.01.26 14:00
+    return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
+
+def read_ts(path, fallback):
+    try:
+        with open(path) as f: return int(f.read().strip())
+    except Exception:
+        return int(fallback)
+
+def is_deployed_anywhere(m_path, mid):
+    # Look for the @<id> symlink next to serverfiles and next to steamapps
+    check_roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))]
+    parts = m_path.split(os.sep)
+    if 'serverfiles' in parts:
+        idx = parts.index('serverfiles')
+        check_roots.append(os.sep.join(parts[:idx+1]))
+    # Use lexists for Docker symlinks
+    return any(os.path.lexists(os.path.join(r, f'@{mid}')) for r in check_roots)
+
+def status_line(mid):
+    m = mods_info.get(mid, {})
+
+    # Check both potential workshop paths and pick the newest one
+    # to handle mirrored folders smoothly. m_path stays None when the
+    # mod has not been downloaded yet.
+    choices = [p for p in (os.path.join(ws_path1, mid), os.path.join(ws_path2, mid)) if os.path.exists(p)]
+    m_path = max(choices, key=os.path.getmtime) if choices else None
+
+    local_v = 0
+    install_ts = 0
+    is_deployed = False
+
+    if m_path:
+        # SYNCED (local_v) = actual filesystem modification time
+        # We touch this on every sync/fix, so it tells us when we last processed it.
+        local_v = int(os.path.getmtime(m_path))
+
+        # INSTALLED (install_ts) = Persistent original install date
+        f_inst = os.path.join(m_path, '.first_installed')
+        v_file = os.path.join(m_path, '.installed_version')
+        ctime = os.path.getctime(m_path)
+        if os.path.exists(f_inst):
+            install_ts = read_ts(f_inst, ctime)
+        elif os.path.exists(v_file):
+            # Fallback: check .installed_version (Steam timestamp)
+            install_ts = read_ts(v_file, ctime)
+        else:
+            install_ts = int(ctime)
+
+        try:
+            is_deployed = is_deployed_anywhere(m_path, mid)
+        except Exception:
+            is_deployed = False
+
+    # Remote Stats
+    remote_v = m.get('updated', 0) or m.get('latest', 0)
+
+    reason = ''
+    if remote_v > local_v: reason += 'U'
+    if local_v == 0: reason += 'M'
+    if not is_deployed: reason += 'D'
+
+    has_update = 1 if reason else 0
+    # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
+    return f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{has_update}|{reason}'
+
+for mid in mod_ids:
+    # Exactly one line per mod, always: one broken mod must not hide the others.
+    try:
+        print(status_line(mid))
+    except Exception:
+        print('-|-|-|1|Err')
 END_PYTHON
             )
             
@@ -497,7 +538,7 @@ END_PYTHON
         printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
         printf "%.0s-" $(seq 1 $TERM_COLS)
         printf "%s" "$RESET"
-        ((row++))
+        row=$((row + 1))
         
         # Action bar
         local action_row=$row
@@ -602,25 +643,7 @@ END_PYTHON
                 ;;
             'r'|'R')
                 if [[ $selected -lt $mod_count ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    local mname=$(get_mod_name "$mid")
-                    
-                    # Dependency Protection
-                    local blocker
-                    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
-                    if [[ -n "$blocker" ]]; then
-                        show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
-                    elif confirm "Remove mod '$mname' from list?" "n"; then
-                        # Auto-Cleanup CE (unlink/unmerge)
-                        cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
-                        
-                        # Paths for key cleanup
-                        local server_keys="${SELECTED_DIR}/data/serverfiles/keys"
-                        local workshop_base="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
-                        
-                        local removed_keys
-                        removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "$server_keys" "$workshop_base")
-                        show_message "Removed: $mname ($removed_keys keys deleted)" "Removed"
+                    if _mod_manager_remove_mod "${mod_ids[$selected]}"; then
                         dirty=1; needs_rebuild=1; touch "$needs_sync_file"
                         [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
                         [[ $selected -lt 0 ]] && selected=0
@@ -658,25 +681,14 @@ END_PYTHON
                         fi
                     fi
                 elif [[ $selected -eq $((mod_count + 1)) ]]; then
-                    # Remove
-                    if [[ $selected -lt $mod_count ]]; then
-                        local mid="${mod_ids[$selected]}"
-                        local mname=$(get_mod_name "$mid")
-                        
-                        # Dependency Protection
-                        local blocker
-                        blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
-                        if [[ -n "$blocker" ]]; then
-                            show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
-                        elif confirm "Remove mod '$mname' from list?" "n"; then
-                            # Auto-Cleanup CE (unlink/unmerge)
-                            cleanup_mod_ce_files "${SELECTED_DIR}" "$mid"
-                            removed_keys=$(uninstall_mod "$mid" "$mods_file" "$servermods_file" "${SELECTED_DIR}/data/serverfiles/keys" "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100")
-                            show_message "Removed: $mname" "Success"
+                    # Remove: while the cursor sits on the action bar no mod is
+                    # highlighted, so let the user pick one from a list.
+                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Remove which mod?"; then
+                        if _mod_manager_remove_mod "${mod_ids[$MENU_RESULT]}"; then
                             dirty=1; needs_rebuild=1; touch "$needs_sync_file"
+                            # The list shrinks by one, keep the cursor on this button
+                            selected=$((selected - 1))
                         fi
-                    else
-                        show_message "Select a mod to remove first" "Info"
                     fi
                 elif [[ $selected -eq $((mod_count + 2)) ]]; then
                     # Sync
@@ -704,11 +716,10 @@ END_PYTHON
                         run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
                     fi
                 elif [[ $selected -eq $((mod_count + 4)) ]]; then
-                     # Info
-                    if [[ $selected -lt $mod_count ]]; then
-                        local mid="${mod_ids[$selected]}"
-                         _view_mod_details "$mid" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                         needs_rebuild=1
+                    # Info: same as Remove, pick the mod from a list
+                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Show info for which mod?"; then
+                        _view_mod_details "${mod_ids[$MENU_RESULT]}" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
+                        needs_rebuild=1
                     fi
                 elif [[ $selected -eq $((mod_count + 5)) ]]; then
                     return 0
@@ -871,7 +882,7 @@ except: pass
                                         for ((i=0; i<ce_count; i++)); do
                                             if [[ ${ce_selected[$i]} -eq 1 ]]; then
                                                 register_modular_loot "$SELECTED_DIR" "${ce_file_paths[$i]}" "${ce_mod_ids[$i]}" 1 "${ce_types[$i]}"
-                                                ((link_count++))
+                                                link_count=$((link_count + 1))
                                             fi
                                         done
                                         [[ $link_count -gt 0 ]] && show_message "Linked $link_count CE file(s)!" "Success"
