@@ -341,8 +341,11 @@ create_instance() {
     done
     step "Copied lib files for in-container ban expiry daemon"
 
-    local admin_pw
-    admin_pw="$(prompt_default "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
+    # The TUI and the CLI both collect the admin password into CLI_ADMIN_PASS;
+    # it used to be ignored here and the prompt repeated (or, non-interactively,
+    # the CHANGEME default was written). Only ask when nothing was provided.
+    local admin_pw="${CLI_ADMIN_PASS:-}"
+    [[ -n "${admin_pw}" ]] || admin_pw="$(prompt_default "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
 
     write_file "${inst_dir}/data/config/serverDZ.cfg" \
 "hostname = \"DayZ ${name}\";

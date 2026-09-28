@@ -96,11 +96,15 @@ init_user_identity() {
 
 # Quote a string for use in .env file
 # Usage: quoted=$(env_quote "value with spaces")
+# Quote a value for a docker compose .env file (double-quoted form).
+# Compose interpolates $VAR and ${VAR} inside double quotes and rejects
+# things like $1, so a literal dollar must be written as $$.
 env_quote() {
     local s="$1"
     s="${s//\\/\\\\}"
     s="${s//\"/\\\"}"
     s="${s//$'\n'/\\n}"
+    s="${s//\$/\$\$}"
     printf "\"%s\"" "$s"
 }
 
@@ -139,6 +143,7 @@ dotenv_get() {
         val="${val//\\n/$'\n'}"
         val="${val//\\\"/\"}"
         val="${val//\\\\/\\}"
+        val="${val//\$\$/\$}"
     fi
     printf "%s" "${val}"
 }
