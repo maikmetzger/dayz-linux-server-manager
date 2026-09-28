@@ -18,10 +18,14 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rowfmt import join_row  # noqa: E402
+
 
 # =============================================================================
 # Ban Record Model
 # =============================================================================
+
 
 class BanRecord:
     """Represents a ban record."""
@@ -297,7 +301,9 @@ def main():
 
     # List bans
     list_parser = subparsers.add_parser('list', help='List all bans')
-    list_parser.add_argument('--tsv', action='store_true', help='One row per ban: guid, name, reason, minutes, banned_at, expires')
+    list_parser.add_argument('--rows', action='store_true',
+                             help='One row per ban: guid, name, reason, minutes, banned_at, expires '
+                                  '(fields separated by 0x1F, see rowfmt.py)')
 
     # Get expired bans
     subparsers.add_parser('expired', help='List expired bans')
@@ -348,10 +354,10 @@ def main():
 
     elif args.command == 'list':
         bans = manager.list_bans()
-        if args.tsv:
+        if args.rows:
             for b in bans:
                 fields = (b.guid, b.name, b.reason, b.duration_minutes, b.banned_at, b.expires)
-                print('\t'.join(str(f).replace('\t', ' ').replace('\n', ' ') for f in fields))
+                print(join_row(fields))
         else:
             print(json.dumps({
                 'count': len(bans),

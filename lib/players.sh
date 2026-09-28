@@ -157,10 +157,12 @@ players_menu() {
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
                 # One python process for the whole list: session bookkeeping,
-                # cleanup of departed players and one TSV row per player.
+                # cleanup of departed players and one row per player.
                 # (Previously 5 processes per player, several seconds per refresh.)
+                # Fields are 0x1F separated: a tab would swallow empty fields
+                # such as the GUID of a lobby player (see lib/rowfmt.py).
                 local pid pname pping pguid ptime pjoined
-                while IFS=$'\t' read -r pid pname pping pguid ptime pjoined; do
+                while IFS=$'\x1f' read -r pid pname pping pguid ptime pjoined; do
                     [[ -z "$pid" ]] && continue
                     player_ids+=("$pid")
                     player_names+=("$pname")
@@ -692,9 +694,10 @@ ban_list_menu() {
             ban_guids=()
             
             if [[ -f "$bans_file" ]]; then
-                # One process for the whole list instead of six per ban
+                # One process for the whole list instead of six per ban.
+                # 0x1F separated so empty fields (GUID, reason) keep their place.
                 local bguid bname breason bminutes bat bexp
-                while IFS=$'\t' read -r bguid bname breason bminutes bat bexp; do
+                while IFS=$'\x1f' read -r bguid bname breason bminutes bat bexp; do
                     [[ -z "$bguid$bname" ]] && continue
                     ban_guids+=("$bguid")
                     ban_names+=("${bname:-Unknown}")
@@ -702,7 +705,7 @@ ban_list_menu() {
                     ban_durations+=("${bminutes:-0}")
                     ban_banned_at+=("${bat:--}")
                     ban_expires+=("${bexp:-never}")
-                done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --tsv 2>/dev/null)
+                done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --rows 2>/dev/null)
             fi
             
             ban_count=${#ban_names[@]}

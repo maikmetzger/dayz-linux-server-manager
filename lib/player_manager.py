@@ -17,6 +17,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rowfmt import FIELD_SEP, field  # noqa: E402
+
 
 # =============================================================================
 # Session Management
@@ -116,6 +119,7 @@ class SessionManager:
 # Duration Parsing
 # =============================================================================
 
+
 def parse_duration(duration_str: str) -> Dict[str, Any]:
     """Parse a duration string into minutes and human-readable format.
 
@@ -193,11 +197,6 @@ def format_timestamp(ts: int) -> str:
 # CLI Interface
 # =============================================================================
 
-def _tsv_safe(value: Any) -> str:
-    """One TSV field: tabs and newlines inside a player name must not break rows."""
-    return str(value).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
-
-
 def sync_rows(manager: 'SessionManager', players_json: Dict[str, Any], now_ts: int) -> List[List[str]]:
     """Session bookkeeping for a whole player list, returning display rows.
 
@@ -214,8 +213,8 @@ def sync_rows(manager: 'SessionManager', players_json: Dict[str, Any], now_ts: i
             join_ts = manager.get_or_create_session(guid, now_ts)
             minutes = manager.calculate_time_on_server(join_ts, now_ts)
             joined = format_timestamp(join_ts)
-        rows.append([_tsv_safe(p.get('id', 0)), _tsv_safe(p.get('name', 'Unknown')),
-                     _tsv_safe(p.get('ping', 0)), guid, str(minutes), _tsv_safe(joined)])
+        rows.append([field(p.get('id', 0)), field(p.get('name', 'Unknown')),
+                     field(p.get('ping', 0)), guid, str(minutes), field(joined)])
     manager.cleanup_departed(online_guids)
     return rows
 
@@ -232,7 +231,8 @@ def main():
     session_parser.add_argument('--file', required=True, help='Path to sessions.json')
     session_parser.add_argument('--action', required=True,
                                choices=['get', 'cleanup', 'sync'],
-                               help='Action to perform (sync: players JSON on stdin -> one TSV row per player)')
+                               help='Action to perform (sync: players JSON on stdin -> one row per player, '
+                                    'fields separated by 0x1F, see rowfmt.py)')
     session_parser.add_argument('--guid', help='Player GUID')
     session_parser.add_argument('--now', type=int, help='Current Unix timestamp')
     session_parser.add_argument('--guids', help='Comma-separated list of current GUIDs (for cleanup)')
@@ -281,7 +281,7 @@ def main():
             # record join times, drop departed players, emit one row per
             # player as id<TAB>name<TAB>ping<TAB>guid<TAB>minutes<TAB>joined.
             for row in sync_rows(manager, json.load(sys.stdin), now):
-                print('\t'.join(row))
+                print(FIELD_SEP.join(row))
 
     elif args.command == 'duration':
         result = parse_duration(args.input)

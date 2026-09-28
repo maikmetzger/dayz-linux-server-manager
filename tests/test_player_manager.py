@@ -180,5 +180,34 @@ class TestTimestampFormatting(unittest.TestCase):
         self.assertEqual(result, '?')
 
 
+class BashRowReadTest(unittest.TestCase):
+    """Regression: the players TUI reads the sync rows with bash `read`. With
+    tab separated rows an empty GUID (lobby player) shifted minutes and join
+    time into the GUID and minutes columns."""
+
+    def test_lobby_player_fields_stay_in_place(self):
+        import subprocess
+        tmp = tempfile.mkdtemp()
+        try:
+            sessions = os.path.join(tmp, 'sessions.json')
+            players = json.dumps({'players': [
+                {'id': 0, 'name': 'Survivor', 'ping': 40, 'guid': 'a' * 32},
+                {'id': 1, 'name': 'Lobby Guy', 'ping': -1, 'guid': ''},
+            ]})
+            script = ("python3 \"$1\" session --file \"$2\" --action sync --now 1700000000 | "
+                      "while IFS=$'\\x1f' read -r pid pname pping pguid ptime pjoined; do "
+                      "printf '%s|%s|%s|%s|%s|%s\\n' \"$pid\" \"$pname\" \"$pping\" \"$pguid\" \"$ptime\" \"$pjoined\"; done")
+            manager = os.path.join(os.path.dirname(__file__), '../lib/player_manager.py')
+            proc = subprocess.run(['bash', '-c', script, '_', manager, sessions],
+                                  input=players, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().split('\n')
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(lines[0].startswith('0|Survivor|40|' + 'a' * 32 + '|0|'), lines[0])
+            self.assertEqual(lines[1], '1|Lobby Guy|-1||0|?')
+        finally:
+            shutil.rmtree(tmp)
+
+
 if __name__ == '__main__':
     unittest.main()
