@@ -38,39 +38,64 @@ save_mod_cache() {
     done
 }
 
-# Get mod name from Steam API (with caching)
+STEAM_FILE_DETAILS_URL="https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+# IDs asked from the API in this session (hit or miss), so an unknown mod
+# does not trigger a request on every redraw
+declare -A MOD_NAME_TRIED=()
+# Set after a failed request: the API is not asked again in this session
+MOD_NAME_API_DOWN=0
+
+# Resolve the names of several mods with ONE Steam API request. Cached and
+# already tried IDs are skipped. Failures are not written to the cache, so a
+# mod shows as "Workshop <id>" until the API answers again.
+# Usage: prefetch_mod_names id...
+prefetch_mod_names() {
+    local -a missing=()
+    local mid
+    for mid in "$@"; do
+        [[ -n "${MOD_NAME_CACHE[$mid]:-}" || -n "${MOD_NAME_TRIED[$mid]:-}" ]] && continue
+        missing+=("$mid")
+        MOD_NAME_TRIED["$mid"]=1
+    done
+    [[ ${#missing[@]} -gt 0 && $MOD_NAME_API_DOWN -eq 0 ]] || return 0
+    command -v curl &>/dev/null || return 0
+
+    local -a form=(-d "itemcount=${#missing[@]}")
+    local i
+    for i in "${!missing[@]}"; do
+        form+=(-d "publishedfileids[$i]=${missing[$i]}")
+    done
+    local response
+    response=$(curl -s --max-time 5 "$STEAM_FILE_DETAILS_URL" "${form[@]}" 2>/dev/null) || response=""
+    if [[ -z "$response" ]]; then
+        MOD_NAME_API_DOWN=1
+        return 0
+    fi
+
+    local title
+    while IFS=$'\x1f' read -r mid title; do
+        [[ -n "$mid" && -n "$title" ]] && MOD_NAME_CACHE["$mid"]="$title"
+    done < <(printf '%s' "$response" | python3 -c '
+import json, sys
+try:
+    details = json.load(sys.stdin).get("response", {}).get("publishedfiledetails", [])
+except (ValueError, AttributeError):
+    details = []
+for item in details:
+    title = str(item.get("title", "")).replace("\x1f", " ").replace("\n", " ")
+    if item.get("publishedfileid") and title:
+        print(str(item["publishedfileid"]) + "\x1f" + title)
+')
+    save_mod_cache
+}
+
+# Display name of one mod from the cache, "Workshop <id>" when unknown.
+# No network here: callers run in command substitutions (subshells), where a
+# fetched name could not be kept; prefetch_mod_names fills the cache first.
 # Usage: name=$(get_mod_name "1559212036")
 get_mod_name() {
     local mod_id="$1"
-    
-    # Check in-memory cache first
-    if [[ -n "${MOD_NAME_CACHE[$mod_id]:-}" ]]; then
-        echo "${MOD_NAME_CACHE[$mod_id]}"
-        return 0
-    fi
-    
-    # Fetch from Steam API
-    local name=""
-    if command -v curl &>/dev/null; then
-        local response
-        response=$(curl -s --max-time 5 \
-            "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/" \
-            -d "itemcount=1" \
-            -d "publishedfileids[0]=$mod_id" 2>/dev/null || true)
-        
-        if [[ -n "$response" ]]; then
-            name=$(echo "$response" | grep -o '"title":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-        fi
-    fi
-    
-    # Fallback to ID if API failed
-    [[ -z "$name" ]] && name="Workshop $mod_id"
-    
-    # Cache the result
-    MOD_NAME_CACHE["$mod_id"]="$name"
-    save_mod_cache
-    
-    echo "$name"
+    echo "${MOD_NAME_CACHE[$mod_id]:-Workshop $mod_id}"
 }
 
 # -----------------------------------------------------------------------------
