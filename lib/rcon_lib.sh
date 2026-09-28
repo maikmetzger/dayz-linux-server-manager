@@ -214,16 +214,20 @@ safe_container_append_line() {
 safe_container_remove_line() {
     local container="$1"
     local file_path="$2"
-    local pattern="$3"
+    local key="$3"
 
-    # Create temp file, filter, then replace original
-    # Using grep -v with the pattern anchored to start of line
+    # An empty key would match every line and empty the file
+    if [[ -z "$key" ]]; then
+        echo "safe_container_remove_line: refusing empty key for ${file_path}" >&2
+        return 1
+    fi
+
+    # Remove only lines whose first field is exactly the key
+    # (bans.txt lines look like "<guid> <expiry> [reason]"). Returns docker's status.
     docker exec "$container" sh -c '
-        if [ -f "$2" ]; then
-            grep -v "^$1" "$2" > "$2.tmp" 2>/dev/null || true
-            mv "$2.tmp" "$2" 2>/dev/null || true
-        fi
-    ' _ "$pattern" "$file_path" 2>/dev/null || true
+        [ -f "$2" ] || exit 0
+        awk -v key="$1" '"'"'$1 != key'"'"' "$2" > "$2.tmp" && mv "$2.tmp" "$2"
+    ' _ "$key" "$file_path" 2>/dev/null
 }
 
 # =============================================================================
