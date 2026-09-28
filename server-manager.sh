@@ -163,627 +163,465 @@ _mod_manager_remove_mod() {
     return 0
 }
 
+# Buttons of the action bar, in cursor order after the mod rows
+MOD_MANAGER_ACTIONS=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[I] Info" "[Q] Back")
+
+# The _mod_manager_* helpers below run inside mod_manager and work on its
+# locals (bash dynamic scoping): mod_ids, mod_names, mod_types, mod_warnings,
+# enabled_mod_ids, mod_count, selected, dirty, needs_rebuild,
+# pending_sync_mods, mods_file, servermods_file, needs_sync_file,
+# pending_mods_file, plus the mod_*_dates/flags/reasons arrays.
+
+# Rebuild the table data from mods.txt/servermods.txt, the update cache and
+# the workshop folders.
+_mod_manager_rebuild() {
+    mod_ids=(); mod_names=(); mod_types=(); mod_warnings=()
+    mapfile -t mod_ids < <(get_all_mod_ids "$mods_file" "$servermods_file")
+    prefetch_mod_names ${mod_ids[@]+"${mod_ids[@]}"}   # one API request for all unknown names
+
+    local max_name=$((TERM_COLS - 45))
+    [[ $max_name -lt 20 ]] && max_name=20
+    local mid mname
+    for mid in ${mod_ids[@]+"${mod_ids[@]}"}; do
+        mname="$(get_mod_name "$mid")"
+        [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
+        mod_names+=("$mname")
+        mod_types+=("$(get_mod_type "$mid" "$mods_file" "$servermods_file")")
+    done
+    _mod_manager_load_status
+
+    # Only enabled mods count for dependency checks: a disabled framework
+    # is not loaded, and a disabled dependent must not block a removal.
+    enabled_mod_ids=()
+    local i
+    for i in "${!mod_ids[@]}"; do
+        [[ "${mod_types[$i]}" != "disabled" ]] && enabled_mod_ids+=("${mod_ids[$i]}")
+    done
+    local warn
+    for i in "${!mod_ids[@]}"; do
+        warn=""
+        if [[ "${mod_types[$i]}" != "disabled" ]]; then
+            warn="$(check_mod_dependencies "${mod_ids[$i]}" ${enabled_mod_ids[@]+"${enabled_mod_ids[@]}"} 2>/dev/null || true)"
+        fi
+        mod_warnings+=("$warn")
+    done
+}
+
+# Dates and update flags per mod from lib/mod_status.py (one process for all)
+_mod_manager_load_status() {
+    mod_ws_dates=(); mod_sync_dates=(); mod_install_dates=(); mod_update_flags=(); mod_update_reasons=()
+    local ws_d sync_d inst_d has_up reason
+    while IFS='|' read -r ws_d sync_d inst_d has_up reason; do
+        [[ -z "$ws_d" ]] && continue
+        mod_ws_dates+=("$ws_d")
+        mod_sync_dates+=("$sync_d")
+        mod_install_dates+=("$inst_d")
+        mod_update_flags+=("$has_up")
+        mod_update_reasons+=("$reason")
+    done < <(get_cached_update_info "$SELECTED_DIR" | python3 "${SCRIPT_DIR}/lib/mod_status.py" \
+        --workshop-dir "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" \
+        --workshop-dir "${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100" \
+        ${mod_ids[@]+"${mod_ids[@]}"})
+}
+
+# ---- drawing -----------------------------------------------------------------
+
+# A full-width dashed line at ROW
+_mod_manager_draw_rule() {
+    move_to "$1" 1
+    printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
+    printf "%.0s-" $(seq 1 "$TERM_COLS")
+    printf "%s" "$RESET"
+}
+
+# Whole screen: header, column titles, mod rows, action bar, footer
+_mod_manager_draw() {
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    move_to 1 1
+    local header_title="Mod Manager - $SELECTED_NAME"
+    if [[ $dirty -eq 1 ]]; then
+        header_title="Mod Manager - $SELECTED_NAME ${YELLOW}[ SYNC NEEDED ]${RESET}${BG_RED}${WHITE}${BOLD}"
+    fi
+    printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
+
+    # column positions, shared with the row functions
+    local table_start=3 col_status=2 col_type=8 col_name=15
+    local col_id=$((TERM_COLS - 45)) col_wsver=$((TERM_COLS - 32)) col_synced=$((TERM_COLS - 15))
+    _mod_manager_draw_rule $table_start
+    local col title
+    for col in "$col_status:STATUS" "$col_type:TYPE" "$col_name:MOD NAME" "$col_id:ID" "$col_wsver:WORKSHOP DATE" "$col_synced:SYNCED"; do
+        move_to $((table_start + 1)) "${col%%:*}"
+        printf "%s%s%s%s" "$DIM" "$WHITE" "${col#*:}" "$RESET"
+    done
+    _mod_manager_draw_rule $((table_start + 2))
+
+    local row=$((table_start + 3))
+    if [[ $mod_count -eq 0 ]]; then
+        move_to $row 1
+        printf "%s  (No mods - press A to add)%s" "$DIM" "$RESET"
+        row=$((row + 1))
+    fi
+    local i
+    for i in "${!mod_ids[@]}"; do
+        _mod_manager_draw_row "$i" "$row"
+        row=$((row + 1))
+    done
+    _mod_manager_draw_rule $row
+    _mod_manager_draw_actions $((row + 1))
+    _mod_manager_draw_footer
+}
+
+# Values both row styles need for mod index $1; sets mid, mtype, mname,
+# status_icon, type_short, ws_ver, sync_ver, ws_color, sync_color in the caller
+_mod_manager_row_values() {
+    local i="$1"
+    mid="${mod_ids[$i]}"
+    mtype="${mod_types[$i]}"
+    mname="${mod_names[$i]}"
+    local max_name_len=$((col_id - col_name - 2))
+    [[ ${#mname} -gt $max_name_len ]] && mname="${mname:0:$((max_name_len-3))}..."
+
+    case "$mtype" in
+        both)     status_icon="✓"; type_short="C+S" ;;
+        client)   status_icon="✓"; type_short="Cli" ;;
+        server)   status_icon="✓"; type_short="Srv" ;;
+        disabled) status_icon="✗"; type_short="Off" ;;
+    esac
+    [[ -n "${mod_warnings[$i]:-}" ]] && status_icon="!"
+
+    ws_ver="${mod_ws_dates[$i]:--}"
+    sync_ver="${mod_sync_dates[$i]:--}"
+    ws_color="$WHITE"
+    sync_color="$DIM"
+    [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && { ws_color="$YELLOW"; sync_color="$YELLOW"; }
+    local reason="${mod_update_reasons[$i]:-}"
+    [[ "$reason" == *D* ]] && { sync_color="$RED"; sync_ver="MISSING LINK"; }
+    [[ "$reason" == *M* ]] && { sync_color="$RED"; sync_ver="MISSING FILE"; }
+    return 0
+}
+
+# One mod row; the row under the cursor is drawn inverted
+_mod_manager_draw_row() {
+    local i="$1" row="$2"
+    local mid mtype mname status_icon type_short ws_ver sync_ver ws_color sync_color
+    _mod_manager_row_values "$i"
+    move_to "$row" 1
+    if [[ $i -eq $selected ]]; then
+        _mod_manager_draw_row_selected
+    else
+        _mod_manager_draw_row_plain "$i"
+    fi
+}
+
+_mod_manager_draw_row_selected() {
+    printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
+    move_to "$row" $col_status
+    printf "▶ %s" "$status_icon"
+    move_to "$row" $col_type
+    case "$mtype" in
+        both)     printf "[%sC%s+%sS%s]" "$MOD_CL" "$WHITE$BOLD" "$MOD_SV" "$WHITE$BOLD" ;;
+        client)   printf "[%s%s%s]" "$MOD_CL" "$type_short" "$WHITE$BOLD" ;;
+        server)   printf "[%s%s%s]" "$MOD_SV" "$type_short" "$WHITE$BOLD" ;;
+        disabled) printf "[%s]" "$type_short" ;;
+    esac
+    move_to "$row" $col_name
+    printf "%s" "$mname"
+    move_to "$row" $col_id
+    printf "%s" "$mid"
+    move_to "$row" $col_wsver
+    printf "%-14s" "${ws_ver:0:14}"
+    move_to "$row" $col_synced
+    printf "%-14s" "${sync_ver:0:14}"
+    printf "%s" "$RESET"
+}
+
+_mod_manager_draw_row_plain() {
+    local i="$1"
+    local row_color="$RESET" id_color="$DIM"
+    # yellow: update available, dependency warning, missing files, pending type change
+    [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
+    [[ -n "${mod_warnings[$i]:-}" ]] && row_color="$YELLOW"
+    [[ "$sync_ver" == *MISSING* ]] && row_color="$YELLOW"
+    [[ "$pending_sync_mods" == *"$mid"* ]] && row_color="$YELLOW"
+    if [[ "$mtype" == "disabled" ]]; then
+        row_color="$DARKGRAY"; ws_color="$DARKGRAY"; sync_color="$DARKGRAY"; id_color="$DARKGRAY"
+    fi
+
+    printf "%s" "$row_color"
+    move_to "$row" $col_status
+    if [[ "$mtype" == "disabled" ]]; then
+        printf "  %s%s%s" "$RED" "$status_icon" "$row_color"
+    elif [[ -n "${mod_warnings[$i]:-}" ]]; then
+        printf "  %s%s%s" "$YELLOW$BOLD" "$status_icon" "$row_color"
+    else
+        printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
+    fi
+    move_to "$row" $col_type
+    case "$mtype" in
+        both)     printf "[%sC%s+%sS%s]%s" "$MOD_CL" "$row_color" "$MOD_SV" "$row_color" "$RESET" ;;
+        client)   printf "[%s%s%s]%s" "$MOD_CL" "$type_short" "$row_color" "$RESET" ;;
+        server)   printf "[%s%s%s]%s" "$MOD_SV" "$type_short" "$row_color" "$RESET" ;;
+        disabled) printf "[%s%s%s]" "$RED" "$type_short" "$row_color" ;;
+    esac
+    move_to "$row" $col_name
+    printf "%s%s" "$row_color" "$mname"
+    move_to "$row" $col_id
+    printf "%s%s%s" "$id_color" "$mid" "$row_color"
+    move_to "$row" $col_wsver
+    printf "%s%-14s%s" "$ws_color" "${ws_ver:0:14}" "$row_color"
+    move_to "$row" $col_synced
+    printf "%s%-14s%s" "$sync_color" "${sync_ver:0:14}" "$row_color"
+    printf "%s" "$RESET"
+}
+
+# Action bar with the clock; the button under the cursor is highlighted
+_mod_manager_draw_actions() {
+    local action_row="$1"
+    move_to "$action_row" $((TERM_COLS - 20))
+    printf "%s%s[ %s ]%s" "$DIM" "$WHITE" "$(date +"%H:%M:%S")" "$RESET"
+    move_to "$action_row" 2
+    local a label
+    for a in "${!MOD_MANAGER_ACTIONS[@]}"; do
+        label="${MOD_MANAGER_ACTIONS[$a]}"
+        [[ "$label" == "[S] Sync" && $dirty -eq 1 ]] && label="[!S] Sync"   # sync pending
+        if [[ $selected -eq $((mod_count + a)) ]]; then
+            if [[ "$label" == "[!S] Sync" ]]; then
+                printf "%s%s▶ %s %s" "$BG_YELLOW" "$BLACK$BOLD" "$label" "$RESET"
+            else
+                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$label" "$RESET"
+            fi
+        elif [[ "$label" == "[!S] Sync" ]]; then
+            printf "  %s%s%s " "$YELLOW$BOLD" "$label" "$RESET"
+        else
+            printf "  %s " "$label"
+        fi
+        printf " "
+    done
+}
+
+# Footer: dependency warning of the selected mod (computed in the rebuild,
+# no python per keypress) and the key help
+_mod_manager_draw_footer() {
+    move_to $((TERM_ROWS - 1)) 1
+    local sel_warn=""
+    [[ $selected -lt $mod_count ]] && sel_warn="${mod_warnings[$selected]:-}"
+    if [[ -n "$sel_warn" ]]; then
+        printf "%s%s WARN: %s %s%s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "${ESC}[K" "$RESET"
+    else
+        printf "%s" "${ESC}[2K"
+    fi
+    move_to "$TERM_ROWS" 1
+    printf "%s%s [↑↓] Select  [U/D] Move  [Enter] Toggle  [A] Add  [R] Remove  [S] Sync  [F] Fix  [Space] Info  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
+}
+
+# ---- actions -----------------------------------------------------------------
+
+# The mod list changed: header shows [SYNC NEEDED], the table gets rebuilt
+_mod_manager_mark_dirty() {
+    dirty=1
+    needs_rebuild=1
+    touch "$needs_sync_file"
+}
+
+# 0 when the container runs, otherwise a message naming the action
+# Usage: _mod_manager_require_running "sync" || return 0
+_mod_manager_require_running() {
+    [[ "$(get_container_status "$SELECTED_CONTAINER")" == "RUNNING" ]] && return 0
+    show_message "Container must be running to $1"
+    return 1
+}
+
+# [U]/[D] move the selected mod one position in the load order
+_mod_manager_move() {
+    local direction="$1"
+    if [[ "$direction" == "up" ]]; then
+        [[ $selected -gt 0 && $selected -lt $mod_count ]] || return 0
+        move_mod_up "${mod_ids[$selected]}" "$mods_file" "$servermods_file"
+        selected=$((selected - 1))
+    else
+        [[ $selected -lt $((mod_count - 1)) ]] || return 0
+        move_mod_down "${mod_ids[$selected]}" "$mods_file" "$servermods_file"
+        selected=$((selected + 1))
+    fi
+    _mod_manager_mark_dirty
+}
+
+# [Enter] on a mod: disabled -> client -> server -> both -> disabled
+_mod_manager_toggle_mod() {
+    local mid="${mod_ids[$selected]}"
+    case "${mod_types[$selected]}" in
+        disabled) add_mod_to_file "$mid" "$mods_file" ;;
+        client)   remove_mod_from_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
+        server)   add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
+        both)     remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
+    esac
+    append_line "$pending_mods_file" "$mid"
+    pending_sync_mods="$pending_sync_mods $mid"
+    _mod_manager_mark_dirty
+}
+
+# [A] ask for a Workshop ID, show its details and add it as client mod
+_mod_manager_add_mod() {
+    local new_id
+    new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
+    [[ "$new_id" =~ ^[0-9]+$ ]] || return 0
+    if is_mod_in_file "$new_id" "$mods_file" || is_mod_in_file "$new_id" "$servermods_file"; then
+        show_message "Mod already in list" "Already Exists"
+        return 0
+    fi
+    local rc=0
+    _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json" || rc=$?
+    [[ $rc -eq 10 ]] || return 0   # 10: the details view's "add" action was chosen
+    add_mod_to_file "$new_id" "$mods_file"
+    show_message "Added mod $new_id as [Client]" "Mod Added"
+    _mod_manager_mark_dirty
+}
+
+# Index of the mod to act on: the selected row, or one picked from a list
+# when the cursor sits on the action bar. Prints the index, returns 1 on cancel.
+_mod_manager_target_index() {
+    local title="$1"
+    if [[ $selected -lt $mod_count ]]; then
+        echo "$selected"
+        return 0
+    fi
+    [[ $mod_count -gt 0 ]] || return 1
+    _mod_manager_pick_mod "$title" || return 1
+    echo "$MENU_RESULT"
+}
+
+# [R] remove a mod (dependency check and confirmation in _mod_manager_remove_mod)
+_mod_manager_remove() {
+    local idx
+    idx=$(_mod_manager_target_index "Remove which mod?") || return 0
+    _mod_manager_remove_mod "${mod_ids[$idx]}" || return 0
+    _mod_manager_mark_dirty
+    # the list is one row shorter: keep the cursor on the same row/button
+    [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
+    [[ $selected -lt 0 ]] && selected=0
+    return 0
+}
+
+# [I]/[Space] workshop details of a mod
+_mod_manager_info() {
+    local idx
+    idx=$(_mod_manager_target_index "Show info for which mod?") || return 0
+    _view_mod_details "${mod_ids[$idx]}" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json" || true
+    needs_rebuild=1
+}
+
+# [S] sync the mod files into the container, refresh the update cache and
+# offer to activate the CE files the mods ship
+_mod_manager_sync() {
+    _mod_manager_require_running "sync" || return 0
+    run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods" || true
+    dirty=0
+    rm -f "$needs_sync_file" "$pending_mods_file"
+    pending_sync_mods=""
+    needs_rebuild=1
+
+    show_progress_start "Sync" "Refreshing update cache..."
+    local workshop_path="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
+    [[ -d "$workshop_path" ]] || workshop_path="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"
+    show_progress_update "Checking mod versions..." 30
+    check_all_mod_updates "$SELECTED_DIR" "$workshop_path" "$mods_file" "$servermods_file" >/dev/null 2>&1 || true
+
+    show_progress_update "Scanning CE files..." 60
+    local -a ce_mod_ids ce_mod_names ce_file_paths ce_filenames ce_types
+    scan_new_ce_files "$SELECTED_DIR" "$workshop_path"
+    show_progress_end "Sync complete!" 300
+    ce_link_files_dialog "$SELECTED_DIR" "Link CE Files - $SELECTED_NAME"
+}
+
+# [F] fix mod folder casing and keys inside the container
+_mod_manager_fix_mods() {
+    _mod_manager_require_running "fix mods" || return 0
+    run_with_output "Fixing Mod Casing & Keys" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh fix-mods && /dayz/run.sh fix-servermods" || true
+}
+
+# [Q] leaving with a pending sync needs confirmation
+_mod_manager_can_leave() {
+    [[ $dirty -eq 1 ]] || return 0
+    confirm "Sync is pending! Leave without syncing?" "n"
+}
+
+# [Enter] toggle the selected mod, or run the action bar button under the cursor
+_mod_manager_enter() {
+    if [[ $selected -lt $mod_count ]]; then
+        _mod_manager_toggle_mod
+        return 0
+    fi
+    case "${MOD_MANAGER_ACTIONS[$((selected - mod_count))]}" in
+        "[A] Add")     _mod_manager_add_mod ;;
+        "[R] Remove")  _mod_manager_remove ;;
+        "[S] Sync")    _mod_manager_sync ;;
+        "[F] FixMods") _mod_manager_fix_mods ;;
+        "[I] Info")    _mod_manager_info ;;
+    esac
+}
+
+# Mod Manager screen: mod list with type and date columns, load order,
+# add/remove, sync into the container.
 mod_manager() {
     local mods_file="${SELECTED_DIR}/data/config/mods.txt"
     local servermods_file="${SELECTED_DIR}/data/config/servermods.txt"
-    
     [[ -f "$mods_file" ]] || touch "$mods_file"
     [[ -f "$servermods_file" ]] || touch "$servermods_file"
-    
+
     local selected=0
     local dirty=0
     local needs_sync_file="${SELECTED_DIR}/data/config/.needs_sync"
     local pending_mods_file="${SELECTED_DIR}/data/config/.pending_sync_mods"
-    
-    # Load persisted dirty state
-    [[ -f "$needs_sync_file" ]] && dirty=1
-    
-    # Load pending sync mods (for yellow highlighting)
-    local pending_sync_mods=""
+    [[ -f "$needs_sync_file" ]] && dirty=1   # persisted dirty state
+    local pending_sync_mods=""                # rows shown yellow until synced
     [[ -f "$pending_mods_file" ]] && pending_sync_mods="$(cat "$pending_mods_file")"
-    
+
     local needs_rebuild=1
-    local -a mod_ids=()
-    local -a mod_names=()
-    local -a mod_types=()
-    local -a mod_warnings=()
-    local -a enabled_mod_ids=()   # ids that are actually loaded; used for dependency checks
-    
     local last_cols=0
-    
+    local -a mod_ids=() mod_names=() mod_types=() mod_warnings=()
+    local -a enabled_mod_ids=()   # ids that are actually loaded; used for dependency checks
+    local -a mod_ws_dates=() mod_sync_dates=() mod_install_dates=() mod_update_flags=() mod_update_reasons=()
+    local mod_count total_items key seq
+
     while true; do
         get_term_size
-        
-        # Trigger rebuild if terminal width changed (for name truncation)
-        if [[ $TERM_COLS -ne $last_cols ]]; then
+        if [[ $TERM_COLS -ne $last_cols ]]; then   # names are truncated to the width
             needs_rebuild=1
             last_cols=$TERM_COLS
         fi
-        
-        # Only rebuild arrays when data has changed
         if [[ $needs_rebuild -eq 1 ]]; then
-            mod_ids=()
-            mod_names=()
-            mod_types=()
-            mod_warnings=()
-            
-            while IFS= read -r mid; do
-                [[ -z "$mid" ]] && continue
-                mod_ids+=("$mid")
-                
-                local mname
-                mname="$(get_mod_name "$mid")"
-                local max_name=$((TERM_COLS - 45))
-                [[ $max_name -lt 20 ]] && max_name=20
-                [[ ${#mname} -gt $max_name ]] && mname="${mname:0:$((max_name-3))}..."
-                mod_names+=("$mname")
-                
-                local mtype
-                mtype="$(get_mod_type "$mid" "$mods_file" "$servermods_file")"
-                mod_types+=("$mtype")
-            done < <(get_all_mod_ids "$mods_file" "$servermods_file")
-            
-            # Pre-calculate versions and updates (ONE Python call for all)
-            local cache_data
-            cache_data=$(get_cached_update_info "$SELECTED_DIR")
-            
-            mod_versions=()
-            mod_update_flags=()
-            
-            # Use Python to extract all info at once for speed
-            # Pass IDs on a separate line or via env
-            mod_ws_dates=()
-            mod_sync_dates=()
-            mod_install_dates=()
-            mod_update_flags=()
-            mod_update_reasons=()
-            
-            while IFS='|' read -r ws_d sync_d inst_d has_up reason; do
-                # If script fails/prints garbage, safeguard
-                [[ -z "$ws_d" ]] && continue
-                mod_ws_dates+=("$ws_d")
-                mod_sync_dates+=("$sync_d")
-                mod_install_dates+=("$inst_d")
-                mod_update_flags+=("$has_up")
-                mod_update_reasons+=("$reason")
-            done < <(
-                export WS_PATH_1="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"
-                export WS_PATH_2="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
-                export MOD_IDS_STR="${mod_ids[*]}"
-                export CACHE_JSON="$cache_data"
-                
-                python3 <<'END_PYTHON'
-import json, sys, datetime, os
-
-mod_ids = os.environ.get('MOD_IDS_STR', '').split()
-ws_path1 = os.environ.get('WS_PATH_1', '')
-ws_path2 = os.environ.get('WS_PATH_2', '')
-cache_json = os.environ.get('CACHE_JSON', '{}')
-
-try:
-    data = json.loads(cache_json) if cache_json else {}
-except Exception:
-    data = {}
-mods_info = data.get('mods', {})
-
-def fmt(ts):
-    if not ts or ts == 0: return '-'
-    # Compact format: 02.01.26 14:00
-    return datetime.datetime.fromtimestamp(ts).strftime('%d.%m.%y %H:%M')
-
-def read_ts(path, fallback):
-    try:
-        with open(path) as f: return int(f.read().strip())
-    except Exception:
-        return int(fallback)
-
-def is_deployed_anywhere(m_path, mid):
-    # Look for the @<id> symlink next to serverfiles and next to steamapps
-    check_roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(m_path))))]
-    parts = m_path.split(os.sep)
-    if 'serverfiles' in parts:
-        idx = parts.index('serverfiles')
-        check_roots.append(os.sep.join(parts[:idx+1]))
-    # Use lexists for Docker symlinks
-    return any(os.path.lexists(os.path.join(r, f'@{mid}')) for r in check_roots)
-
-def status_line(mid):
-    m = mods_info.get(mid, {})
-
-    # Check both potential workshop paths and pick the newest one
-    # to handle mirrored folders smoothly. m_path stays None when the
-    # mod has not been downloaded yet.
-    choices = [p for p in (os.path.join(ws_path1, mid), os.path.join(ws_path2, mid)) if os.path.exists(p)]
-    m_path = max(choices, key=os.path.getmtime) if choices else None
-
-    local_v = 0
-    install_ts = 0
-    is_deployed = False
-
-    if m_path:
-        # SYNCED (local_v) = actual filesystem modification time
-        # We touch this on every sync/fix, so it tells us when we last processed it.
-        local_v = int(os.path.getmtime(m_path))
-
-        # INSTALLED (install_ts) = Persistent original install date
-        f_inst = os.path.join(m_path, '.first_installed')
-        v_file = os.path.join(m_path, '.installed_version')
-        ctime = os.path.getctime(m_path)
-        if os.path.exists(f_inst):
-            install_ts = read_ts(f_inst, ctime)
-        elif os.path.exists(v_file):
-            # Fallback: check .installed_version (Steam timestamp)
-            install_ts = read_ts(v_file, ctime)
-        else:
-            install_ts = int(ctime)
-
-        try:
-            is_deployed = is_deployed_anywhere(m_path, mid)
-        except Exception:
-            is_deployed = False
-
-    # Remote Stats
-    remote_v = m.get('updated', 0) or m.get('latest', 0)
-
-    reason = ''
-    if remote_v > local_v: reason += 'U'
-    if local_v == 0: reason += 'M'
-    if not is_deployed: reason += 'D'
-
-    has_update = 1 if reason else 0
-    # Output: WS_DATE | SYNC_DATE | INSTALL_DATE | HAS_UPDATE | REASON
-    return f'{fmt(remote_v)}|{fmt(local_v)}|{fmt(install_ts)}|{has_update}|{reason}'
-
-for mid in mod_ids:
-    # Exactly one line per mod, always: one broken mod must not hide the others.
-    try:
-        print(status_line(mid))
-    except Exception:
-        print('-|-|-|1|Err')
-END_PYTHON
-            )
-            
-            # Global sync flag
-            global_sync_needed=0
-            for flag in "${mod_update_flags[@]}"; do
-                [[ "$flag" -eq 1 ]] && { global_sync_needed=1; break; }
-            done
-            
-            # Only enabled mods count for dependency checks: a disabled framework
-            # is not loaded, and a disabled dependent must not block a removal.
-            enabled_mod_ids=()
-            for i in "${!mod_ids[@]}"; do
-                [[ "${mod_types[$i]}" != "disabled" ]] && enabled_mod_ids+=("${mod_ids[$i]}")
-            done
-
-            # Pre-calculate dependency warnings
-            for i in "${!mod_ids[@]}"; do
-                local mid="${mod_ids[$i]}"
-                local mtype="${mod_types[$i]}"
-                local warn=""
-                if [[ "$mtype" != "disabled" ]]; then
-                    warn="$(check_mod_dependencies "$mid" "${enabled_mod_ids[@]}" 2>/dev/null || true)"
-                fi
-                mod_warnings+=("$warn")
-            done
-            
+            _mod_manager_rebuild
             needs_rebuild=0
         fi
-        
-        local mod_count=${#mod_ids[@]}
-        local total_items=$((mod_count + 5))
-        
+        mod_count=${#mod_ids[@]}
+        total_items=$((mod_count + ${#MOD_MANAGER_ACTIONS[@]}))
         [[ $selected -lt 0 ]] && selected=0
         [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
-        
-        # Draw screen
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        
-        # Header bar
-        move_to 1 1
-        local header_title="Mod Manager - $SELECTED_NAME"
-        if [[ $dirty -eq 1 ]]; then
-            header_title="Mod Manager - $SELECTED_NAME ${YELLOW}[ SYNC NEEDED ]${RESET}${BG_RED}${WHITE}${BOLD}"
-        fi
-        printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
-        
-        # Table header
-        local table_start=3
-        local col_status=2
-        local col_type=8
-        local col_name=15
-        local col_id=$((TERM_COLS - 45))
-        local col_wsver=$((TERM_COLS - 32))
-        local col_synced=$((TERM_COLS - 15))
-        
-        move_to $table_start 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        move_to $((table_start + 1)) $col_status
-        printf "%s%sSTATUS%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_type
-        printf "%s%sTYPE%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_name
-        printf "%s%sMOD NAME%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_id
-        printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_wsver
-        printf "%s%sWORKSHOP DATE%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_synced
-        printf "%s%sSYNCED%s" "$DIM" "$WHITE" "$RESET"
-        
-        move_to $((table_start + 2)) 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        # Mod rows
-        local row=$((table_start + 3))
-        if [[ $mod_count -eq 0 ]]; then
-            move_to $row 1
-            printf "%s  (No mods - press A to add)%s" "$DIM" "$RESET"
-            row=$((row+1))
-        fi
-        for i in "${!mod_ids[@]}"; do
-            local mid="${mod_ids[$i]}"
-            local mname="${mod_names[$i]}"
-            local max_name_len=$((col_id - col_name - 2))
-            [[ ${#mname} -gt $max_name_len ]] && mname="${mname:0:$((max_name_len-3))}..."
-            
-            local mtype="${mod_types[$i]}"
-            local status_icon type_short
-            # Status icon
-            case "$mtype" in
-                both|client|server) status_icon="✓" ;;
-                disabled) status_icon="✗" ;;
-            esac
-            
-            # Type Label formatting
-            case "$mtype" in
-                both)     type_short="C+S" ;;
-                client)   type_short="Cli" ;;
-                server)   type_short="Srv" ;;
-                disabled) type_short="Off" ;;
-            esac
-            
-            if [[ -n "${mod_warnings[$i]:-}" ]]; then
-                status_icon="!"
-            fi
-            
-            
-            # Get pre-calculated version info
-            local ws_ver="${mod_ws_dates[$i]:--}"
-            local sync_ver="${mod_sync_dates[$i]:--}"
-            
-            # Highlight Logic
-            local ws_color="$WHITE"
-            local sync_color="$DIM"
-            [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && ws_color="$YELLOW" && sync_color="$YELLOW"
-            
-            # Check for specific reasons
-            local reason="${mod_update_reasons[$i]}"
-            if [[ "$reason" == *"D"* ]]; then sync_color="$RED"; sync_ver="MISSING LINK"; fi
-            if [[ "$reason" == *"M"* ]]; then sync_color="$RED"; sync_ver="MISSING FILE"; fi
-            
-            move_to $row 1
-            if [[ $i -eq $selected ]]; then
-                printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
-                move_to $row $col_status
-                printf "▶ %s" "$status_icon"
-                move_to $row $col_type
-                
-                # Selected row color logic for Types
-                case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]" "$MOD_CL" "$WHITE$BOLD" "$MOD_SV" "$WHITE$BOLD" ;;
-                    client)   printf "[%s%s%s]" "$MOD_CL" "$type_short" "$WHITE$BOLD" ;;
-                    server)   printf "[%s%s%s]" "$MOD_SV" "$type_short" "$WHITE$BOLD" ;;
-                    disabled) printf "[%s]" "$type_short" ;;
-                esac
-                move_to $row $col_name
-                printf "%s" "$mname"
-                move_to $row $col_id
-                printf "%s" "$mid"
-                move_to $row $col_wsver
-                printf "%-14s" "${ws_ver:0:14}"
-                move_to $row $col_synced
-                printf "%-14s" "${sync_ver:0:14}"
-                printf "%s" "$RESET"
-            else
-                local row_color="$RESET"
-                local id_color="$DIM"
-                
-                [[ ${mod_update_flags[$i]:-0} -eq 1 ]] && row_color="$YELLOW"
-                [[ -n "${mod_warnings[$i]:-}" ]] && row_color="$YELLOW"
-                # Non-synced mods (missing files) should be yellow
-                [[ "$sync_ver" == *"MISSING"* ]] && row_color="$YELLOW"
-                # Mods with pending type changes should be yellow
-                [[ "$pending_sync_mods" == *"$mid"* ]] && row_color="$YELLOW"
-                
-                if [[ "$mtype" == "disabled" ]]; then
-                    row_color="$DARKGRAY"
-                    ws_color="$DARKGRAY"
-                    sync_color="$DARKGRAY"
-                    id_color="$DARKGRAY"
-                fi
-                
-                printf "%s" "$row_color"
-                move_to $row $col_status
-                if [[ "$mtype" == "disabled" ]]; then
-                    printf "  %s%s%s" "$RED" "$status_icon" "$row_color"
-                elif [[ -n "${mod_warnings[$i]:-}" ]]; then
-                    printf "  %s%s%s" "$YELLOW$BOLD" "$status_icon" "$row_color"
-                else
-                    printf "  %s%s%s" "$GREEN" "$status_icon" "$row_color"
-                fi
-                move_to $row $col_type
-                case "$mtype" in
-                    both)     printf "[%sC%s+%sS%s]%s" "$MOD_CL" "$row_color" "$MOD_SV" "$row_color" "$RESET" ;;
-                    client)   printf "[%s%s%s]%s" "$MOD_CL" "$type_short" "$row_color" "$RESET" ;;
-                    server)   printf "[%s%s%s]%s" "$MOD_SV" "$type_short" "$row_color" "$RESET" ;;
-                    disabled) printf "[%s%s%s]" "$RED" "$type_short" "$row_color" ;;
-                esac
-                move_to $row $col_name
-                printf "%s%s" "$row_color" "$mname"
-                move_to $row $col_id
-                printf "%s%s%s" "$id_color" "$mid" "$row_color"
-                move_to $row $col_wsver
-                
-                # Truncate dates to fit
-                local d_ws="${ws_ver:0:14}"
-                local d_sync="${sync_ver:0:14}"
-                printf "%s%-14s%s" "$ws_color" "$d_ws" "$row_color"
-                move_to $row $col_synced
-                printf "%s%-14s%s" "$sync_color" "$d_sync" "$row_color"
-                printf "%s" "$RESET"
-            fi
-            row=$((row+1))
-        done
-        
-        # Separator
-        move_to $row 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        row=$((row + 1))
-        
-        # Action bar
-        local action_row=$row
-        local sys_time
-        sys_time=$(date +"%H:%M:%S")
-        local actions=("[A] Add" "[R] Remove" "[S] Sync" "[F] FixMods" "[I] Info" "[Q] Back")
-        
-        move_to $action_row $((TERM_COLS - 20))
-        printf "%s%s[ %s ]%s" "$DIM" "$WHITE" "$sys_time" "$RESET"
-        
-        move_to $action_row 2
-        for a in "${!actions[@]}"; do
-            local action_idx=$((mod_count + a))
-            local action_label="${actions[$a]}"
-            
-            # Highlight Sync button in yellow when dirty
-            if [[ "$action_label" == "[S] Sync" && $dirty -eq 1 ]]; then
-                action_label="[!S] Sync"
-            fi
-            
-            if [[ $selected -eq $action_idx ]]; then
-                if [[ "$action_label" == "[!S] Sync" ]]; then
-                    printf "%s%s▶ %s %s" "$BG_YELLOW" "$BLACK$BOLD" "$action_label" "$RESET"
-                else
-                    printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
-                fi
-            else
-                if [[ "$action_label" == "[!S] Sync" ]]; then
-                    printf "  %s%s%s " "$YELLOW$BOLD" "$action_label" "$RESET"
-                else
-                    printf "  %s " "$action_label"
-                fi
-            fi
-            printf " "
-        done
-        
-        # Footer warning
-        move_to $((TERM_ROWS-1)) 1
-        if [[ $selected -lt $mod_count ]]; then
-            local sel_mid="${mod_ids[$selected]}"
-            # Warnings were computed once during the rebuild; no python per keypress
-            local sel_warn="${mod_warnings[$selected]:-}"
-            if [[ -n "$sel_warn" ]]; then
-                printf "%s%s WARN: %s %s%s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "${ESC}[K" "$RESET"
-            else
-                printf "%s" "${ESC}[2K"
-            fi
-        else
-            printf "%s" "${ESC}[2K"
-        fi
 
-        move_to $TERM_ROWS 1
-        move_to $TERM_ROWS 1
-        printf "%s%s [↑↓] Select  [U/D] Move  [Enter] Toggle  [A] Add  [R] Remove  [S] Sync  [F] Fix  [Space] Info  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
-        
-        # Read input (EOF, e.g. closed stdin, leaves the menu instead of looping)
+        _mod_manager_draw
+
+        # EOF (closed stdin) leaves the menu instead of looping
         IFS= read -rsn1 key || return 0
-        
         case "$key" in
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
-                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
+                    '[A') if [[ $selected -gt 0 ]]; then selected=$((selected - 1)); fi ;;
+                    '[B') if [[ $selected -lt $((total_items - 1)) ]]; then selected=$((selected + 1)); fi ;;
                 esac
                 ;;
-            'u'|'U'|'+')
-                if [[ $selected -gt 0 && $selected -lt $mod_count ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    move_mod_up "$mid" "$mods_file" "$servermods_file"
-                    selected=$((selected - 1))
-                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                fi
-                continue
+            u|U|+)   _mod_manager_move up ;;
+            d|D|-)   _mod_manager_move down ;;
+            a|A)     _mod_manager_add_mod ;;
+            r|R)     _mod_manager_remove ;;
+            i|I|' ') _mod_manager_info ;;
+            s|S)     _mod_manager_sync ;;
+            f|F)     _mod_manager_fix_mods ;;
+            q|Q)     if _mod_manager_can_leave; then return 0; fi ;;
+            '')      # Enter; the last button is [Q] Back
+                if [[ $selected -eq $((total_items - 1)) ]]; then return 0; fi
+                _mod_manager_enter
                 ;;
-            'd'|'D'|'-')
-                if [[ $selected -lt $((mod_count - 1)) ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    move_mod_down "$mid" "$mods_file" "$servermods_file"
-                    selected=$((selected + 1))
-                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                fi
-                continue
-                ;;
-
-            'a'|'A')
-                local new_id
-                new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
-                if [[ "$new_id" =~ ^[0-9]+$ ]]; then
-                    if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
-                        # Show details first
-                        _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                        if [[ $? -eq 10 ]]; then
-                            add_mod_to_file "$new_id" "$mods_file"
-                            show_message "Added mod $new_id as [Client]" "Mod Added"
-                            dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                        fi
-                    else
-                        show_message "Mod already in list" "Already Exists"
-                    fi
-                fi
-                ;;
-            'r'|'R')
-                if [[ $selected -lt $mod_count ]]; then
-                    if _mod_manager_remove_mod "${mod_ids[$selected]}"; then
-                        dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                        [[ $selected -ge $((mod_count - 1)) ]] && selected=$((selected - 1))
-                        [[ $selected -lt 0 ]] && selected=0
-                    fi
-                fi
-                ;;
-            '')  # Enter
-                if [[ $selected -lt $mod_count ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    local mtype="${mod_types[$selected]}"
-                    case "$mtype" in
-                        disabled) add_mod_to_file "$mid" "$mods_file" ;;
-                        client) remove_mod_from_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
-                        server) add_mod_to_file "$mid" "$mods_file"; add_mod_to_file "$mid" "$servermods_file" ;;
-                        both) remove_mod_from_file "$mid" "$mods_file"; remove_mod_from_file "$mid" "$servermods_file" ;;
-                    esac
-                    dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                    append_line "$pending_mods_file" "$mid"
-                    pending_sync_mods="$pending_sync_mods $mid"
-                elif [[ $selected -eq $mod_count ]]; then
-                    # Add
-                    local new_id
-                    new_id=$(read_input "Enter Steam Workshop ID:" "" "Add Workshop Mod")
-                    if [[ "$new_id" =~ ^[0-9]+$ ]]; then
-                        if ! is_mod_in_file "$new_id" "$mods_file" && ! is_mod_in_file "$new_id" "$servermods_file"; then
-                            # Show details first
-                            _view_mod_details "$new_id" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                            if [[ $? -eq 10 ]]; then
-                                add_mod_to_file "$new_id" "$mods_file"
-                                show_message "Added mod $new_id as [Client]" "Mod Added"
-                                dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                            fi
-                        else
-                            show_message "Mod already in list" "Already Exists"
-                        fi
-                    fi
-                elif [[ $selected -eq $((mod_count + 1)) ]]; then
-                    # Remove: while the cursor sits on the action bar no mod is
-                    # highlighted, so let the user pick one from a list.
-                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Remove which mod?"; then
-                        if _mod_manager_remove_mod "${mod_ids[$MENU_RESULT]}"; then
-                            dirty=1; needs_rebuild=1; touch "$needs_sync_file"
-                            # The list shrinks by one, keep the cursor on this button
-                            selected=$((selected - 1))
-                        fi
-                    fi
-                elif [[ $selected -eq $((mod_count + 2)) ]]; then
-                    # Sync
-                    local status
-                    status="$(get_container_status "$SELECTED_CONTAINER")"
-                    if [[ "$status" != "RUNNING" ]]; then
-                        show_message "Container must be running to sync"
-                    else
-                        run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
-                        dirty=0; rm -f "$needs_sync_file" "$pending_mods_file"; pending_sync_mods=""
-                        needs_rebuild=1
-                        # Refresh update cache after sync with progress bar
-                        show_progress_start "Sync" "Refreshing update cache..."
-                        show_progress_update "Checking mod versions..." 50
-                        check_all_mod_updates "$SELECTED_DIR" "${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
-                        show_progress_end "Sync complete!" 300
-                    fi
-                elif [[ $selected -eq $((mod_count + 3)) ]]; then
-                    # FixMods
-                    local status
-                    status="$(get_container_status "$SELECTED_CONTAINER")"
-                    if [[ "$status" != "RUNNING" ]]; then
-                        show_message "Container must be running to fix mods"
-                    else
-                        run_with_output "Fixing Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
-                    fi
-                elif [[ $selected -eq $((mod_count + 4)) ]]; then
-                    # Info: same as Remove, pick the mod from a list
-                    if [[ $mod_count -gt 0 ]] && _mod_manager_pick_mod "Show info for which mod?"; then
-                        _view_mod_details "${mod_ids[$MENU_RESULT]}" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                        needs_rebuild=1
-                    fi
-                elif [[ $selected -eq $((mod_count + 5)) ]]; then
-                    return 0
-                fi
-                ;;
-            'i'|'I'|' ')
-                if [[ $selected -lt $mod_count ]]; then
-                    local mid="${mod_ids[$selected]}"
-                    _view_mod_details "$mid" "$SELECTED_DIR" "$mods_file" "${SCRIPT_DIR}/data/workshop_rules.json"
-                    needs_rebuild=1
-                fi
-                ;;
-            'q'|'Q')
-                if [[ $dirty -eq 1 ]]; then
-                    if confirm "Sync is pending! Leave without syncing?" "n"; then
-                        return 0
-                    fi
-                else
-                    return 0
-                fi
-                ;;
-
-            's'|'S')
-                local status
-                status="$(get_container_status "$SELECTED_CONTAINER")"
-                if [[ "$status" != "RUNNING" ]]; then
-                    show_message "Container must be running to sync"
-                else
-                    run_with_output "Syncing All Mods" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh sync-mods; /dayz/run.sh sync-servermods"
-                    dirty=0; rm -f "$needs_sync_file" "$pending_mods_file"; pending_sync_mods=""
-                    needs_rebuild=1
-                    
-                    # Progress bar for post-sync operations
-                    show_progress_start "Sync" "Refreshing update cache..."
-                    local workshop_path="${SELECTED_DIR}/data/serverfiles/steamapps/workshop/content/221100"
-                    if [[ ! -d "$workshop_path" ]]; then workshop_path="${SELECTED_DIR}/serverfiles/steamapps/workshop/content/221100"; fi
-                    
-                    show_progress_update "Checking mod versions..." 30
-                    check_all_mod_updates "$SELECTED_DIR" "$workshop_path" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
-                    
-                    # Offer to activate the CE files the synced mods ship
-                    show_progress_update "Scanning CE files..." 60
-                    local -a ce_mod_ids ce_mod_names ce_file_paths ce_filenames ce_types
-                    scan_new_ce_files "$SELECTED_DIR" "$workshop_path"
-                    show_progress_end "Sync complete!" 300
-                    ce_link_files_dialog "$SELECTED_DIR" "Link CE Files - $SELECTED_NAME"
-                fi
-                ;;
-            'f'|'F')
-                local status
-                status="$(get_container_status "$SELECTED_CONTAINER")"
-                if [[ "$status" != "RUNNING" ]]; then
-                    show_message "Container must be running to fix mods"
-                else
-                    run_with_output "Fixing Mod Casing & Keys" $DOCKER exec "$SELECTED_CONTAINER" bash -c "/dayz/run.sh fix-mods && /dayz/run.sh fix-servermods"
-                fi
         esac
     done
 }
