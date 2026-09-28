@@ -109,21 +109,6 @@ is_admin_tool_installed() {
     return 1
 }
 
-# Get list of installed admin tools
-# Usage: tools=$(get_installed_admin_tools "$inst_dir")
-# Returns: pipe-delimited list "mod_id|name|config_path|format"
-get_installed_admin_tools() {
-    local inst_dir="$1"
-    local result=""
-    
-    for pattern in "${ADMIN_TOOL_PATTERNS[@]}"; do
-        IFS='|' read -r mod_id name config_path format <<< "$pattern"
-        if is_admin_tool_installed "$mod_id" "$inst_dir"; then
-            echo "$pattern"
-        fi
-    done
-}
-
 # =============================================================================
 # VPPAdminTools Functions
 # =============================================================================

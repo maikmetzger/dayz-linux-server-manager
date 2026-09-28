@@ -118,11 +118,6 @@ read_ids() {
   ' "${file}" | awk '/^[0-9]+$/' | awk '!seen[$0]++'
 }
 
-list_has_id_enabled() {
-  local file="$1" id="$2"
-  grep -Eq "^[[:space:]]*${id}[[:space:]]*$" "${file}"
-}
-
 list_add_id() {
   local file="$1" id="$2"
   [[ "${id}" =~ ^[0-9]+$ ]] || die "Invalid workshop id: ${id}"

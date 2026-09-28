@@ -13,13 +13,6 @@
 # Config Registry
 # =============================================================================
 # Format: "parser|relative_path|icon|label"
-declare -A CONFIG_REGISTRY=(
-    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
-    ["BEServer"]="beserver|data/config/BEServer_x64.cfg|🔐|RCON Settings"
-    ["types"]="xml||📦|Loot Economy"
-    ["modConfigs"]="mod||📁|Mod Configs"
-    ["adminTools"]="admin||🔐|Admin Tools"
-)
 
 # Helper to find types.xml within mpmissions
 find_types_xml() {
@@ -501,99 +494,6 @@ types_selection_menu() {
 # =============================================================================
 # Config Editor Main Menu
 # =============================================================================
-
-config_editor_menu() {
-    local container="$SELECTED_CONTAINER"
-    local inst_dir="$SELECTED_DIR"
-    
-    while true; do
-        draw_header "Config Editor"
-        
-        local -a items=()
-        local -a config_ids=()
-        
-        for id in "${!CONFIG_REGISTRY[@]}"; do
-            IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$id]}"
-            local full_path="${inst_dir}/${rel_path}"
-            local display_name="${icon}|${label}"
-            
-            # Check if file exists (via host path since it's mounted)
-            local exists=0
-            if [[ "$fmt" == "mod" ]]; then
-                exists=1
-            elif [[ -n "$rel_path" ]]; then
-                [[ -f "$full_path" ]] && exists=1
-            else
-                # Dynamic path (e.g. types.xml)
-                local dyn_path=$(find_types_xml "$inst_dir")
-                [[ -n "$dyn_path" && -f "$dyn_path" ]] && exists=1
-            fi
-
-            if [[ $exists -eq 1 ]]; then
-                items+=("${display_name}")
-            else
-                items+=("${icon}|${label} (not found)")
-            fi
-            config_ids+=("$id")
-        done
-        
-        items+=("--------------------")
-        items+=("←|Back")
-        
-        if ! run_menu items "Select Config File"; then
-            return
-        fi
-        
-        # Check if Back was selected (by content, not index)
-        local selected_item="${items[$MENU_RESULT]}"
-        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
-            return
-        fi
-        
-        local selected_id="${config_ids[$MENU_RESULT]}"
-        IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$selected_id]}"
-        
-        local full_path=""
-        if [[ -n "$rel_path" ]]; then
-            full_path="${inst_dir}/${rel_path}"
-        else
-            # Dynamic lookup for types.xml
-            full_path=$(find_types_xml "$inst_dir")
-        fi
-        
-        if [[ -z "${full_path}" || ! -f "${full_path}" ]]; then
-            show_message "File not found: ${selected_id}.xml" "Error"
-            continue
-        fi
-        
-        # Route to appropriate editor based on format/ID
-        case "$fmt" in
-            "xml")
-                if [[ "$selected_id" == "types" ]]; then
-                    types_selection_menu "$inst_dir" "$container"
-                else
-                    config_xml_editor "$inst_dir" "$full_path" "$selected_id" "$container"
-                fi
-                ;;
-            "mod")
-                # Mod configs browser - uses profile directory
-                local profile_dir="${inst_dir}/data/profile"
-                mod_config_browser "$profile_dir"
-                ;;
-            "admin")
-                # Admin tools menu - manage Steam64 IDs and passwords
-                source "${SCRIPT_DIR}/lib/admin_config.sh"
-                admin_tools_menu "$inst_dir"
-                ;;
-            *)
-                case "$selected_id" in
-                    "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
-                    *) config_flat_editor "$container" "$full_path" "$selected_id" ;;
-                esac
-                ;;
-        esac
-    done
-}
 
 # =============================================================================
 # Category-based Editor (for serverDZ.cfg)

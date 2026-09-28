@@ -14,34 +14,11 @@
 # =============================================================================
 
 # Cache settings
-VERSION_CACHE_TTL_SECONDS=120  # 2 minutes minimum between API checks
 
 # Debug trace of workshop fetches. Not under /tmp: a predictable path there
 # could be pre-created by another local user.
 WORKSHOP_DEBUG_LOG="${WORKSHOP_DEBUG_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/dayz-docker-hub/workshop_debug.log}"
 mkdir -p "$(dirname "$WORKSHOP_DEBUG_LOG")" 2>/dev/null || true
-
-# store_mod_version - Save the timestamp of a mod version after sync
-#
-# Usage: store_mod_version "$mod_id" "$time_updated" "$workshop_dir"
-#
-# Args:
-#   mod_id       - Steam Workshop ID
-#   time_updated - Unix timestamp from Steam API (time_updated field)
-#   workshop_dir - Base workshop directory (e.g., /dayz/serverfiles/steamapps/workshop/content/221100)
-#
-# Creates: ${workshop_dir}/${mod_id}/.installed_version
-store_mod_version() {
-    local mod_id="$1"
-    local time_updated="$2"
-    local workshop_dir="$3"
-    
-    local version_file="${workshop_dir}/${mod_id}/.installed_version"
-    
-    if [[ -d "${workshop_dir}/${mod_id}" ]]; then
-        echo "$time_updated" > "$version_file"
-    fi
-}
 
 # get_mod_local_version - Retrieve the stored version timestamp for a mod
 #
@@ -92,60 +69,6 @@ format_timestamp_as_date() {
     fi
 }
 
-# get_dayz_server_build - Get the installed DayZ server build ID
-#
-# Usage: build=$(get_dayz_server_build "$serverfiles_dir")
-#
-# Returns: Build ID string or "0" if not found
-get_dayz_server_build() {
-    local serverfiles_dir="$1"
-    local manifest="${serverfiles_dir}/steamapps/appmanifest_223350.acf"
-    
-    if [[ -f "$manifest" ]]; then
-        grep -oP 'buildid"\s+"\K[0-9]+' "$manifest" 2>/dev/null || echo "0"
-    else
-        echo "0"
-    fi
-}
-
-# check_mod_has_update - Compare local version to remote version
-#
-# Usage: has_update=$(check_mod_has_update "$local_timestamp" "$remote_timestamp")
-#
-# Returns: "true" if update available, "false" otherwise
-check_mod_has_update() {
-    local local_timestamp="$1"
-    local remote_timestamp="$2"
-    
-    if [[ "$remote_timestamp" -gt "$local_timestamp" ]]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
-
-# format_version_display - Format version for UI display
-#
-# Usage: display=$(format_version_display "$local_ts" "$remote_ts" "$has_update")
-#
-# Returns: "Jan 01" if up to date, "Dec 15 → Jan 01" if update available
-format_version_display() {
-    local local_timestamp="$1"
-    local remote_timestamp="$2"
-    local has_update="$3"
-    
-    local local_date
-    local_date=$(format_timestamp_as_date "$local_timestamp")
-    
-    if [[ "$has_update" == "true" ]]; then
-        local remote_date
-        remote_date=$(format_timestamp_as_date "$remote_timestamp")
-        echo "${local_date} → ${remote_date}"
-    else
-        echo "$local_date"
-    fi
-}
-
 # =============================================================================
 # Update Check Functions (Phase 1 - Caching Infrastructure)
 # =============================================================================
@@ -156,32 +79,6 @@ format_version_display() {
 get_update_cache_file() {
     local instance_dir="$1"
     echo "${instance_dir}/data/state/update_cache.json"
-}
-
-# is_update_cache_stale - Check if cache needs refresh
-#
-# Usage: if is_update_cache_stale "$cache_file"; then refresh; fi
-#
-# Returns: 0 (true) if stale, 1 (false) if fresh
-is_update_cache_stale() {
-    local cache_file="$1"
-    
-    if [[ ! -f "$cache_file" ]]; then
-        return 0  # No cache = stale
-    fi
-    
-    local last_checked
-    last_checked=$(python3 -c "import json; print(json.load(open('$cache_file')).get('last_checked', 0))" 2>/dev/null || echo "0")
-    
-    local now
-    now=$(date +%s)
-    local age=$((now - last_checked))
-    
-    if [[ $age -gt $VERSION_CACHE_TTL_SECONDS ]]; then
-        return 0  # Stale
-    else
-        return 1  # Fresh
-    fi
 }
 
 # check_all_mod_updates - Check for updates on all mods in an instance
@@ -281,72 +178,6 @@ get_update_summary() {
         [[ "$update_count" -gt 1 ]] && s="s"
         echo "[NEED SYNC] (${update_count} mod update${s})"
     fi
-}
-
-# get_mod_update_status - Check if a specific mod has update available
-#
-# Usage: if get_mod_update_status "$instance_dir" "$mod_id"; then echo "update!"; fi
-#
-# Returns: 0 if update available, 1 if not
-get_mod_update_status() {
-    local instance_dir="$1"
-    local mod_id="$2"
-    local cache_file
-    cache_file=$(get_update_cache_file "$instance_dir")
-    
-    if [[ ! -f "$cache_file" ]]; then
-        return 1
-    fi
-    
-    local has_update
-    has_update=$(python3 -c "
-import json
-try:
-    data = json.load(open('$cache_file'))
-    mod = data.get('mods', {}).get('$mod_id', {})
-    print('true' if mod.get('has_update', False) else 'false')
-except: print('false')
-" 2>/dev/null)
-    
-    [[ "$has_update" == "true" ]]
-}
-
-# get_mod_version_info - Get version display info for a specific mod
-#
-# Usage: version_display=$(get_mod_version_info "$instance_dir" "$mod_id")
-#
-# Returns: "Jan 01" or "Dec 15 → Jan 01" if update available
-get_mod_version_info() {
-    local instance_dir="$1"
-    local mod_id="$2"
-    local cache_file
-    cache_file=$(get_update_cache_file "$instance_dir")
-    
-    if [[ ! -f "$cache_file" ]]; then
-        echo "-"
-        return
-    fi
-    
-    python3 -c "
-import json
-import datetime
-try:
-    data = json.load(open('$cache_file'))
-    mod = data.get('mods', {}).get('$mod_id', {})
-    installed = mod.get('installed', 0)
-    latest = mod.get('latest', 0)
-    has_update = mod.get('has_update', False)
-    
-    def fmt(ts):
-        if ts == 0: return '-'
-        return datetime.datetime.fromtimestamp(ts).strftime('%b %d')
-    
-    if has_update:
-        print(f'{fmt(installed)} → {fmt(latest)}')
-    else:
-        print(fmt(installed) if installed > 0 else fmt(latest))
-except: print('-')
-" 2>/dev/null || echo "-"
 }
 
 # =============================================================================

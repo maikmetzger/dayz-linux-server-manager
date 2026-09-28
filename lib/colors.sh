@@ -69,8 +69,3 @@ CLEAR_LINE="${ESC}[2K"
 # Move cursor to row, column (1-indexed)
 move_to() { printf "${ESC}[%d;%dH" "$1" "$2"; }
 
-# Move cursor up N lines
-move_up() { printf "${ESC}[%dA" "${1:-1}"; }
-
-# Move cursor down N lines
-move_down() { printf "${ESC}[%dB" "${1:-1}"; }

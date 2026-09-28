@@ -207,19 +207,6 @@ rcon_action() {
 # Safe Container Command Execution
 # =============================================================================
 
-# Safely execute a command in container with properly escaped arguments
-# SECURITY: Uses base64 encoding to prevent injection
-# Usage: safe_container_exec "$container" "command" "arg1" "arg2"
-safe_container_exec() {
-    local container="$1"
-    shift
-    local cmd=("$@")
-
-    # For simple commands, just use docker exec with proper quoting
-    local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
-    "${dcmd[@]}" exec "$container" "${cmd[@]}" 2>/dev/null
-}
-
 # Safely append a line to a file in container
 # SECURITY: Uses printf with proper quoting to prevent injection
 # Usage: safe_container_append_line "$container" "/path/to/file" "line content"

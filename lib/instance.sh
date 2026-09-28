@@ -37,21 +37,6 @@ discover_instances_under() {
     find "${root}" -maxdepth 3 -type f -name ".dayz-instance" -print 2>/dev/null || true
 }
 
-# Find marker directory by instance name
-# Usage: dir=$(find_marker_dir_by_instance_name "/home/user/servers" "server1")
-find_marker_dir_by_instance_name() {
-    local scan_root="$1" inst_name="$2"
-    local m
-    while IFS= read -r m; do
-        [[ -f "${m}" ]] || continue
-        if [[ "$(marker_get "${m}" "INSTANCE_NAME")" == "${inst_name}" ]]; then
-            dirname "${m}"
-            return 0
-        fi
-    done < <(discover_instances_under "${scan_root}")
-    return 1
-}
-
 # Scan for instances and populate INSTANCE_* arrays
 # Uses SEARCH_ROOT or defaults to ~/servers
 scan_instances() {
