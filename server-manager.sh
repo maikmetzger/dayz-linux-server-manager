@@ -602,8 +602,8 @@ END_PYTHON
         move_to $TERM_ROWS 1
         printf "%s%s [↑↓] Select  [U/D] Move  [Enter] Toggle  [A] Add  [R] Remove  [S] Sync  [F] Fix  [Space] Info  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
         
-        # Read input
-        IFS= read -rsn1 key
+        # Read input (EOF, e.g. closed stdin, leaves the menu instead of looping)
+        IFS= read -rsn1 key || return 0
         
         case "$key" in
             $'\x1b')
@@ -768,143 +768,12 @@ END_PYTHON
                     show_progress_update "Checking mod versions..." 30
                     check_all_mod_updates "$SELECTED_DIR" "$workshop_path" "${SELECTED_DIR}/data/config/mods.txt" "${SELECTED_DIR}/data/config/servermods.txt" >/dev/null 2>&1 || true
                     
-                    # Scan for CE files (Phase 3-4)
+                    # Offer to activate the CE files the synced mods ship
                     show_progress_update "Scanning CE files..." 60
-                    local ce_result
-                    ce_result=$(scan_dayz_ce_files_python "$SELECTED_DIR" "$workshop_path" 2>/dev/null | tail -n 1)
-
-                    # Load ignore list
-                    local ignore_file
-                    ignore_file=$(get_ce_ignore_file "$SELECTED_DIR" 2>/dev/null || echo "")
-                    local ignored_list=""
-                    if [[ -f "$ignore_file" ]]; then
-                        ignored_list=$(python3 -c "
-import json
-try:
-    with open('$ignore_file', 'r') as f:
-        data = json.load(f)
-    for item in data.get('ignored', []):
-        print(item.lower())
-except: pass
-" 2>/dev/null)
-                    fi
-
-                    # Count new CE files (excluding ignored)
-                    local new_ce_count
-                    if [[ -z "$ce_result" ]]; then
-                         new_ce_count=0
-                    else
-                         # Count NEW or UNLINKED files that aren't ignored
-                         new_ce_count=$(echo "$ce_result" | IGNORED_LIST="$ignored_list" python3 -c "
-import json, sys, os
-ignored_raw = os.environ.get('IGNORED_LIST', '')
-ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
-try:
-    d = json.load(sys.stdin)
-    count = 0
-    for x in d:
-        if x.get('status') in ['new', 'unlinked']:
-            key = f\"{x['mod_id']}|{x['filename']}\".lower()
-            if key not in ignored:
-                count += 1
-    print(count)
-except: print(0)
-" 2>/dev/null || echo "0")
-                    fi
-                    
-                    # Complete progress bar
+                    local -a ce_mod_ids ce_mod_names ce_file_paths ce_filenames ce_types
+                    scan_new_ce_files "$SELECTED_DIR" "$workshop_path"
                     show_progress_end "Sync complete!" 300
-                    
-                    if [[ "$new_ce_count" -gt 0 ]]; then
-                        # Build arrays of new CE files for checklist (excluding ignored)
-                        local -a ce_mod_ids=()
-                        local -a ce_mod_names=()
-                        local -a ce_file_paths=()
-                        local -a ce_filenames=()
-                        local -a ce_types=()
-                        local -a ce_selected=()
-                        
-                        while IFS='|' read -r mid mname fpath fname cetype; do
-                            [[ -z "$mid" ]] && continue
-                            ce_mod_ids+=("$mid")
-                            ce_mod_names+=("$mname")
-                            ce_file_paths+=("$fpath")
-                            ce_filenames+=("$fname")
-                            ce_types+=("$cetype")
-                            ce_selected+=(1)  # Pre-selected by default
-                        done < <(echo "$ce_result" | IGNORED_LIST="$ignored_list" python3 -c "
-import json, sys, os
-ignored_raw = os.environ.get('IGNORED_LIST', '')
-ignored = set(x.strip().lower() for x in ignored_raw.strip().split('\n') if x.strip())
-try:
-    data = json.load(sys.stdin)
-    for x in data:
-        if x.get('status') in ['new', 'unlinked']:
-            mid = x['mod_id']
-            fname = x['filename']
-            key = f'{mid}|{fname}'.lower()
-            if key not in ignored:
-                mname = x.get('mod_name', mid)
-                fpath = x['file_path']
-                cetype = x['ce_type']
-                print(f'{mid}|{mname}|{fpath}|{fname}|{cetype}')
-except: pass
-" 2>/dev/null)
-                        
-                        local ce_count=${#ce_filenames[@]}
-                        if [[ $ce_count -gt 0 ]]; then
-                            local selection=0
-                            
-                            while true; do
-                                draw_header "Link CE Files - $SELECTED_NAME"
-                                
-                                # Build menu items with checkboxes (column-aligned)
-                                local -a items=()
-                                for ((i=0; i<ce_count; i++)); do
-                                    local check=" "
-                                    [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
-                                    # Format CE type for display
-                                    local type_label
-                                    case "${ce_types[$i]}" in
-                                        types)          type_label="[TYPES]" ;;
-                                        spawnabletypes) type_label="[SPAWNABLE]" ;;
-                                        events)         type_label="[EVENTS]" ;;
-                                        eventspawns)   type_label="[EVENTPOS]" ;;
-                                        *)              type_label="[OTHER]" ;;
-                                    esac
-                                    items+=("[$check] ${ce_mod_names[$i]} $type_label - ${ce_filenames[$i]}")
-                                done
-                                
-                                items+=("--------------------")
-                                items+=("✅|LINK SELECTED FILES")
-                                items+=("❌|Cancel / Skip All")
-                                
-                                if run_menu items "Toggle files with Enter, then Execute" $selection; then
-                                    selection=$MENU_RESULT
-                                    if [[ $selection -lt $ce_count ]]; then
-                                        # Toggle selection
-                                        ce_selected[$selection]=$((1 - ce_selected[$selection]))
-                                    elif [[ $selection -eq $((ce_count + 1)) ]]; then
-                                        # Execute linking
-                                        local link_count=0
-                                        for ((i=0; i<ce_count; i++)); do
-                                            if [[ ${ce_selected[$i]} -eq 1 ]]; then
-                                                register_modular_loot "$SELECTED_DIR" "${ce_file_paths[$i]}" "${ce_mod_ids[$i]}" 1 "${ce_types[$i]}"
-                                                link_count=$((link_count + 1))
-                                            fi
-                                        done
-                                        [[ $link_count -gt 0 ]] && show_message "Linked $link_count CE file(s)!" "Success"
-                                        break
-                                    elif [[ $selection -eq $((ce_count + 2)) ]]; then
-                                        # Cancel
-                                        break
-                                    fi
-                                else
-                                    break
-                                fi
-                            done
-                        fi
-                    fi
+                    ce_link_files_dialog "$SELECTED_DIR" "Link CE Files - $SELECTED_NAME"
                 fi
                 ;;
             'f'|'F')

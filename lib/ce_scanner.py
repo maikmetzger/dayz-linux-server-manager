@@ -9,13 +9,14 @@ CustomCE/ that belong to no enabled mod are reported as orphans.
 
 Usage:
   ce_scanner.py scan --workshop-dir DIR --mission-path DIR --instance-dir DIR
-                     [--mods-file FILE ...] [--format json|rows]
+                     [--mods-file FILE ...] [--ignore-file FILE] [--only-new]
+                     [--format json|rows]
   ce_scanner.py linked --mission-path DIR      files registered in cfgeconomycore.xml
   ce_scanner.py detect FILE                    CE type of one XML file (self test)
 
 Row format (--format rows, fields separated by 0x1F, see rowfmt.py):
 file_path, mod_id, mod_name, filename, ce_type, linked(0/1), linked_filename,
-modified(0/1).
+modified(0/1), ignored(0/1).
 """
 import argparse
 import hashlib
@@ -78,6 +79,18 @@ def get_mod_name(workshop_dir, mod_id):
     except OSError:
         return mod_id
     return match.group(1) if match else mod_id
+
+
+def read_ignore_list(path):
+    """Lower-cased 'mod_id|filename' keys from CustomCE/.ce_ignored.json."""
+    if not path:
+        return set()
+    try:
+        with open(path) as fp:
+            data = json.load(fp)
+    except (OSError, ValueError):
+        return set()
+    return {str(item).lower() for item in data.get('ignored', []) if item}
 
 
 def linked_files(mission_path):
@@ -186,12 +199,16 @@ def is_modified(entry):
 class ScanContext:
     """Everything a scan needs to know about the instance."""
 
-    def __init__(self, workshop_dir, mission_path, instance_dir, mod_files=()):
+    def __init__(self, workshop_dir, mission_path, instance_dir, mod_files=(), ignore_file=''):
         self.workshop_dir = workshop_dir
         self.mission_path = mission_path
         self.instance_dir = instance_dir
         self.mod_ids = read_mod_ids(mod_files)
         self.linked = {entry['name']: entry for entry in linked_files(mission_path)}
+        self.ignored = read_ignore_list(ignore_file)
+
+    def is_ignored(self, mod_id, filename):
+        return f'{mod_id}|{filename}'.lower() in self.ignored
 
 
 def classify(ctx, mod_id, filename, ce_type):
@@ -245,6 +262,7 @@ def scan_mods(ctx):
                 'status': status,
                 'linked_filename': linked_name,
                 'modified': modified,
+                'ignored': ctx.is_ignored(mod_id, filename),
             })
             seen.add(filename)
             if linked_name:
@@ -279,6 +297,7 @@ def scan_orphans(ctx, seen):
                     'status': 'unlinked',
                     'linked_filename': '',
                     'modified': False,
+                    'ignored': ctx.is_ignored(LOCAL_MOD_ID, filename),
                 })
     return results
 
@@ -286,6 +305,11 @@ def scan_orphans(ctx, seen):
 def scan(ctx):
     results, seen = scan_mods(ctx)
     return results + scan_orphans(ctx, seen)
+
+
+def only_new(results):
+    """Files that are neither linked/merged nor ignored (post-sync checklist)."""
+    return [r for r in results if r['status'] in ('new', 'unlinked') and not r['ignored']]
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +324,7 @@ def to_rows(results):
             item['file_path'], item['mod_id'], item['mod_name'], item['filename'],
             item['ce_type'], 1 if item['status'] == 'linked' else 0,
             item['linked_filename'], 1 if item['modified'] else 0,
+            1 if item['ignored'] else 0,
         )))
     return '\n'.join(rows)
 
@@ -314,6 +339,9 @@ def build_parser():
     p_scan.add_argument('--instance-dir', required=True)
     p_scan.add_argument('--mods-file', action='append', default=[],
                         help='mods.txt or servermods.txt (repeatable)')
+    p_scan.add_argument('--ignore-file', default='', help='CustomCE/.ce_ignored.json')
+    p_scan.add_argument('--only-new', action='store_true',
+                        help='only files that are not linked, merged or ignored')
     p_scan.add_argument('--format', choices=('json', 'rows'), default='json',
                         help='rows: one line per file for bash (0x1F separated)')
 
@@ -328,8 +356,11 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.command == 'scan':
-        ctx = ScanContext(args.workshop_dir, args.mission_path, args.instance_dir, args.mods_file)
+        ctx = ScanContext(args.workshop_dir, args.mission_path, args.instance_dir,
+                          args.mods_file, args.ignore_file)
         results = scan(ctx)
+        if args.only_new:
+            results = only_new(results)
         print(to_rows(results) if args.format == 'rows' else json.dumps(results))
     elif args.command == 'linked':
         print(json.dumps(linked_files(args.mission_path)))

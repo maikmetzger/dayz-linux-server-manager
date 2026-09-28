@@ -65,7 +65,12 @@ class ScannerFixture(unittest.TestCase):
         write(os.path.join(self.instance, 'data', 'state', 'ce_merge_tracking', 'cfgrandompresets.json'),
               json.dumps({'entries': {'111': {'names': ['foodMod']}}}))
 
-        self.ctx = ce_scanner.ScanContext(self.workshop, self.mission, self.instance, [self.mods_file])
+        # mod 111's eventgroups file is on the ignore list
+        self.ignore_file = os.path.join(self.mission, 'CustomCE', '.ce_ignored.json')
+        write(self.ignore_file, json.dumps({'ignored': ['111|MOD_EVENTGROUPS.XML']}))
+
+        self.ctx = ce_scanner.ScanContext(self.workshop, self.mission, self.instance,
+                                          [self.mods_file], self.ignore_file)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -144,11 +149,22 @@ class ScanTest(ScannerFixture):
         rows = ce_scanner.to_rows(ce_scanner.scan(self.ctx)).split('\n')
         self.assertTrue(rows)
         for row in rows:
-            self.assertEqual(len(row.split(sep)), 8, row)
+            self.assertEqual(len(row.split(sep)), 9, row)
         linked = [r for r in rows if r.split(sep)[3] == 'mod_types.xml'][0].split(sep)
-        self.assertEqual(linked[5:], ['1', '111_mod_types.xml', '1'])
+        self.assertEqual(linked[5:], ['1', '111_mod_types.xml', '1', '0'])
         local = [r for r in rows if r.split(sep)[3] == 'local_types.xml'][0].split(sep)
-        self.assertEqual(local[5:], ['0', '', '0'])
+        self.assertEqual(local[5:], ['0', '', '0', '0'])
+        groups = [r for r in rows if r.split(sep)[3] == 'mod_eventgroups.xml'][0].split(sep)
+        self.assertEqual(groups[5:], ['0', '', '0', '1'])
+
+    def test_ignore_list_and_only_new(self):
+        results = ce_scanner.scan(self.ctx)
+        self.assertTrue(self.by_name(results, 'mod_eventgroups.xml')['ignored'])
+        self.assertFalse(self.by_name(results, 'mod_types.xml')['ignored'])
+        new = {r['filename'] for r in ce_scanner.only_new(results)}
+        self.assertEqual(new, {'local_types.xml'})  # types linked, presets merged, groups ignored
+        self.assertEqual(ce_scanner.read_ignore_list(''), set())
+        self.assertEqual(ce_scanner.read_ignore_list(os.path.join(self.tmp.name, 'missing.json')), set())
 
     def test_detect_by_content_then_filename(self):
         self.assertEqual(ce_scanner.detect_ce_type(os.path.join(self.workshop, '111', 'ce', 'mod_types.xml')), 'types')
@@ -169,25 +185,27 @@ class CliTest(ScannerFixture):
     def test_scan_json_and_tsv(self):
         common = ['--workshop-dir', self.workshop, '--mission-path', self.mission,
                   '--instance-dir', self.instance, '--mods-file', self.mods_file,
-                  '--mods-file', '/missing/servermods.txt']
+                  '--mods-file', '/missing/servermods.txt', '--ignore-file', self.ignore_file]
         data = json.loads(self.run_cli('scan', *common))
         self.assertEqual({r['filename'] for r in data},
                          {'mod_types.xml', 'mod_randompresets.xml', 'mod_eventgroups.xml', 'local_types.xml'})
         rows = self.run_cli('scan', '--format', 'rows', *common)
         self.assertEqual(len(rows.strip().split('\n')), 4)
+        new = json.loads(self.run_cli('scan', '--only-new', *common))
+        self.assertEqual([r['filename'] for r in new], ['local_types.xml'])
 
     def test_bash_read_keeps_empty_fields_in_place(self):
         """Regression: with tab separated rows bash's read collapsed the empty
         linked_filename and the modified flag landed in the wrong variable."""
         rows = self.run_cli('scan', '--format', 'rows', '--workshop-dir', self.workshop,
                             '--mission-path', self.mission, '--instance-dir', self.instance,
-                            '--mods-file', self.mods_file)
-        script = ("while IFS=$'\\x1f' read -r sp mid mn fn ct st ln md; do "
-                  "printf '%s|%s|%s|%s\\n' \"$fn\" \"$st\" \"$ln\" \"$md\"; done")
+                            '--mods-file', self.mods_file, '--ignore-file', self.ignore_file)
+        script = ("while IFS=$'\\x1f' read -r sp mid mn fn ct st ln md ig; do "
+                  "printf '%s|%s|%s|%s|%s\\n' \"$fn\" \"$st\" \"$ln\" \"$md\" \"$ig\"; done")
         out = subprocess.run(['bash', '-c', script], input=rows, capture_output=True, text=True).stdout
-        self.assertIn('mod_types.xml|1|111_mod_types.xml|1', out)
-        self.assertIn('local_types.xml|0||0', out)
-        self.assertIn('mod_eventgroups.xml|0||0', out)
+        self.assertIn('mod_types.xml|1|111_mod_types.xml|1|0', out)
+        self.assertIn('local_types.xml|0||0|0', out)
+        self.assertIn('mod_eventgroups.xml|0||0|1', out)
 
     def test_linked_and_detect(self):
         data = json.loads(self.run_cli('linked', '--mission-path', self.mission))
