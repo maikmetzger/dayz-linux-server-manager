@@ -330,6 +330,17 @@ create_instance() {
     chmod +x "${inst_dir}/run.sh"
     sed -i 's/\r$//' "${inst_dir}/run.sh"
 
+    # Copy lib files for in-container ban expiry daemon
+    mkdir -p "${inst_dir}/lib"
+    local lib_files=("ban_manager.py" "ban_expiry_daemon.sh" "be_rcon.py" "player_manager.py")
+    for lib_file in "${lib_files[@]}"; do
+        if [[ -f "${SCRIPT_DIR}/lib/${lib_file}" ]]; then
+            cp -f "${SCRIPT_DIR}/lib/${lib_file}" "${inst_dir}/lib/${lib_file}"
+            chmod +x "${inst_dir}/lib/${lib_file}" 2>/dev/null || true
+        fi
+    done
+    step "Copied lib files for in-container ban expiry daemon"
+
     local admin_pw
     admin_pw="$(prompt_default "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
 
@@ -460,6 +471,7 @@ DZ_UPDATE_ON_START=${update_on_start}
       - ./data/state:/dayz/state
       - ./data/backups:/dayz/backups
       - ./run.sh:/dayz/run.sh:ro
+      - ./lib:/dayz/lib:ro
     command: [\"/dayz/run.sh\",\"foreground\"]
     healthcheck:
       test: [\"CMD-SHELL\",\"pgrep -f DayZServer >/dev/null || exit 1\"]
@@ -513,6 +525,7 @@ DZ_UPDATE_ON_START=${update_on_start}
       - ./data/state:/dayz/state
       - ./data/backups:/dayz/backups
       - ./run.sh:/dayz/run.sh:ro
+      - ./lib:/dayz/lib:ro
     command: [\"/dayz/run.sh\",\"foreground\"]
     healthcheck:
       test: [\"CMD-SHELL\",\"pgrep -f DayZServer >/dev/null || exit 1\"]
@@ -549,11 +562,21 @@ update_run_sh_only() {
     container_name="$(marker_get "${marker}" "CONTAINER_NAME")"
     [[ -n "${container_name}" ]] || die "Could not read CONTAINER_NAME from marker."
 
-    step "Step: Updating run.sh only"
+    step "Step: Updating run.sh and lib files"
     cp -f "${RUN_SH_SRC}" "${inst_dir}/run.sh"
     chmod +x "${inst_dir}/run.sh"
     sed -i 's/\r$//' "${inst_dir}/run.sh"
-    ok "Updated run.sh."
+
+    # Update lib files for in-container ban expiry daemon
+    mkdir -p "${inst_dir}/lib"
+    local lib_files=("ban_manager.py" "ban_expiry_daemon.sh" "be_rcon.py" "player_manager.py")
+    for lib_file in "${lib_files[@]}"; do
+        if [[ -f "${SCRIPT_DIR}/lib/${lib_file}" ]]; then
+            cp -f "${SCRIPT_DIR}/lib/${lib_file}" "${inst_dir}/lib/${lib_file}"
+            chmod +x "${inst_dir}/lib/${lib_file}" 2>/dev/null || true
+        fi
+    done
+    ok "Updated run.sh and lib files."
 
     if "${DOCKER_ARR[@]}" ps --format '{{.Names}}' | grep -qx "${container_name}"; then
         if prompt_yn "Container '${container_name}' is running. Restart it now?" "Y"; then
@@ -716,16 +739,8 @@ run_cli_mode() {
     info "Instance directory: ${inst_dir}"
     info "Container name: dayz-${name}"
     
-    # Setup ban expiry timer if setup script exists
-    local timer_setup="${SCRIPT_DIR}/lib/setup_ban_expiry_timer.sh"
-    if [[ -f "${timer_setup}" ]]; then
-        step "Step: Setting up ban expiry timer"
-        if bash "${timer_setup}" "${inst_dir}" 2>/dev/null; then
-            ok "Ban expiry timer enabled (checks every minute)"
-        else
-            warn "Could not setup ban expiry timer. Run manually: ${timer_setup} ${inst_dir}"
-        fi
-    fi
+    # Ban expiry daemon now runs inside the container (no host timer needed)
+    ok "Ban expiry daemon will run inside container (checks every minute)"
     
     info ""
     info "Manage with: ./server-manager.sh"

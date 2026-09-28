@@ -331,10 +331,13 @@ class BattlEyeRcon:
                 break
 
 if __name__ == "__main__":
+    import os
+
     parser = argparse.ArgumentParser(description='BattlEye RCON Client for DayZ')
     parser.add_argument('--host', required=True, help='Server IP')
     parser.add_argument('--port', required=True, type=int, help='RCON Port')
-    parser.add_argument('--password', required=True, help='RCON Password')
+    parser.add_argument('--password', help='RCON Password (prefer --password-env for security)')
+    parser.add_argument('--password-env', help='Environment variable containing RCON password (more secure)')
     parser.add_argument('--command', help='Single raw command to execute')
     
     # Action-based interface for TUI integration
@@ -353,8 +356,22 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='Enable debug output to stderr')
     
     args = parser.parse_args()
-    
-    client = BattlEyeRcon(args.host, args.port, args.password, debug=args.debug)
+
+    # Get password from environment variable or command line
+    # Environment variable is more secure (doesn't show in ps output)
+    password = None
+    if args.password_env:
+        password = os.environ.get(args.password_env)
+        if not password:
+            print(f'{{"success": false, "error": "Environment variable {args.password_env} not set"}}')
+            sys.exit(1)
+    elif args.password:
+        password = args.password
+    else:
+        print('{"success": false, "error": "Password required: use --password or --password-env"}')
+        sys.exit(1)
+
+    client = BattlEyeRcon(args.host, args.port, password, debug=args.debug)
     if client.connect():
         if args.action:
             # Auto-login before action commands using DayZ admin password
