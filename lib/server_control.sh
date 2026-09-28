@@ -8,6 +8,10 @@
 # - Performance monitoring
 # =============================================================================
 
+# Prevent double-sourcing
+[[ -n "${_DAYZ_SERVER_CONTROL_LOADED:-}" ]] && return 0
+_DAYZ_SERVER_CONTROL_LOADED=1
+
 # Ensure script directory is set
 [[ -z "${SCRIPT_DIR:-}" ]] && SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 

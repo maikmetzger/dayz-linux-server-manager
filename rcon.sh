@@ -33,6 +33,11 @@ get_rcon_details() {
     
     local be_cfg="${inst_dir}/data/config/BEServer_x64.cfg"
     [[ -f "${be_cfg}" ]] || return 1
+
+    # BEServer_x64.cfg may set its own port (RConPort <n>); it wins over DZ_PORT+3
+    local cfg_port
+    cfg_port=$(grep -E '^RConPort[[:space:]]+[0-9]+' "${be_cfg}" | awk '{print $2}' | tr -d '\r' | head -n 1 || true)
+    [[ "${cfg_port}" =~ ^[0-9]+$ ]] && rcon_port="${cfg_port}"
     
     local rcon_pass
     # Extract RConPassword from config using simple grep/awk, removing comments if any

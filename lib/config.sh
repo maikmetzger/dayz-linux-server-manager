@@ -363,9 +363,11 @@ config_parser_exec() {
     echo "$output"
 }
 
-# Parse JSON response from Python
-# Usage: result=$(config_parser_exec ...) && value=$(json_get "$result" "value")
-json_get() {
+# Parse JSON response from config_parser.py (grep based, top-level keys and
+# the values nested under "data"). Named cfg_* so it cannot collide with the
+# python json_get in lib/json_helpers.sh, which only knows top-level keys.
+# Usage: result=$(config_parser_exec ...) && value=$(cfg_json_get "$result" "value")
+cfg_json_get() {
     local json="$1"
     local key="$2"
     
@@ -385,12 +387,12 @@ json_get() {
     echo "$value"
 }
 
-json_get_status() {
+cfg_json_status() {
     local json="$1"
-    json_get "$json" "status"
+    cfg_json_get "$json" "status"
 }
 
-json_get_keys() {
+cfg_json_keys() {
     local json="$1"
     # Extract keys array: ["key1", "key2"] -> key1 key2
     # Use || true to prevent crash
@@ -678,13 +680,13 @@ config_flat_editor() {
     local result
     result=$(config_parser_exec "$container" list cfg "$container_path")
     
-    if [[ "$(json_get_status "$result")" != "ok" ]]; then
-        show_message "Failed to read config: $(json_get "$result" "message")" "Error"
+    if [[ "$(cfg_json_status "$result")" != "ok" ]]; then
+        show_message "Failed to read config: $(cfg_json_get "$result" "message")" "Error"
         return
     fi
     
     local keys_raw
-    keys_raw=$(json_get_keys "$result")
+    keys_raw=$(cfg_json_keys "$result")
     local keys_csv
     keys_csv=$(echo "$keys_raw" | tr '\n' ',' | sed 's/,$//')
     
@@ -726,8 +728,8 @@ config_table_editor() {
         local result
         result=$(config_parser_exec "$container" getall "$parser_format" "$container_path")
         
-        if [[ "$(json_get_status "$result")" != "ok" ]]; then
-            show_message "Failed to read config: $(json_get "$result" "message")" "Error"
+        if [[ "$(cfg_json_status "$result")" != "ok" ]]; then
+            show_message "Failed to read config: $(cfg_json_get "$result" "message")" "Error"
             return
         fi
         
@@ -735,7 +737,7 @@ config_table_editor() {
         local -a values=()
         for key in "${keys[@]}"; do
             local val
-            val=$(json_get "$result" "$key")
+            val=$(cfg_json_get "$result" "$key")
             values+=("$val")
         done
         
@@ -944,9 +946,9 @@ config_table_editor() {
             if [[ "$new_val" != "$current_val" ]]; then
                 local set_result
                 set_result=$(config_parser_exec "$container" set "$parser_format" "$container_path" "$selected_key" "$new_val")
-                if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
+                if [[ "$(cfg_json_status "$set_result")" != "ok" ]]; then
                     local msg
-                    msg=$(json_get "$set_result" "message")
+                    msg=$(cfg_json_get "$set_result" "message")
                     [[ -z "$msg" ]] && msg="Raw: $set_result"
                     show_message "Failed to save: $msg" "Error"
                 fi

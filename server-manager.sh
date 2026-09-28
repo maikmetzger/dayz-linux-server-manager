@@ -13,7 +13,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # =============================================================================
 # Load Libraries
 # =============================================================================
-for lib in colors tui menu dialogs utils docker instance mods config mod_config types workshop; do
+for lib in colors tui menu dialogs utils docker instance mods config mod_config types workshop server_control; do
     source "${SCRIPT_DIR}/lib/${lib}.sh"
 done
 
@@ -1095,6 +1095,7 @@ main_menu() {
             "📦|Loot Economy"
             "🔧|Server Settings"
             "🔐|RCON Settings"
+            "🖥️|Server Control"
             "📁|Mod Configs"
             "👤|Admin Tools"
             "--------------------"
@@ -1138,6 +1139,7 @@ main_menu() {
                     show_message "RCON config not found: BEServer_x64.cfg" "Error"
                 fi
                 ;;
+            "🖥️|Server Control") server_control_menu "$SELECTED_DIR" || true ;;
             "📁|Mod Configs")
                 local profile_dir="${SELECTED_DIR}/data/profile"
                 mod_config_browser "$profile_dir" || true
