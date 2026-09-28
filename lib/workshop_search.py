@@ -47,7 +47,7 @@ def fetch_mod_names(ids):
     names = {}
     try:
         req = urllib.request.Request(api_url, data=encoded_data)
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             res_data = json.loads(response.read().decode('utf-8'))
         for d in res_data.get('response', {}).get('publishedfiledetails', []):
             mid = d.get('publishedfileid')
@@ -74,6 +74,7 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     steam_end_p = ((global_end - 1) // STEAM_PAGE_SIZE) + 1
     
     all_found_ids = []
+    fetch_failed = False
     
     for p in range(steam_start_p, steam_end_p + 1):
         if text.lower() == "dayz" or not text.strip():
@@ -84,7 +85,7 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=15) as response:
                 html = response.read().decode('utf-8')
             
             page_ids = []
@@ -117,6 +118,7 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
             all_found_ids.extend(page_ids)
         except Exception as e:
             print(f"Fetch Error Page {p}: {e}", file=sys.stderr)
+            fetch_failed = True
             break
             
     base_index = (steam_start_p - 1) * STEAM_PAGE_SIZE
@@ -124,6 +126,9 @@ def search_workshop(text, sort="trend", num=25, page=1, mode="title"):
     local_end = local_start + num
     final_ids = all_found_ids[local_start:local_end]
     
+    if fetch_failed:
+        # A failed fetch must not be cached as a fresh empty result for an hour
+        return final_ids
     cache[cache_key] = {'timestamp': time.time(), 'data': final_ids}
     save_cache(cache)
     return final_ids
@@ -133,7 +138,7 @@ def scrape_dependencies(mod_id):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             html = response.read().decode('utf-8', errors='ignore')
         
         reqs = []
@@ -261,10 +266,12 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
             entry = cache[cache_key]
             data = entry['data']
             needs_refetch = False
-            if 'author' not in data or 'images' not in data or data['author'] == "Unknown": needs_refetch = True
+            # Refetch only when the entry is structurally incomplete. An unknown
+            # author or a missing creation date come from a failed scrape and
+            # would otherwise be retried on every call, forever.
+            if 'author' not in data or 'images' not in data: needs_refetch = True
             elif 'rating_count' not in data or 'rating_stars' not in data: needs_refetch = True
             elif 'dependencies' not in data or 'created' not in data: needs_refetch = True
-            elif data.get('created', 0) == 0: needs_refetch = True
             
             if not needs_refetch and time.time() - entry['timestamp'] < CACHE_EXPIRY_DETAILS:
                 results.append(data)
@@ -288,7 +295,7 @@ def get_mod_details(mod_ids, recursive=False, update_rules=None):
             
             try:
                 req = urllib.request.Request(api_url, data=encoded_data)
-                with urllib.request.urlopen(req) as response:
+                with urllib.request.urlopen(req, timeout=15) as response:
                     res_data = json.loads(response.read().decode('utf-8'))
                 
                 details = res_data.get('response', {}).get('publishedfiledetails', [])
