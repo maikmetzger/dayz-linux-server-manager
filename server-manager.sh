@@ -145,7 +145,7 @@ _mod_manager_remove_mod() {
     mname=$(get_mod_name "$mid")
 
     local blocker
-    blocker=$(check_reverse_dependencies "$mid" "${mod_ids[@]}")
+    blocker=$(check_reverse_dependencies "$mid" "${enabled_mod_ids[@]}")
     if [[ -n "$blocker" ]]; then
         show_message "Cannot remove '$mname':\nRequired by '$blocker'" "DEPENDENCY ERROR"
         return 1
@@ -187,6 +187,7 @@ mod_manager() {
     local -a mod_names=()
     local -a mod_types=()
     local -a mod_warnings=()
+    local -a enabled_mod_ids=()   # ids that are actually loaded; used for dependency checks
     
     local last_cols=0
     
@@ -348,13 +349,20 @@ END_PYTHON
                 [[ "$flag" -eq 1 ]] && { global_sync_needed=1; break; }
             done
             
+            # Only enabled mods count for dependency checks: a disabled framework
+            # is not loaded, and a disabled dependent must not block a removal.
+            enabled_mod_ids=()
+            for i in "${!mod_ids[@]}"; do
+                [[ "${mod_types[$i]}" != "disabled" ]] && enabled_mod_ids+=("${mod_ids[$i]}")
+            done
+
             # Pre-calculate dependency warnings
             for i in "${!mod_ids[@]}"; do
                 local mid="${mod_ids[$i]}"
                 local mtype="${mod_types[$i]}"
                 local warn=""
                 if [[ "$mtype" != "disabled" ]]; then
-                    warn="$(check_mod_dependencies "$mid" "${mod_ids[@]}" 2>/dev/null || true)"
+                    warn="$(check_mod_dependencies "$mid" "${enabled_mod_ids[@]}" 2>/dev/null || true)"
                 fi
                 mod_warnings+=("$warn")
             done
@@ -579,8 +587,8 @@ END_PYTHON
         move_to $((TERM_ROWS-1)) 1
         if [[ $selected -lt $mod_count ]]; then
             local sel_mid="${mod_ids[$selected]}"
-            local sel_warn
-            sel_warn="$(check_mod_dependencies "$sel_mid" "${mod_ids[@]}" || true)"
+            # Warnings were computed once during the rebuild; no python per keypress
+            local sel_warn="${mod_warnings[$selected]:-}"
             if [[ -n "$sel_warn" ]]; then
                 printf "%s%s WARN: %s %s%s" "$BG_RED" "$WHITE$BOLD" "$sel_warn" "${ESC}[K" "$RESET"
             else
