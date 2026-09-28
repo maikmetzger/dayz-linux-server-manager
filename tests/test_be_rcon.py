@@ -45,6 +45,25 @@ class ResponseAssemblerTest(unittest.TestCase):
         self.assertFalse(r.feed(b'BE'))
         self.assertFalse(r.started)
 
+    def test_utf8_character_split_across_parts(self):
+        r = be_rcon.ResponseAssembler()
+        fire = '🔥'.encode('utf-8')
+        self.assertFalse(r.feed(cmd_packet(b'\x00\x02\x00' + b'A' + fire[:2])))
+        self.assertTrue(r.feed(cmd_packet(b'\x00\x02\x01' + fire[2:] + b'B')))
+        self.assertEqual(r.text(), 'A🔥B')
+
+    def test_incomplete_multipart_has_no_text(self):
+        r = be_rcon.ResponseAssembler()
+        self.assertFalse(r.feed(cmd_packet(b'\x00\x03\x00AAA')))
+        self.assertTrue(r.started)
+        self.assertFalse(r.complete)
+        self.assertIsNone(r.text())
+
+    def test_stale_sequence_is_ignored(self):
+        r = be_rcon.ResponseAssembler(expected_seq=2)
+        self.assertFalse(r.feed(cmd_packet(b'late reply to seq 1')))
+        self.assertFalse(r.started)
+
 
 class ActionResultTest(unittest.TestCase):
     """Actions must not claim success when the server never answered."""
@@ -106,6 +125,11 @@ class PlayerParsingTest(unittest.TestCase):
     def test_names_with_quotes_survive(self):
         r = json.loads(self.client.parse_players_response(PLAYERS_REPLY))
         self.assertEqual(r['players'][2]['name'], "Jo\"hn 'Quote' O'Brien")
+
+    def test_no_reply_is_an_error(self):
+        r = json.loads(self.client.parse_players_response(None))
+        self.assertEqual(r['count'], 0)
+        self.assertIsNotNone(r['error'])
 
     def test_header_and_footer_lines_are_ignored(self):
         r = json.loads(self.client.parse_players_response("Players on server:\n(0 players in total)"))

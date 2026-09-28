@@ -51,11 +51,16 @@ class ResponseAssembler:
     BE packet layout: 'BE' + CRC32 (4) + 0xFF + type + sequence + payload.
     A multipart reply marks the payload with 0x00 followed by the total
     number of parts and the index of this part; the text follows after.
+    Parts are kept as bytes and decoded once at the end, so a UTF-8
+    character split across two packets survives. Packets whose sequence
+    byte does not match the command are late replies and are ignored.
     """
     MULTIPART_MARKER = 0x00
     HEADER_LEN = 9  # 'BE' + CRC32 + 0xFF + type + sequence
+    SEQ_OFFSET = 8
 
-    def __init__(self):
+    def __init__(self, expected_seq=None):
+        self.expected_seq = expected_seq
         self.single = None
         self.parts = {}
         self.total = None
@@ -64,23 +69,33 @@ class ResponseAssembler:
     def started(self):
         return self.single is not None or bool(self.parts)
 
+    @property
+    def complete(self):
+        if self.single is not None:
+            return True
+        return self.total is not None and len(self.parts) >= self.total
+
     def feed(self, data):
         """Feed one raw packet. Returns True once the reply is complete."""
         if len(data) < self.HEADER_LEN or data[7] != BE_COMMAND:
-            # Too short, or a server message (chat) that is not our reply
-            return False
+            return False  # too short, or a server message (chat)
+        if self.expected_seq is not None and data[self.SEQ_OFFSET] != self.expected_seq:
+            return False  # late reply to an earlier command
         payload = data[self.HEADER_LEN:]
         if len(payload) >= 3 and payload[0] == self.MULTIPART_MARKER:
             self.total = payload[1]
-            self.parts[payload[2]] = payload[3:].decode('utf-8', errors='ignore')
-            return len(self.parts) >= self.total
-        self.single = payload.decode('utf-8', errors='ignore')
+            self.parts[payload[2]] = payload[3:]
+            return self.complete
+        self.single = payload
         return True
 
     def text(self):
-        if self.parts:
-            return "".join(self.parts[i] for i in sorted(self.parts))
-        return self.single or ""
+        """The decoded reply, or None while parts are still missing."""
+        if not self.complete:
+            return None
+        if self.single is not None:
+            return self.single.decode('utf-8', errors='ignore')
+        return b"".join(self.parts[i] for i in sorted(self.parts)).decode('utf-8', errors='ignore')
 
 
 class BattlEyeRcon:
@@ -184,19 +199,23 @@ class BattlEyeRcon:
         # Wait for the reply. It is one packet, or a multipart set that we
         # reassemble. Returns None when no reply arrived at all.
         try:
-            reply = ResponseAssembler()
+            reply = ResponseAssembler(expected_seq=seq_byte[0])
             start_time = time.time()
             while time.time() - start_time < 2.0:
                 ready = select.select([self.sock], [], [], 0.5)
                 if not ready[0]:
-                    # Silence after a partial reply: return what we have
+                    # Silence after a partial reply: stop waiting for the rest
                     if reply.started:
                         break
                     continue
                 if reply.feed(self.sock.recv(4096)):
                     break
 
-            return reply.text() if reply.started else None
+            if not reply.complete:
+                if self.debug and reply.started:
+                    print("[DEBUG] Incomplete multipart reply discarded", file=sys.stderr)
+                return None
+            return reply.text()
 
         except socket.timeout:
             if self.debug:
@@ -224,6 +243,9 @@ class BattlEyeRcon:
         import json
         
         players = []
+        if response is None:
+            # No reply at all is a failure, not an empty server
+            return json.dumps({"count": 0, "players": [], "error": "No reply from server (connection lost or timeout)"})
         if not response:
             return json.dumps({"count": 0, "players": [], "error": None})
         
