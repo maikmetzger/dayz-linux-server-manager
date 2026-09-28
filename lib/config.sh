@@ -706,6 +706,8 @@ config_table_editor() {
             for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
                 local key="${keys[$i]}"
                 local val="${values[$i]}"
+                # Never print passwords in the table
+                [[ "${keys[$i],,}" == *password* && -n "$val" ]] && val="********"
                 local default
                 local memo
                 
@@ -833,7 +835,10 @@ config_table_editor() {
         fi
         
         local new_val
-        new_val=$(read_input "Edit $selected_key $hint" "$current_val" "$title")
+        local secret_flag=""
+        [[ "${selected_key,,}" == *password* ]] && secret_flag="secret"
+        # shellcheck disable=SC2086  # secret_flag is intentionally unquoted (empty = no 4th arg)
+        new_val=$(read_input "Edit $selected_key $hint" "$current_val" "$title" $secret_flag)
         
         if [[ -n "$new_val" ]]; then
             # Validation Warning

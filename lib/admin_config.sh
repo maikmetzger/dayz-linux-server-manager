@@ -709,7 +709,7 @@ admin_vpp_password_dialog() {
     current_pw=$(get_vpp_password "$profile_dir")
     
     local new_pw
-    new_pw=$(read_input "Enter new password:" "" "VPP Admin Password")
+    new_pw=$(read_secret "Enter new password:" "" "VPP Admin Password")
     
     if [[ -n "$new_pw" ]]; then
         set_vpp_password "$profile_dir" "$new_pw"
@@ -731,7 +731,7 @@ admin_password_dialog() {
     fi
     
     local new_pw
-    new_pw=$(read_input "Enter new password:" "" "$label Password")
+    new_pw=$(read_secret "Enter new password:" "" "$label Password")
     
     if [[ -n "$new_pw" ]]; then
         if [[ "$type" == "dayz" ]]; then
