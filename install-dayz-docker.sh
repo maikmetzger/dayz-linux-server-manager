@@ -47,6 +47,14 @@ prompt_default() {
     echo "${ans:-$def}"
 }
 
+# Like prompt_default, but the input is not echoed and the default stays hidden
+prompt_secret() {
+    local msg="$1" def="$2" ans=""
+    read -rs -p "${msg} [hidden, Enter keeps the default]: " ans || true
+    echo >&2
+    echo "${ans:-$def}"
+}
+
 prompt_yn() {
     local msg="$1" def="$2"
     local prompt
@@ -345,7 +353,7 @@ create_instance() {
     # it used to be ignored here and the prompt repeated (or, non-interactively,
     # the CHANGEME default was written). Only ask when nothing was provided.
     local admin_pw="${CLI_ADMIN_PASS:-}"
-    [[ -n "${admin_pw}" ]] || admin_pw="$(prompt_default "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
+    [[ -n "${admin_pw}" ]] || admin_pw="$(prompt_secret "Set passwordAdmin for serverDZ.cfg" "CHANGEME_ADMIN_PASSWORD")"
 
     write_file "${inst_dir}/data/config/serverDZ.cfg" \
 "hostname = \"DayZ ${name}\";
@@ -423,13 +431,20 @@ DZ_PORT=${dz_port}
 DZ_QUERY_PORT=${query_port}
 DZ_EXTRA_PARAMS=$(env_quote "${extra_params}")
 
-STEAM_USER=$(env_quote "${steam_user}")
-STEAM_PASS=$(env_quote "${steam_pass}")
-
 DZ_SYNC_ON_START=${sync_on_start}
 DZ_UPDATE_ON_START=${update_on_start}
 "
     chmod 600 "${inst_dir}/.env"
+
+    # Steam credentials live in a private file inside the (0700) config dir,
+    # which run.sh reads only when it calls steamcmd. Keeping them out of the
+    # container environment keeps them out of 'docker inspect' and out of
+    # every process the game server starts.
+    write_file "${inst_dir}/data/config/.steam.env" \
+"STEAM_USER=$(env_quote "${steam_user}")
+STEAM_PASS=$(env_quote "${steam_pass}")
+"
+    chmod 600 "${inst_dir}/data/config/.steam.env"
 
     local restart_policy="on-failure:5"
 
@@ -452,8 +467,6 @@ DZ_UPDATE_ON_START=${update_on_start}
       HOME: /dayz
       APPID: \${APPID}
       WORKSHOP_APPID: \${WORKSHOP_APPID}
-      STEAM_USER: \${STEAM_USER}
-      STEAM_PASS: \${STEAM_PASS}
       DZ_PORT: \${DZ_PORT}
       DZ_QUERY_PORT: \${DZ_QUERY_PORT}
       DZ_EXTRA_PARAMS: \${DZ_EXTRA_PARAMS}
@@ -506,8 +519,6 @@ DZ_UPDATE_ON_START=${update_on_start}
       HOME: /dayz
       APPID: \${APPID}
       WORKSHOP_APPID: \${WORKSHOP_APPID}
-      STEAM_USER: \${STEAM_USER}
-      STEAM_PASS: \${STEAM_PASS}
       DZ_PORT: \${DZ_PORT}
       DZ_QUERY_PORT: \${DZ_QUERY_PORT}
       DZ_EXTRA_PARAMS: \${DZ_EXTRA_PARAMS}
@@ -844,15 +855,15 @@ tui_create_instance() {
         break
     done
     if [[ "$steam_user" != "anonymous" ]]; then
-        steam_pass=$(read_input "Steam Password" "" "Steam Credentials")
+        steam_pass=$(read_secret "Steam Password" "" "Steam Credentials")
     fi
     
     local admin_pass
-    admin_pass=$(read_input "DayZ Admin Password" "changeme$(date +%s)" "Security")
+    admin_pass=$(read_secret "DayZ Admin Password" "changeme$(date +%s)" "Security")
     [[ -z "$admin_pass" ]] && return
     
     local rcon_pass
-    rcon_pass=$(read_input "RCON Password" "rcon$(date +%s | tail -c 4)" "Security")
+    rcon_pass=$(read_secret "RCON Password" "rcon$(date +%s | tail -c 4)" "Security")
     [[ -z "$rcon_pass" ]] && return
     
     CLI_NAME="$name"

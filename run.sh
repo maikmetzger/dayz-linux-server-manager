@@ -71,37 +71,78 @@ require_steamcmd() {
   [[ -x "${STEAMCMD}" ]] || die "steamcmd not found/executable at: ${STEAMCMD}"
 }
 
-steam_login_args_for_workshop() {
-  if [[ -z "${STEAM_USER}" || "${STEAM_USER}" == "anonymous" ]]; then
-    die "Workshop mod download requires a Steam account. Set STEAM_USER/STEAM_PASS (not anonymous)."
-  fi
-  [[ -n "${STEAM_PASS}" ]] || die "STEAM_PASS is empty but STEAM_USER is set."
-  printf "%s" "+login ${STEAM_USER} ${STEAM_PASS}"
+# Steam credentials: STEAM_USER/STEAM_PASS from the environment (older
+# instances) or, preferred, from the private file the installer writes into
+# the config dir. That way the password is not part of the container
+# environment (docker inspect, every child process of the server).
+load_steam_credentials() {
+  local f="${DZ_CONFIG_DIR}/.steam.env"
+  [[ -z "${STEAM_PASS:-}" && -f "${f}" ]] || return 0
+  local k v
+  while IFS='=' read -r k v; do
+    [[ "${k}" == "STEAM_USER" || "${k}" == "STEAM_PASS" ]] || continue
+    v="${v%$'\r'}"
+    if [[ "${v}" =~ ^\".*\"$ ]]; then
+      # same escapes as env_quote in lib/utils.sh
+      v="${v:1:${#v}-2}"
+      v="${v//\\n/$'\n'}"; v="${v//\\\"/\"}"; v="${v//\\\\/\\}"; v="${v//\$\$/\$}"
+    fi
+    printf -v "${k}" '%s' "${v}"
+  done < "${f}"
 }
 
-steam_login_args_for_server() {
-  # Server downloads often work as anonymous; if user provided creds, use them.
-  if [[ -n "${STEAM_USER}" && "${STEAM_USER}" != "anonymous" && -n "${STEAM_PASS}" ]]; then
-    printf "%s" "+login ${STEAM_USER} ${STEAM_PASS}"
-  else
-    printf "%s" "+login anonymous"
-  fi
+# Run steamcmd with a private script instead of +login on the command line,
+# so the password is not visible in the process list of host or container.
+# Usage: run_steamcmd_script "<user> <pass>|anonymous" +cmd arg... [+cmd arg...]
+run_steamcmd_script() {
+  local login_line="$1"; shift
+  local script
+  script=$(mktemp "${DZ_STEAM_TMPDIR:-/dev/shm}/steamcmd.XXXXXX" 2>/dev/null) || script=$(mktemp)
+  chmod 600 "${script}"
+  {
+    echo "@NoPromptForPassword 1"
+    echo "force_install_dir ${DZ_SERVERFILES}"
+    echo "login ${login_line}"
+    # every +command token starts a new line, the following tokens are its arguments
+    local tok line=""
+    for tok in "$@"; do
+      if [[ "${tok}" == +* ]]; then
+        [[ -n "${line}" ]] && echo "${line}"
+        line="${tok#+}"
+      else
+        line="${line} ${tok}"
+      fi
+    done
+    [[ -n "${line}" ]] && echo "${line}"
+    echo "quit"
+  } > "${script}"
+  local rc=0
+  "${STEAMCMD}" +runscript "${script}" || rc=$?
+  rm -f "${script}"
+  return "${rc}"
 }
 
 run_steamcmd_server() {
   require_steamcmd
-  # shellcheck disable=SC2206
-  local login=( $(steam_login_args_for_server) )
-  "${STEAMCMD}" +force_install_dir "${DZ_SERVERFILES}" "${login[@]}" "$@" +quit
+  load_steam_credentials
+  # Server downloads often work as anonymous; if user provided creds, use them.
+  local login="anonymous"
+  if [[ -n "${STEAM_USER}" && "${STEAM_USER}" != "anonymous" && -n "${STEAM_PASS}" ]]; then
+    login="${STEAM_USER} ${STEAM_PASS}"
+  fi
+  run_steamcmd_script "${login}" "$@"
 }
 
 run_steamcmd_workshop_multi() {
-  # args passed as array after login; caller builds +workshop_download_item ...
+  # args passed as array; caller builds +workshop_download_item ...
   require_steamcmd
-  # shellcheck disable=SC2206
-  local login=( $(steam_login_args_for_workshop) )
+  load_steam_credentials
+  if [[ -z "${STEAM_USER}" || "${STEAM_USER}" == "anonymous" ]]; then
+    die "Workshop mod download requires a Steam account. Set STEAM_USER/STEAM_PASS (not anonymous)."
+  fi
+  [[ -n "${STEAM_PASS}" ]] || die "STEAM_PASS is empty but STEAM_USER is set."
   # NOTE: steamcmd often returns non-zero even on success; don't let set -e kill us
-  "${STEAMCMD}" +force_install_dir "${DZ_SERVERFILES}" "${login[@]}" "$@" +quit || {
+  run_steamcmd_script "${STEAM_USER} ${STEAM_PASS}" "$@" || {
     local rc=$?
     warn "SteamCMD exited with code $rc (may be normal for 'already up to date')"
   }
