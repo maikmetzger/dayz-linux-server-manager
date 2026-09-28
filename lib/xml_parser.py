@@ -633,6 +633,71 @@ def merge_ce_files(source_path: str, local_path: str, original_path: str = None)
             "error": str(e)
         }
 
+
+# =============================================================================
+# cfgeconomycore.xml registration (Modular Loot Manager)
+# =============================================================================
+
+def validate_ce_xml(xml_path: str) -> bool:
+    """True when the file is well-formed XML or a bare fragment (<type> rows
+    without a <types> root) that parses once wrapped. One broken CE file stops
+    the server's CE loading, so callers refuse to link anything else."""
+    with open(xml_path, 'rb') as fp:
+        data = fp.read()
+    try:
+        ET.fromstring(data)
+        return True
+    except ET.ParseError:
+        body = re.sub(rb'^\s*<\?xml[^>]*\?>', b'', data)
+        try:
+            ET.fromstring(b'<r>' + body + b'</r>')
+            return True
+        except ET.ParseError:
+            return False
+
+
+def _write_core(tree: ET.ElementTree, core_path: str) -> None:
+    if hasattr(ET, 'indent'):
+        ET.indent(tree, space='\t', level=0)
+    atomic_write_tree(tree, core_path, encoding='UTF-8', xml_declaration=True)
+
+
+def add_ce_file(core_path: str, filename: str, ce_type: str, ce_folder: str) -> str:
+    """Register filename in the <ce folder=ce_folder> block of cfgeconomycore.xml.
+
+    The block is created when missing. Only that block counts for the duplicate
+    check: a user-added db block listing the vanilla types.xml must not block
+    linking a mod file of the same name. Returns 'Success' or 'Already linked'.
+    """
+    tree = ET.parse(core_path)
+    root = tree.getroot()
+    ce_node = next((ce for ce in root.findall('ce') if ce.get('folder') == ce_folder), None)
+    if ce_node is None:
+        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
+    if any(entry.get('name') == filename for entry in ce_node.findall('file')):
+        return 'Already linked'
+    ET.SubElement(ce_node, 'file', {'name': filename, 'type': ce_type})
+    _write_core(tree, core_path)
+    return 'Success'
+
+
+def remove_ce_file(core_path: str, filename: str) -> int:
+    """Remove every <file name=filename> entry (case-insensitive) from all ce
+    blocks. Returns how many entries were removed; the file is only rewritten
+    when something changed."""
+    tree = ET.parse(core_path)
+    wanted = filename.lower().strip()
+    removed = 0
+    for ce_node in tree.getroot().findall('ce'):
+        for entry in list(ce_node.findall('file')):
+            if entry.get('name', '').lower().strip() == wanted:
+                ce_node.remove(entry)
+                removed += 1
+    if removed:
+        _write_core(tree, core_path)
+    return removed
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='DayZ types.xml Parser Backend')
     subparsers = parser.add_subparsers(dest='command')
@@ -689,6 +754,18 @@ if __name__ == "__main__":
     p_merge.add_argument('local', help='Path to user working copy')
     p_merge.add_argument('--original', help='Path to original snapshot from link time')
     
+    # cfgeconomycore.xml registration (Modular Loot Manager)
+    p_validate = subparsers.add_parser('validate-ce', help='Exit 0 when the file is well-formed XML or a wrappable fragment')
+    p_validate.add_argument('file', help='Path to CE XML file')
+    p_add = subparsers.add_parser('add-ce-file', help='Register a file in a <ce folder=...> block of cfgeconomycore.xml')
+    p_add.add_argument('core', help='Path to cfgeconomycore.xml')
+    p_add.add_argument('filename', help='File name inside the ce folder')
+    p_add.add_argument('ce_type', help='CE type attribute (types, spawnabletypes, events, eventspawns)')
+    p_add.add_argument('ce_folder', help='Folder attribute of the ce block, e.g. CustomCE/types')
+    p_remove = subparsers.add_parser('remove-ce-file', help='Remove a file entry from every ce block of cfgeconomycore.xml')
+    p_remove.add_argument('core', help='Path to cfgeconomycore.xml')
+    p_remove.add_argument('filename', help='File name to remove (case-insensitive)')
+
     args = parser.parse_args()
     
     if args.command == 'metadata':
@@ -724,6 +801,27 @@ if __name__ == "__main__":
     elif args.command == 'merge-ce':
         result = merge_ce_files(args.source, args.local, args.original)
         print(json.dumps(result))
+    elif args.command == 'validate-ce':
+        try:
+            valid = validate_ce_xml(args.file)
+        except OSError as exc:
+            print(f'Error: {exc}', file=sys.stderr)
+            sys.exit(1)
+        print('ok' if valid else 'invalid')
+        sys.exit(0 if valid else 1)
+    elif args.command == 'add-ce-file':
+        try:
+            print(add_ce_file(args.core, args.filename, args.ce_type, args.ce_folder))
+        except (OSError, ET.ParseError) as exc:
+            print(f'Error: {exc}', file=sys.stderr)
+            sys.exit(1)
+    elif args.command == 'remove-ce-file':
+        try:
+            removed = remove_ce_file(args.core, args.filename)
+        except (OSError, ET.ParseError) as exc:
+            print(f'Error: {exc}', file=sys.stderr)
+            sys.exit(1)
+        print('Success' if removed else 'NotFound')
     else:
         parser.print_help()
 
