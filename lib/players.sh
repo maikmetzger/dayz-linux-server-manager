@@ -109,277 +109,188 @@ fetch_online_players() {
 # =============================================================================
 # Players Menu
 # =============================================================================
+# The _players_* and _bans_* helpers run inside players_menu / ban_list_menu
+# and use their locals (bash dynamic scoping): the data arrays, player_count /
+# ban_count, selected, needs_refresh, inst_dir and the col_* layout set by
+# the draw function.
 
-# Main players menu showing online player list in table view
+# Action bar of both table screens; the buttons follow the data rows in cursor order
+TABLE_SCREEN_ACTIONS=("[R] Refresh" "[Q] Back")
+
+# Action bar at ROW; ITEM_COUNT data rows precede the buttons
+_table_actions() {
+    local row="$1" item_count="$2"
+    move_to "$row" 2
+    local a label
+    for a in "${!TABLE_SCREEN_ACTIONS[@]}"; do
+        label="${TABLE_SCREEN_ACTIONS[$a]}"
+        if [[ $selected -eq $((item_count + a)) ]]; then
+            printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$label" "$RESET"
+        else
+            printf "  %s " "$label"
+        fi
+        printf " "
+    done
+}
+
+# Fetch the online players via RCON and rebuild the player_* arrays
+_players_refresh() {
+    max_players=$(get_max_players "$inst_dir")
+    local player_json
+    player_json=$(fetch_online_players "$inst_dir")
+    error=$(json_get "$player_json" "error" "")
+    player_ids=(); player_names=(); player_pings=(); player_guids=(); player_times=(); player_joined=()
+    if [[ -z "$error" || "$error" == "null" ]] && [[ "$(json_get "$player_json" "count" "0")" -gt 0 ]]; then
+        # One python process for the whole list: session bookkeeping, cleanup
+        # of departed players and one row per player (previously 5 processes
+        # per player). Fields are 0x1F separated: a tab would swallow empty
+        # fields such as the GUID of a lobby player (see lib/rowfmt.py).
+        local pid pname pping pguid ptime pjoined
+        while IFS=$'\x1f' read -r pid pname pping pguid ptime pjoined; do
+            [[ -z "$pid" ]] && continue
+            player_ids+=("$pid")
+            player_names+=("$pname")
+            player_pings+=("$pping")
+            player_guids+=("$pguid")
+            player_times+=("$ptime")
+            player_joined+=("$pjoined")
+        done < <(printf '%s' "$player_json" | python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                    --file "$sessions_file" --action sync --now "$(date +%s)" 2>/dev/null)
+    fi
+    player_count=${#player_ids[@]}
+}
+
+# Minutes on the server as "3h05m" or "12m"
+_players_time_str() {
+    local minutes="${1:-0}"
+    if [[ $minutes -ge 60 ]]; then
+        printf "%dh%02dm" $((minutes / 60)) $((minutes % 60))
+    else
+        printf "%dm" "$minutes"
+    fi
+}
+
+# One player row for index I at screen ROW; the selected row is inverted
+_players_draw_row() {
+    local i="$1" row="$2"
+    local pname="${player_names[$i]}"
+    local max_name_len=$((col_joined - col_name - 2))
+    [[ ${#pname} -gt $max_name_len ]] && pname="${pname:0:$((max_name_len-3))}..."
+    local id_cell time_str
+    printf -v id_cell '#%-4s' "${player_ids[$i]}"
+    time_str=$(_players_time_str "${player_times[$i]:-0}")
+
+    local dim="$DIM"
+    move_to "$row" 1
+    if [[ $i -eq $selected ]]; then
+        printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
+        move_to "$row" $col_status
+        printf "▶ 👤"
+        dim=""
+    else
+        printf "%s" "${ESC}[K"
+        move_to "$row" $col_status
+        printf "  %s👤%s" "$GREEN" "$RESET"
+    fi
+    tui_draw_cells "$row" "$col_id:$dim:$id_cell" "$col_name::$pname" "$col_joined:$dim:${player_joined[$i]:-?}" \
+        "$col_time:$dim:$time_str" "$col_ping:$dim:${player_pings[$i]}ms" "$col_guid:$dim:${player_guids[$i]:-?}"
+    [[ $i -eq $selected ]] && printf "%s" "$RESET"
+    return 0
+}
+
+# Title, column titles, rows (or the error/empty line), action bar, footer
+_players_draw() {
+    tui_draw_header "👥 Players - Online: ${player_count} / ${max_players}"
+    local table_start=3 col_status=2 col_id=6 col_name=12
+    local col_joined=$((TERM_COLS - 70)) col_time=$((TERM_COLS - 52))
+    local col_ping=$((TERM_COLS - 45)) col_guid=$((TERM_COLS - 38))
+    tui_draw_rule $table_start
+    tui_draw_titles $((table_start + 1)) "$col_status:  " "$col_id:ID" "$col_name:PLAYER NAME" \
+        "$col_joined:JOINED" "$col_time:TIME" "$col_ping:PING" "$col_guid:GUID"
+    tui_draw_rule $((table_start + 2))
+
+    local row=$((table_start + 3)) i
+    if [[ -n "$error" && "$error" != "null" ]]; then
+        move_to $row 1
+        printf "%s%s  ⚠️  Error: %s%s" "$BG_RED" "$WHITE" "$error" "$RESET"
+        row=$((row + 1))
+    elif [[ $player_count -eq 0 ]]; then
+        move_to $row 1
+        printf "%s  ℹ️  No players online (press R to refresh)%s" "$DIM" "$RESET"
+        row=$((row + 1))
+    else
+        for i in "${!player_ids[@]}"; do
+            _players_draw_row "$i" "$row"
+            row=$((row + 1))
+        done
+    fi
+    tui_draw_rule $row
+    _table_actions $((row + 1)) "$player_count"
+    tui_draw_footer " [↑↓] Select  [Enter] Player Actions  [R] Refresh  [K] Kick  [B] Ban  [M] Message  [Q] Back"
+}
+
+# [Enter]/[K]/[B]/[M] on the selected player; nothing while the cursor is on a button
+_players_key_action() {
+    local action="$1"
+    [[ $selected -lt $player_count ]] || return 0
+    local pid="${player_ids[$selected]}" pname="${player_names[$selected]}"
+    local pping="${player_pings[$selected]}" pguid="${player_guids[$selected]}"
+    case "$action" in
+        details)
+            player_details_menu "$inst_dir" "$(player_to_json "$pid" "$pname" "$pping" "$pguid")" || true
+            needs_refresh=1 ;;
+        kick)    kick_player_dialog "$inst_dir" "$pid" "$pname" "$pguid" || true; needs_refresh=1 ;;
+        ban)     ban_player_dialog "$inst_dir" "$pid" "$pname" "$pguid" || true; needs_refresh=1 ;;
+        message) send_message_dialog "$inst_dir" "$pname" || true ;;
+    esac
+}
+
+# Online players in a table with kick, ban, message and details actions
 # Usage: players_menu "$inst_dir"
 players_menu() {
     local inst_dir="$1"
-    
-    # Initialize state directory
     PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
     mkdir -p "$PLAYERS_STATE_DIR" 2>/dev/null
-    
-    local selected=0
-    local needs_refresh=1
-    
-    # Player data arrays
-    local -a player_ids=()
-    local -a player_names=()
-    local -a player_pings=()
-    local -a player_guids=()
-    local -a player_times=()  # Time on server in minutes
-    local -a player_joined=() # Formatted join timestamp
-    local player_count=0
-    local max_players=0
-    local error=""
-    
-    # Session tracking file
     local sessions_file="${PLAYERS_STATE_DIR}/sessions.json"
-    
+
+    local selected=0 needs_refresh=1
+    local -a player_ids=() player_names=() player_pings=() player_guids=() player_times=() player_joined=()
+    local player_count=0 max_players=0 error=""
+    local total_items key seq
     while true; do
-        # Refresh player data if needed
         if [[ $needs_refresh -eq 1 ]]; then
-            max_players=$(get_max_players "$inst_dir")
-            
-            local player_json
-            player_json=$(fetch_online_players "$inst_dir")
-            
-            player_count=$(json_get "$player_json" "count" "0")
-            error=$(json_get "$player_json" "error" "")
-            
-            # Clear and rebuild arrays
-            player_ids=()
-            player_names=()
-            player_pings=()
-            player_guids=()
-            player_times=()
-            player_joined=()
-            
-            if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
-                # One python process for the whole list: session bookkeeping,
-                # cleanup of departed players and one row per player.
-                # (Previously 5 processes per player, several seconds per refresh.)
-                # Fields are 0x1F separated: a tab would swallow empty fields
-                # such as the GUID of a lobby player (see lib/rowfmt.py).
-                local pid pname pping pguid ptime pjoined
-                while IFS=$'\x1f' read -r pid pname pping pguid ptime pjoined; do
-                    [[ -z "$pid" ]] && continue
-                    player_ids+=("$pid")
-                    player_names+=("$pname")
-                    player_pings+=("$pping")
-                    player_guids+=("$pguid")
-                    player_times+=("$ptime")
-                    player_joined+=("$pjoined")
-                done < <(printf '%s' "$player_json" | python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
-                            --file "$sessions_file" --action sync --now "$(date +%s)" 2>/dev/null)
-            fi
-            
-            player_count=${#player_ids[@]}
+            _players_refresh
             needs_refresh=0
         fi
-        
-        local total_items=$((player_count + 2))  # Players + Refresh + Back
+        total_items=$((player_count + ${#TABLE_SCREEN_ACTIONS[@]}))
         [[ $selected -lt 0 ]] && selected=0
         [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
-        
-        # Get terminal size
         get_term_size
-        
-        # Draw screen
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        
-        # Header bar
-        move_to 1 1
-        local header_title="Players - Online: ${player_count} / ${max_players}"
-        printf "%s%s 👥 %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
-        
-        # Table header
-        local table_start=3
-        local col_status=2
-        local col_id=6
-        local col_name=12
-        local col_joined=$((TERM_COLS - 70))
-        local col_time=$((TERM_COLS - 52))
-        local col_ping=$((TERM_COLS - 45))
-        local col_guid=$((TERM_COLS - 38))
-        
-        move_to $table_start 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        move_to $((table_start + 1)) $col_status
-        printf "%s%s  %s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_id
-        printf "%s%sID%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_name
-        printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_joined
-        printf "%s%sJOINED%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_time
-        printf "%s%sTIME%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_ping
-        printf "%s%sPING%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_guid
-        printf "%s%sGUID%s" "$DIM" "$WHITE" "$RESET"
-        
-        move_to $((table_start + 2)) 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        # Player rows
-        local row=$((table_start + 3))
-        
-        if [[ -n "$error" && "$error" != "null" ]]; then
-            move_to $row 1
-            printf "%s%s  ⚠️  Error: %s%s" "$BG_RED" "$WHITE" "$error" "$RESET"
-            row=$((row + 1))
-        elif [[ $player_count -eq 0 ]]; then
-            move_to $row 1
-            printf "%s  ℹ️  No players online (press R to refresh)%s" "$DIM" "$RESET"
-            row=$((row + 1))
-        else
-            for i in "${!player_ids[@]}"; do
-                local pid="${player_ids[$i]}"
-                local pname="${player_names[$i]}"
-                local pping="${player_pings[$i]}"
-                local pguid="${player_guids[$i]:-?}"
-                
-                local ptime="${player_times[$i]:-0}"
-                
-                # Format time as HH:MM
-                local time_str
-                if [[ $ptime -ge 60 ]]; then
-                    time_str=$(printf "%dh%02dm" $((ptime / 60)) $((ptime % 60)))
-                else
-                    time_str=$(printf "%dm" $ptime)
-                fi
-                
-                local pjoined="${player_joined[$i]:-?}"
-                
-                # Truncate name if too long
-                local max_name_len=$((col_joined - col_name - 2))
-                [[ ${#pname} -gt $max_name_len ]] && pname="${pname:0:$((max_name_len-3))}..."
-                
-                move_to $row 1
-                if [[ $i -eq $selected ]]; then
-                    # Selected row
-                    printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
-                    move_to $row $col_status
-                    printf "▶ 👤"
-                    move_to $row $col_id
-                    printf "#%-4s" "$pid"
-                    move_to $row $col_name
-                    printf "%s" "$pname"
-                    move_to $row $col_joined
-                    printf "%s" "$pjoined"
-                    move_to $row $col_time
-                    printf "%s" "$time_str"
-                    move_to $row $col_ping
-                    printf "%sms" "$pping"
-                    move_to $row $col_guid
-                    printf "%s" "$pguid"
-                    printf "%s" "$RESET"
-                else
-                    # Normal row
-                    printf "%s" "${ESC}[K"
-                    move_to $row $col_status
-                    printf "  %s👤%s" "$GREEN" "$RESET"
-                    move_to $row $col_id
-                    printf "%s#%-4s%s" "$DIM" "$pid" "$RESET"
-                    move_to $row $col_name
-                    printf "%s" "$pname"
-                    move_to $row $col_joined
-                    printf "%s%s%s" "$DIM" "$pjoined" "$RESET"
-                    move_to $row $col_time
-                    printf "%s%s%s" "$DIM" "$time_str" "$RESET"
-                    move_to $row $col_ping
-                    printf "%s%sms%s" "$DIM" "$pping" "$RESET"
-                    move_to $row $col_guid
-                    printf "%s%s%s" "$DIM" "$pguid" "$RESET"
-                fi
-                row=$((row + 1))
-            done
-        fi
-        
-        # Separator
-        move_to $row 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        row=$((row + 1))
-        
-        # Action bar
-        local action_row=$row
-        local actions=("[R] Refresh" "[Q] Back")
-        
-        move_to $action_row 2
-        for a in "${!actions[@]}"; do
-            local action_idx=$((player_count + a))
-            local action_label="${actions[$a]}"
-            
-            if [[ $selected -eq $action_idx ]]; then
-                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
-            else
-                printf "  %s " "$action_label"
-            fi
-            printf " "
-        done
-        
-        # Footer help
-        move_to $TERM_ROWS 1
-        printf "%s%s [↑↓] Select  [Enter] Player Actions  [R] Refresh  [K] Kick  [B] Ban  [M] Message  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
-        
-        # Read input
-        IFS= read -rsn1 key
-        
+        _players_draw
+
+        IFS= read -rsn1 key || return 0   # EOF: leave instead of looping
         case "$key" in
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
-                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
+                    '[A') if [[ $selected -gt 0 ]]; then selected=$((selected - 1)); fi ;;
+                    '[B') if [[ $selected -lt $((total_items - 1)) ]]; then selected=$((selected + 1)); fi ;;
                 esac
                 ;;
-            '') # Enter
+            '')  # Enter: player details, or the button under the cursor
                 if [[ $selected -lt $player_count ]]; then
-                    # Open player details
-                    local full_player_data
-                    full_player_data=$(player_to_json "${player_ids[$selected]}" "${player_names[$selected]}" "${player_pings[$selected]}" "${player_guids[$selected]}")
-                    player_details_menu "$inst_dir" "$full_player_data"
-                    needs_refresh=1
+                    _players_key_action details
                 elif [[ $selected -eq $player_count ]]; then
-                    # Refresh
                     needs_refresh=1
-                elif [[ $selected -eq $((player_count + 1)) ]]; then
-                    # Back
+                else
                     return 0
                 fi
                 ;;
-            'r'|'R')
-                needs_refresh=1
-                ;;
-            'k'|'K')
-                if [[ $selected -lt $player_count ]]; then
-                    kick_player_dialog "$inst_dir" "${player_ids[$selected]}" "${player_names[$selected]}" "${player_guids[$selected]}"
-                    needs_refresh=1
-                fi
-                ;;
-            'b'|'B')
-                if [[ $selected -lt $player_count ]]; then
-                    ban_player_dialog "$inst_dir" "${player_ids[$selected]}" "${player_names[$selected]}" "${player_guids[$selected]}"
-                    needs_refresh=1
-                fi
-                ;;
-            'm'|'M')
-                if [[ $selected -lt $player_count ]]; then
-                    send_message_dialog "$inst_dir" "${player_names[$selected]}"
-                fi
-                ;;
-            'q'|'Q')
-                return 0
-                ;;
+            r|R) needs_refresh=1 ;;
+            k|K) _players_key_action kick ;;
+            b|B) _players_key_action ban ;;
+            m|M) _players_key_action message ;;
+            q|Q) return 0 ;;
         esac
     done
 }
@@ -663,258 +574,165 @@ save_ban_record() {
 # Ban List Menu
 # =============================================================================
 
-# Show ban list in table view and allow unbanning
+# Rebuild the ban_* arrays from bans.json (one ban_manager.py call)
+_bans_refresh() {
+    ban_names=(); ban_reasons=(); ban_durations=(); ban_banned_at=(); ban_expires=(); ban_guids=()
+    if [[ -f "$bans_file" ]]; then
+        # 0x1F separated so empty fields (GUID, reason) keep their place
+        local bguid bname breason bminutes bat bexp
+        while IFS=$'\x1f' read -r bguid bname breason bminutes bat bexp; do
+            [[ -z "$bguid$bname" ]] && continue
+            ban_guids+=("$bguid")
+            ban_names+=("${bname:-Unknown}")
+            ban_reasons+=("${breason:--}")
+            ban_durations+=("${bminutes:-0}")
+            ban_banned_at+=("${bat:--}")
+            ban_expires+=("${bexp:-never}")
+        done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --rows 2>/dev/null)
+    fi
+    ban_count=${#ban_names[@]}
+}
+
+# ISO timestamp as "YYYY-MM-DD HH:MM" (was a sed|sed|cut pipeline per cell)
+_bans_date_str() {
+    local ts="$1"
+    case "$ts" in
+        never)     echo "Never" ;;
+        -|null|"") echo "-" ;;
+        *)         ts="${ts/T/ }"; ts="${ts/Z/}"; echo "${ts:0:16}" ;;
+    esac
+}
+
+# "Permanent" or "<minutes>m"
+_bans_duration_str() {
+    if [[ "${1:-0}" == "0" || -z "${1:-}" ]]; then
+        echo "Permanent"
+    else
+        echo "${1}m"
+    fi
+}
+
+# One ban row for index I at screen ROW; the selected row is inverted
+_bans_draw_row() {
+    local i="$1" row="$2"
+    local bname="${ban_names[$i]}" breason="${ban_reasons[$i]}"
+    [[ ${#bname} -gt 20 ]] && bname="${bname:0:17}..."
+    [[ ${#breason} -gt 20 ]] && breason="${breason:0:17}..."
+    local duration_str banned_str expires_str
+    duration_str=$(_bans_duration_str "${ban_durations[$i]}")
+    banned_str=$(_bans_date_str "${ban_banned_at[$i]}")
+    expires_str=$(_bans_date_str "${ban_expires[$i]}")
+
+    local dim="$DIM"
+    move_to "$row" 1
+    if [[ $i -eq $selected ]]; then
+        printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
+        move_to "$row" $col_status
+        printf "▶ 🚫"
+        dim=""
+    else
+        printf "%s" "${ESC}[K"
+        move_to "$row" $col_status
+        printf "  %s🚫%s" "$RED" "$RESET"
+    fi
+    tui_draw_cells "$row" "$col_name::$bname" "$col_reason:$dim:$breason" "$col_duration:$dim:$duration_str" \
+        "$col_banned:$dim:$banned_str" "$col_expires:$dim:$expires_str" "$col_guid:$dim:${ban_guids[$i]}"
+    [[ $i -eq $selected ]] && printf "%s" "$RESET"
+    return 0
+}
+
+# Title, column titles, rows (or the empty line), action bar, footer
+_bans_draw() {
+    tui_draw_header "🚫 Ban List - ${ban_count} bans"
+    local table_start=3 col_status=2 col_name=6
+    local col_reason=$((col_name + 22))
+    local col_duration=$((col_reason + 22))
+    local col_banned=$((col_duration + 10))
+    local col_expires=$((col_banned + 18))
+    local col_guid=$((TERM_COLS - 38))
+    tui_draw_rule $table_start
+    tui_draw_titles $((table_start + 1)) "$col_status:  " "$col_name:PLAYER NAME" "$col_reason:REASON" \
+        "$col_duration:DURATION" "$col_banned:BANNED AT" "$col_expires:EXPIRES" "$col_guid:GUID"
+    tui_draw_rule $((table_start + 2))
+
+    local row=$((table_start + 3)) i
+    if [[ $ban_count -eq 0 ]]; then
+        move_to $row 1
+        printf "%s  ℹ️  No bans recorded (press R to refresh)%s" "$DIM" "$RESET"
+        row=$((row + 1))
+    else
+        for i in "${!ban_names[@]}"; do
+            _bans_draw_row "$i" "$row"
+            row=$((row + 1))
+        done
+    fi
+    tui_draw_rule $row
+    _table_actions $((row + 1)) "$ban_count"
+    tui_draw_footer " [↑↓] Select  [Enter] Ban Details  [U] Unban  [R] Refresh  [Q] Back"
+}
+
+# [Enter] details of the selected ban
+_bans_key_details() {
+    [[ $selected -lt $ban_count ]] || return 0
+    local record
+    record=$(ban_to_json "${ban_names[$selected]}" "${ban_reasons[$selected]}" "${ban_durations[$selected]}" \
+        "${ban_banned_at[$selected]}" "${ban_expires[$selected]}" "${ban_guids[$selected]}")
+    ban_details_menu "$inst_dir" "$record" || true
+    needs_refresh=1
+}
+
+# [U] unban the selected record after confirmation
+_bans_key_unban() {
+    [[ $selected -lt $ban_count ]] || return 0
+    confirm "Unban '${ban_names[$selected]}'?" "n" || return 0
+    if unban_player "$inst_dir" "${ban_guids[$selected]}" "${ban_names[$selected]}"; then
+        needs_refresh=1
+    fi
+}
+
+# Ban list in a table with details and unban
 # Usage: ban_list_menu "$inst_dir"
 ban_list_menu() {
     local inst_dir="$1"
-    
     PLAYERS_STATE_DIR="${inst_dir}/data/state/players"
     local bans_file="${PLAYERS_STATE_DIR}/bans.json"
-    
-    local selected=0
-    local needs_refresh=1
-    
-    # Ban data arrays
-    local -a ban_names=()
-    local -a ban_reasons=()
-    local -a ban_durations=()
-    local -a ban_banned_at=()
-    local -a ban_expires=()
-    local -a ban_guids=()
+
+    local selected=0 needs_refresh=1
+    local -a ban_names=() ban_reasons=() ban_durations=() ban_banned_at=() ban_expires=() ban_guids=()
     local ban_count=0
-    
+    local total_items key seq
     while true; do
-        # Refresh ban data if needed
         if [[ $needs_refresh -eq 1 ]]; then
-            ban_names=()
-            ban_reasons=()
-            ban_durations=()
-            ban_banned_at=()
-            ban_expires=()
-            ban_guids=()
-            
-            if [[ -f "$bans_file" ]]; then
-                # One process for the whole list instead of six per ban.
-                # 0x1F separated so empty fields (GUID, reason) keep their place.
-                local bguid bname breason bminutes bat bexp
-                while IFS=$'\x1f' read -r bguid bname breason bminutes bat bexp; do
-                    [[ -z "$bguid$bname" ]] && continue
-                    ban_guids+=("$bguid")
-                    ban_names+=("${bname:-Unknown}")
-                    ban_reasons+=("${breason:--}")
-                    ban_durations+=("${bminutes:-0}")
-                    ban_banned_at+=("${bat:--}")
-                    ban_expires+=("${bexp:-never}")
-                done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --rows 2>/dev/null)
-            fi
-            
-            ban_count=${#ban_names[@]}
+            _bans_refresh
             needs_refresh=0
         fi
-        
-        local total_items=$((ban_count + 2))  # Bans + Refresh + Back
+        total_items=$((ban_count + ${#TABLE_SCREEN_ACTIONS[@]}))
         [[ $selected -lt 0 ]] && selected=0
         [[ $selected -ge $total_items ]] && selected=$((total_items - 1))
-        
-        # Get terminal size
         get_term_size
-        
-        # Draw screen
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        
-        # Header bar
-        move_to 1 1
-        local header_title="Ban List - ${ban_count} bans"
-        printf "%s%s 🚫 %s%s%s" "$BG_RED" "$WHITE$BOLD" "$header_title" "${ESC}[K" "$RESET"
-        
-        # Table header - calculate column positions
-        local table_start=3
-        local col_status=2
-        local col_name=6
-        local col_reason=$((col_name + 22))
-        local col_duration=$((col_reason + 22))
-        local col_banned=$((col_duration + 10))
-        local col_expires=$((col_banned + 18))
-        local col_guid=$((TERM_COLS - 38))
-        
-        move_to $table_start 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        move_to $((table_start + 1)) $col_status
-        printf "%s%s  %s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_name
-        printf "%s%sPLAYER NAME%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_reason
-        printf "%s%sREASON%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_duration
-        printf "%s%sDURATION%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_banned
-        printf "%s%sBANNED AT%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_expires
-        printf "%s%sEXPIRES%s" "$DIM" "$WHITE" "$RESET"
-        move_to $((table_start + 1)) $col_guid
-        printf "%s%sGUID%s" "$DIM" "$WHITE" "$RESET"
-        
-        move_to $((table_start + 2)) 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        
-        # Ban rows
-        local row=$((table_start + 3))
-        
-        if [[ $ban_count -eq 0 ]]; then
-            move_to $row 1
-            printf "%s  ℹ️  No bans recorded (press R to refresh)%s" "$DIM" "$RESET"
-            row=$((row + 1))
-        else
-            for i in "${!ban_names[@]}"; do
-                local bname="${ban_names[$i]}"
-                local breason="${ban_reasons[$i]}"
-                local bduration="${ban_durations[$i]}"
-                local bbanned="${ban_banned_at[$i]}"
-                local bexpires="${ban_expires[$i]}"
-                local bguid="${ban_guids[$i]}"
-                
-                # Format duration
-                local duration_str
-                if [[ "$bduration" == "0" || -z "$bduration" ]]; then
-                    duration_str="Permanent"
-                else
-                    duration_str="${bduration}m"
-                fi
-                
-                # Format timestamps (convert ISO to DD/MM HH:MM)
-                local banned_str expires_str
-                if [[ "$bbanned" != "-" && "$bbanned" != "null" ]]; then
-                    banned_str=$(echo "$bbanned" | sed 's/T/ /' | sed 's/Z//' | cut -c1-16 || echo "$bbanned")
-                else
-                    banned_str="-"
-                fi
-                if [[ "$bexpires" == "never" ]]; then
-                    expires_str="Never"
-                elif [[ "$bexpires" != "-" && "$bexpires" != "null" ]]; then
-                    expires_str=$(echo "$bexpires" | sed 's/T/ /' | sed 's/Z//' | cut -c1-16 || echo "$bexpires")
-                else
-                    expires_str="-"
-                fi
-                
-                # Truncate fields (but not GUID)
-                [[ ${#bname} -gt 20 ]] && bname="${bname:0:17}..."
-                [[ ${#breason} -gt 20 ]] && breason="${breason:0:17}..."
-                
-                move_to $row 1
-                if [[ $i -eq $selected ]]; then
-                    # Selected row
-                    printf "%s%s%s" "$BG_RED" "$WHITE$BOLD" "${ESC}[K"
-                    move_to $row $col_status
-                    printf "▶ 🚫"
-                    move_to $row $col_name
-                    printf "%s" "$bname"
-                    move_to $row $col_reason
-                    printf "%s" "$breason"
-                    move_to $row $col_duration
-                    printf "%s" "$duration_str"
-                    move_to $row $col_banned
-                    printf "%s" "$banned_str"
-                    move_to $row $col_expires
-                    printf "%s" "$expires_str"
-                    move_to $row $col_guid
-                    printf "%s" "$bguid"
-                    printf "%s" "$RESET"
-                else
-                    # Normal row
-                    printf "%s" "${ESC}[K"
-                    move_to $row $col_status
-                    printf "  %s🚫%s" "$RED" "$RESET"
-                    move_to $row $col_name
-                    printf "%s" "$bname"
-                    move_to $row $col_reason
-                    printf "%s%s%s" "$DIM" "$breason" "$RESET"
-                    move_to $row $col_duration
-                    printf "%s%s%s" "$DIM" "$duration_str" "$RESET"
-                    move_to $row $col_banned
-                    printf "%s%s%s" "$DIM" "$banned_str" "$RESET"
-                    move_to $row $col_expires
-                    printf "%s%s%s" "$DIM" "$expires_str" "$RESET"
-                    move_to $row $col_guid
-                    printf "%s%s%s" "$DIM" "$bguid" "$RESET"
-                fi
-                row=$((row + 1))
-            done
-        fi
-        
-        # Separator
-        move_to $row 1
-        printf "%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET"
-        printf "%.0s-" $(seq 1 $TERM_COLS)
-        printf "%s" "$RESET"
-        row=$((row + 1))
-        
-        # Action bar
-        local action_row=$row
-        local actions=("[R] Refresh" "[Q] Back")
-        
-        move_to $action_row 2
-        for a in "${!actions[@]}"; do
-            local action_idx=$((ban_count + a))
-            local action_label="${actions[$a]}"
-            
-            if [[ $selected -eq $action_idx ]]; then
-                printf "%s%s▶ %s %s" "$BG_RED" "$WHITE$BOLD" "$action_label" "$RESET"
-            else
-                printf "  %s " "$action_label"
-            fi
-            printf " "
-        done
-        
-        # Footer help
-        move_to $TERM_ROWS 1
-        printf "%s%s [↑↓] Select  [Enter] Ban Details  [U] Unban  [R] Refresh  [Q] Back%s%s" "$BG_DARKGRAY" "$WHITE" "${ESC}[K" "$RESET"
-        
-        # Read input
-        IFS= read -rsn1 key
-        
+        _bans_draw
+
+        IFS= read -rsn1 key || return 0   # EOF: leave instead of looping
         case "$key" in
             $'\x1b')
                 read -rsn2 -t 0.1 seq || true
                 case "$seq" in
-                    '[A') if ((selected > 0)); then selected=$((selected-1)); fi ;;
-                    '[B') if ((selected < total_items - 1)); then selected=$((selected+1)); fi ;;
+                    '[A') if [[ $selected -gt 0 ]]; then selected=$((selected - 1)); fi ;;
+                    '[B') if [[ $selected -lt $((total_items - 1)) ]]; then selected=$((selected + 1)); fi ;;
                 esac
                 ;;
-            '') # Enter
+            '')  # Enter: ban details, or the button under the cursor
                 if [[ $selected -lt $ban_count ]]; then
-                    # Build ban record JSON for details menu
-                    local ban_record
-                    ban_record=$(ban_to_json "${ban_names[$selected]}" "${ban_reasons[$selected]}" "${ban_durations[$selected]}" "${ban_banned_at[$selected]}" "${ban_expires[$selected]}" "${ban_guids[$selected]}")
-                    ban_details_menu "$inst_dir" "$ban_record"
-                    needs_refresh=1
+                    _bans_key_details
                 elif [[ $selected -eq $ban_count ]]; then
-                    # Refresh
                     needs_refresh=1
-                elif [[ $selected -eq $((ban_count + 1)) ]]; then
-                    # Back
+                else
                     return 0
                 fi
                 ;;
-            'r'|'R')
-                needs_refresh=1
-                ;;
-            'u'|'U')
-                if [[ $selected -lt $ban_count ]]; then
-                    local unban_guid="${ban_guids[$selected]}"
-                    local unban_name="${ban_names[$selected]}"
-                    if confirm "Unban '${unban_name}'?" "n"; then
-                        unban_player "$inst_dir" "$unban_guid" "$unban_name" && needs_refresh=1
-                    fi
-                fi
-                ;;
-            'q'|'Q')
-                return 0
-                ;;
+            r|R) needs_refresh=1 ;;
+            u|U) _bans_key_unban ;;
+            q|Q) return 0 ;;
         esac
     done
 }

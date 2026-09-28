@@ -102,3 +102,57 @@ draw_box() {
     printf "─%.0s" $(seq 1 $((width-2)))
     printf "┘%s" "$RESET"
 }
+
+# -----------------------------------------------------------------------------
+# Table screens: shared drawing helpers (Mod Manager, players, ban list)
+# -----------------------------------------------------------------------------
+
+# Clear the screen and draw the title bar in row 1
+tui_draw_header() {
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    move_to 1 1
+    printf "%s%s %s%s%s" "$BG_RED" "$WHITE$BOLD" "$1" "${ESC}[K" "$RESET"
+}
+
+# Key help in the last row
+tui_draw_footer() {
+    move_to "$TERM_ROWS" 1
+    printf "%s%s%s%s%s" "$BG_DARKGRAY" "$WHITE" "$1" "${ESC}[K" "$RESET"
+}
+
+# Full-width dashed line at ROW (no subprocess)
+tui_draw_rule() {
+    local line
+    printf -v line '%*s' "$TERM_COLS" ''
+    move_to "$1" 1
+    printf "%s%s%s%s%s%s" "$DIM" "$RED" "${ESC}[K" "$RESET" "${line// /-}" "$RESET"
+}
+
+# Dim column titles at ROW: each argument "COL:TITLE"
+tui_draw_titles() {
+    local row="$1"
+    shift
+    local col
+    for col in "$@"; do
+        move_to "$row" "${col%%:*}"
+        printf "%s%s%s%s" "$DIM" "$WHITE" "${col#*:}" "$RESET"
+    done
+}
+
+# Cells at ROW: each argument "COL:COLOR:TEXT"; an empty COLOR prints plain text
+tui_draw_cells() {
+    local row="$1"
+    shift
+    local cell rest color text
+    for cell in "$@"; do
+        rest="${cell#*:}"
+        color="${rest%%:*}"
+        text="${rest#*:}"
+        move_to "$row" "${cell%%:*}"
+        if [[ -n "$color" ]]; then
+            printf "%s%s%s" "$color" "$text" "$RESET"
+        else
+            printf "%s" "$text"
+        fi
+    done
+}
