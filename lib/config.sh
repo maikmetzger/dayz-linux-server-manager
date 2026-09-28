@@ -337,8 +337,11 @@ config_parser_exec() {
     # Disable exit on error for docker commands
     set +e
     
-    # Copy script to container
-    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null
+    # Copy the parser and the helper module it imports (fileutil.py) into
+    # the container; python resolves imports relative to the script's folder.
+    local fileutil_script="${SCRIPT_DIR}/lib/fileutil.py"
+    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null \
+        && $DOCKER cp "${fileutil_script}" "${container}:/tmp/fileutil.py" 2>/dev/null
     if [[ $? -ne 0 ]]; then
         set -e
         echo '{"status":"error","message":"Failed to copy parser to container. Is the container running?"}'
