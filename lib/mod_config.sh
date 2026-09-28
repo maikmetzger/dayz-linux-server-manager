@@ -91,63 +91,6 @@ EOF
 
 # Link an existing CustomCE file to cfgeconomycore.xml
 # Args: instance_dir, target_filename, ce_type (types|spawnabletypes|events|eventspawns)
-link_modular_xml() {
-    local instance_dir="$1"
-    local target_filename="$2"
-    local ce_type="${3:-types}"  # Default to 'types' for backward compatibility
-    
-    local mission_path=$(get_mission_path "$instance_dir")
-    [[ -z "$mission_path" ]] && return 1
-    
-    setup_modular_loot "$mission_path"
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    
-    # Map ce_type to folder path
-    local ce_folder="CustomCE/${ce_type}"
-    
-    python3 <<EOF
-import xml.etree.ElementTree as ET
-import sys
-
-core_path = "$core_xml"
-file_to_add = "$target_filename"
-ce_type = "$ce_type"
-ce_folder = "$ce_folder"
-
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    # Find the correct CE block by folder attribute
-    ce_node = None
-    for ce in root.findall('ce'):
-        if ce.get('folder') == ce_folder:
-            ce_node = ce
-            break
-    
-    # If no matching CE block, create one
-    if ce_node is None:
-        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
-    
-    # Check if file already exists in any CE block
-    exists = False
-    for ce in root.findall('ce'):
-        for f in ce.findall('file'):
-            if f.get('name') == file_to_add:
-                exists = True
-                break
-        if exists:
-            break
-            
-    if not exists:
-        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
-        if hasattr(ET, 'indent'):
-            ET.indent(tree, space="\t", level=0)
-        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
-except Exception as e:
-    sys.exit(1)
-EOF
-}
 
 
 # Register a loot XML as a modular include
@@ -196,6 +139,24 @@ register_modular_loot() {
 
     # Clean target name for FS safety
     target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
+
+    # Never link a file the server cannot parse: one broken CE file stops CE loading
+    if ! python3 - "$source_xml" <<'PY_VALIDATE' 2>/dev/null
+import re, sys, xml.etree.ElementTree as ET
+with open(sys.argv[1], 'rb') as f:
+    data = f.read()
+try:
+    ET.fromstring(data)
+except ET.ParseError:
+    # a bare fragment (<type> without <types>) is fine once wrapped
+    body = re.sub(rb'^\s*<\?xml[^>]*\?>', b'', data)
+    ET.fromstring(b'<r>' + body + b'</r>')
+PY_VALIDATE
+    then
+        echo "Error: '$source_xml' is not well-formed XML, not linked" >&2
+        [[ "$silent" == "0" ]] && show_message "'$(basename "$source_xml")' is not valid XML and was not linked." "Error"
+        return 1
+    fi
     
     # Route to the correct CE folder based on detected type
     local ce_folder="CustomCE/${ce_type}"
@@ -225,14 +186,11 @@ register_modular_loot() {
     cp "$source_xml" "$original_path"
     
     # 3. Add to cfgeconomycore.xml using Python for correct CE block
-    python3 <<EOF
+    python3 - "$core_xml" "$target_filename" "$ce_type" "$ce_folder" <<'EOF'
 import xml.etree.ElementTree as ET
 import sys
 
-core_path = "$core_xml"
-file_to_add = "$target_filename"
-ce_type = "$ce_type"
-ce_folder = "$ce_folder"
+core_path, file_to_add, ce_type, ce_folder = sys.argv[1:5]
 
 try:
     tree = ET.parse(core_path)
@@ -249,16 +207,10 @@ try:
     if ce_node is None:
         ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
     
-    # Check if file already exists in any CE block
-    exists = False
-    for ce in root.findall('ce'):
-        for f in ce.findall('file'):
-            if f.get('name') == file_to_add:
-                exists = True
-                break
-        if exists:
-            break
-            
+    # Already linked in this CustomCE block? Other blocks (e.g. a user-added
+    # db block listing the vanilla types.xml) must not count as a duplicate.
+    exists = any(f.get('name') == file_to_add for f in ce_node.findall('file'))
+
     if not exists:
         new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
         
@@ -271,13 +223,18 @@ try:
     else:
         print("Already linked")
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)
 EOF
-    
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        [[ "$silent" == "0" ]] && show_message "Could not register $target_filename in cfgeconomycore.xml" "Error"
+        return $rc
+    fi
     if [[ "$silent" == "0" ]]; then
         show_message "Registered $target_filename in cfgeconomycore.xml (${ce_type})" "Success"
     fi
+    return 0
 }
 
 # Unregister a modular include (removes from any CE block)
@@ -344,35 +301,9 @@ PYTHON_UNREGISTER
 get_ce_ignore_file() {
     local inst_dir="$1"
     local mission_path
-    mission_path=$(get_mission_path "$inst_dir" 2>/dev/null)
+    # Without a mission the path would degrade to /CustomCE at the filesystem root
+    mission_path=$(get_mission_path "$inst_dir" 2>/dev/null) || return 1
     echo "${mission_path}/CustomCE/.ce_ignored.json"
-}
-
-# Check if a file is in the ignore list
-# Usage: is_ce_ignored "$inst_dir" "mod_id" "filename"
-is_ce_ignored() {
-    local inst_dir="$1"
-    local mod_id="$2"
-    local filename="$3"
-    local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
-    
-    if [[ ! -f "$ignore_file" ]]; then
-        return 1  # Not ignored
-    fi
-    
-    python3 -c "
-import json, sys
-try:
-    with open('$ignore_file', 'r') as f:
-        data = json.load(f)
-    key = f'${mod_id}|${filename}'.lower()
-    if key in [x.lower() for x in data.get('ignored', [])]:
-        sys.exit(0)
-    sys.exit(1)
-except:
-    sys.exit(1)
-"
 }
 
 # Add a file to the ignore list
@@ -382,13 +313,12 @@ add_ce_ignore() {
     local mod_id="$2"
     local filename="$3"
     local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
-    
-    python3 -c "
-import json, os
-ignore_file = '$ignore_file'
-mod_id = '$mod_id'
-filename = '$filename'
+    ignore_file=$(get_ce_ignore_file "$inst_dir") || { show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"; return 1; }
+
+    # Values travel as arguments: file names come from mod folders and may contain quotes
+    python3 - "$ignore_file" "$mod_id" "$filename" <<'PY_ADD_IGNORE'
+import json, os, sys
+ignore_file, mod_id, filename = sys.argv[1], sys.argv[2], sys.argv[3]
 key = f'{mod_id}|{filename}'
 
 data = {'ignored': []}
@@ -408,7 +338,7 @@ os.makedirs(os.path.dirname(ignore_file), exist_ok=True)
 with open(ignore_file, 'w') as f:
     json.dump(data, f, indent=2)
 print('Added')
-"
+PY_ADD_IGNORE
 }
 
 # Remove a file from the ignore list
@@ -418,17 +348,15 @@ remove_ce_ignore() {
     local mod_id="$2"
     local filename="$3"
     local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
+    ignore_file=$(get_ce_ignore_file "$inst_dir") || return 1
     
     if [[ ! -f "$ignore_file" ]]; then
         return
     fi
     
-    python3 -c "
-import json
-ignore_file = '$ignore_file'
-mod_id = '$mod_id'
-filename = '$filename'
+    python3 - "$ignore_file" "$mod_id" "$filename" <<'PY_REMOVE_IGNORE'
+import json, sys
+ignore_file, mod_id, filename = sys.argv[1], sys.argv[2], sys.argv[3]
 key = f'{mod_id}|{filename}'
 
 try:
@@ -440,8 +368,9 @@ try:
         with open(ignore_file, 'w') as f:
             json.dump(data, f, indent=2)
         print('Removed')
-except: pass
-"
+except (OSError, ValueError) as e:
+    print(f'WARN: {e}', file=sys.stderr)
+PY_REMOVE_IGNORE
 }
 
 # =============================================================================
@@ -892,8 +821,11 @@ except: pass
              local midx=$selection
              local fn="${sfile_names[$midx]}"
              
-             # Call Rollback UI (Phase 4)
-             show_rollback_menu "$inst_dir" "${smod_names[$midx]}_${fn}" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
+             # Call Rollback UI (Phase 4). Linked files are named <mod_id>_<file>
+             # (see register_modular_loot); prefer the name the scan reported.
+             local linked_fn="${slinked_names[$midx]:-}"
+             [[ -z "$linked_fn" ]] && linked_fn=$(echo "${smod_ids[$midx]}_${fn}" | tr -cd '[:alnum:]_.-')
+             show_rollback_menu "$inst_dir" "$linked_fn" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${linked_fn}"
              
         elif [[ "$key" == "d" || "$key" == "D" ]]; then
             local midx=$selection
@@ -1529,15 +1461,16 @@ cleanup_mod_ce_files() {
 # Merge Tracking Wrappers (Phase 2)
 # =============================================================================
 
-# Resolve the merge target for merge-only CE types inside the active mission
-# (randompresets -> db/cfgrandompresets.xml, eventgroups -> db/cfgeventgroups.xml).
+# Resolve the merge target for merge-only CE types inside the active mission.
+# The vanilla files live in the mission root (cfgrandompresets.xml,
+# cfgeventgroups.xml), not in db/: a merge into db/ is never read by the server.
 # Usage: target_xml=$(ce_merge_target "$inst_dir" "$ce_type") || <no mission found>
 ce_merge_target() {
     local inst_dir="$1" ce_type="$2"
     local mission_path
     mission_path=$(get_mission_path "$inst_dir") || return 1
-    local target_file="db/cfgrandompresets.xml"
-    [[ "$ce_type" == "eventgroups" ]] && target_file="db/cfgeventgroups.xml"
+    local target_file="cfgrandompresets.xml"
+    [[ "$ce_type" == "eventgroups" ]] && target_file="cfgeventgroups.xml"
     echo "${mission_path}/${target_file}"
 }
 
@@ -1686,14 +1619,14 @@ list_ce_backups() {
     # Strip .xml extension for matching
     local base="${ce_filename%.xml}"
     
-    python3 <<EOF
+    python3 - "$backup_dir" "$base" <<'EOF'
 import os
 import json
 import re
+import sys
 from datetime import datetime
 
-backup_dir = "$backup_dir"
-base = "$base"
+backup_dir, base = sys.argv[1], sys.argv[2]
 
 backups = []
 pattern = re.compile(rf'^{re.escape(base)}_(\d{{8}}_\d{{6}})_(\w+)\.xml$')

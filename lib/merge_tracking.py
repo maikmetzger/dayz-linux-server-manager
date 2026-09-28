@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Any
 #
 # Tracking File Schema:
 # {
-#   "target_file": "db/cfgrandompresets.xml",
+#   "target_file": "cfgrandompresets.xml",
 #   "last_updated": "ISO8601",
 #   "entries": {
 #     "ModID_123": [
@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Any
 def get_tracking_path(instance_dir: str, target_file: str) -> str:
     """
     Returns the absolute path to the tracking JSON for a given target file.
-    Example: target_file='db/cfgrandompresets.xml' -> '.../state/ce_merge_tracking/cfgrandompresets.json'
+    Example: target_file='cfgrandompresets.xml' -> '.../state/ce_merge_tracking/cfgrandompresets.json'
     """
     state_dir = os.path.join(instance_dir, 'data', 'state', 'ce_merge_tracking')
     if not os.path.exists(state_dir):
@@ -122,7 +122,7 @@ def inject_entries(target_file: str, source_file: str, mod_id: str, mod_name: st
         tag_name = "types" # Default
         base = os.path.basename(target_file).lower()
         if 'randompresets' in base: tag_name = 'randompresets'
-        elif 'eventgroups' in base: tag_name = 'eventgroups'
+        elif 'eventgroups' in base: tag_name = 'eventgroupdef'  # real root of cfgeventgroups.xml
         elif not is_wrapped: tag_name = src_root.tag
             
         target_root = ET.Element(tag_name)

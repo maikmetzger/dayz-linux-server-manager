@@ -49,16 +49,27 @@ CE_TYPE_REGISTRY: Dict[str, Dict[str, Any]] = {
         'merge_only': False
     },
     # Merge-only types: Cannot be included via cfgeconomycore.xml
+    # Merge-only types: the vanilla files live in the mission root
+    # (cfgrandompresets.xml, cfgeventgroups.xml), not in db/.
     'randompresets': {
         'ce_type': 'randompresets',
-        'folder': 'db',
+        'folder': '',
         'description': 'Random loot preset groups (themed item bundles)',
         'merge_only': True,
         'target_file': 'cfgrandompresets.xml'
     },
     'eventgroups': {
         'ce_type': 'eventgroups',
-        'folder': 'db',
+        'folder': '',
+        'description': 'Event object groups (train wrecks, helicopter crashes)',
+        'merge_only': True,
+        'target_file': 'cfgeventgroups.xml'
+    },
+    # The real root element of cfgeventgroups.xml (checked against the
+    # official BohemiaInteractive/DayZ-Central-Economy files)
+    'eventgroupdef': {
+        'ce_type': 'eventgroups',
+        'folder': '',
         'description': 'Event object groups (train wrecks, helicopter crashes)',
         'merge_only': True,
         'target_file': 'cfgeventgroups.xml'

@@ -141,5 +141,18 @@ class TestInjectIsIdempotent(unittest.TestCase):
         self.assertEqual(ET.parse(self.target).getroot().find('cargo').get('chance'), '0.1')
 
 
+class TestNewTargetRootTag(unittest.TestCase):
+    def test_new_eventgroups_target_uses_real_root(self):
+        d = tempfile.mkdtemp()
+        src = os.path.join(d, 'mod_eventgroups.xml')
+        with open(src, 'w', encoding='utf-8') as f:
+            f.write('<eventgroupdef><group name="G1"><child type="X"/></group></eventgroupdef>')
+        target = os.path.join(d, 'cfgeventgroups.xml')
+        added = merge_tracking.inject_entries(target, src, '1', 'Mod')
+        self.assertEqual([a['name'] for a in added], ['G1'])
+        self.assertEqual(ET.parse(target).getroot().tag, 'eventgroupdef')
+        shutil.rmtree(d)
+
+
 if __name__ == '__main__':
     unittest.main()
