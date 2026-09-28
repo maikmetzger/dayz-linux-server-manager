@@ -15,11 +15,14 @@ _DAYZ_DIALOGS_LOADED=1
 # -----------------------------------------------------------------------------
 
 # Show an input dialog and return user input
-# Usage: result=$(read_input "Prompt:" "default_value" "Title")
+# Usage: result=$(read_input "Prompt:" "default_value" "Title" [secret])
+# With a 4th argument the input is not echoed and the default is never shown
+# (passwords). read_secret is a shorthand for that.
 read_input() {
     local prompt="$1"
     local default="${2:-}"
     local title="${3:-Input}"
+    local secret="${4:-}"
     
     # All display output goes to /dev/tty so it renders even when captured in $()
     exec 3>/dev/tty
@@ -73,12 +76,13 @@ read_input() {
     move_to $((box_row + 2)) $((box_col + 3)) >&3
     printf "%s%s%s" "$WHITE" "$prompt" "$RESET" >&3
     
-    # Show default value hint
-    if [[ -n "$default" ]]; then
-        move_to $((box_row + 4)) $((box_col + 3)) >&3
+    # Show default value hint (never the value itself for secrets)
+    move_to $((box_row + 4)) $((box_col + 3)) >&3
+    if [[ -n "$secret" ]]; then
+        printf "%s(input hidden%s)%s" "$DIM" "${default:+, Enter keeps the current value}" "$RESET" >&3
+    elif [[ -n "$default" ]]; then
         printf "%sDefault: %s%s" "$DIM" "$default" "$RESET" >&3
     else
-        move_to $((box_row + 4)) $((box_col + 3)) >&3
         printf "%s(Empty to cancel)%s" "$DIM" "$RESET" >&3
     fi
     
@@ -94,7 +98,11 @@ read_input() {
     
     # Simple read without -e -i to avoid cursor positioning bugs
     local input=""
-    read -r input </dev/tty
+    if [[ -n "$secret" ]]; then
+        read -rs input </dev/tty
+    else
+        read -r input </dev/tty
+    fi
     
     printf "%s" "$HIDE_CURSOR" >/dev/tty
     
@@ -105,6 +113,12 @@ read_input() {
     else
         echo "$input"
     fi
+}
+
+# Password input: no echo, default never displayed
+# Usage: pw=$(read_secret "Prompt:" "current_value" "Title")
+read_secret() {
+    read_input "$1" "${2:-}" "${3:-Password}" secret
 }
 
 # -----------------------------------------------------------------------------

@@ -37,7 +37,11 @@ _sync_xml_items() {
 import sys, json
 data = json.load(sys.stdin)
 for x in data:
-    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{json.dumps(x['flags'])}|{x['nominal_v']}|{x['min_v']}|{x['lifetime_v']}|{x['restock_v']}\")
+    # flags as six comma-separated 0/1 values (map,hoarder,cargo,player,crafted,deloot):
+    # bash can split that with read, no python per redraw
+    f = x['flags']
+    flag_str = ','.join(str(f.get(k, '0')) for k in ('count_in_map', 'count_in_hoarder', 'count_in_cargo', 'count_in_player', 'crafted', 'deloot'))
+    print(f\"{x['name']}|{x['nominal']}|{x['min']}|{x['lifetime']}|{x['restock']}|{x['category']}|{x['usages']}|{x['tiers']}|{flag_str}|{x['nominal_v']}|{x['min_v']}|{x['lifetime_v']}|{x['restock_v']}\")
 ")
     _count_out=${#_items_out[@]}
 }
@@ -160,23 +164,17 @@ _draw_xml_editor_screen() {
         
         # Flags
         if [[ -n "$flags" ]]; then
+            # Six 0/1 values from _sync_xml_items; no process spawns on a redraw
             local f_map f_hoarder f_cargo f_player f_crafted f_deloot
-            f_map=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_map', 0))")
-            f_hoarder=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_hoarder', 0))")
-            f_cargo=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_cargo', 0))")
-            f_player=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('count_in_player', 0))")
-            f_crafted=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('crafted', 0))")
-            f_deloot=$(echo "$flags" | python3 -c "import sys, json; print(json.load(sys.stdin).get('deloot', 0))")
-            
+            IFS=',' read -r f_map f_hoarder f_cargo f_player f_crafted f_deloot <<< "$flags"
+            local m_map=" " m_hoarder=" " m_cargo=" " m_player=" " m_crafted=" " m_deloot=" "
+            [[ "$f_map" == 1 ]] && m_map="x";         [[ "$f_hoarder" == 1 ]] && m_hoarder="x"
+            [[ "$f_cargo" == 1 ]] && m_cargo="x";     [[ "$f_player" == 1 ]] && m_player="x"
+            [[ "$f_crafted" == 1 ]] && m_crafted="x"; [[ "$f_deloot" == 1 ]] && m_deloot="x"
+
             move_to $((footer_row + 3)) 2
             printf "%sFlags:    %s[%s] Map  [%s] Hoarder  [%s] Cargo  [%s] Player  [%s] Crafted  [%s] DeLoot" \
-                "$YLW" "$WHITE" \
-                "$([[ $f_map == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_hoarder == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_cargo == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_player == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_crafted == 1 ]] && echo "x" || echo " ")" \
-                "$([[ $f_deloot == 1 ]] && echo "x" || echo " ")"
+                "$YLW" "$WHITE" "$m_map" "$m_hoarder" "$m_cargo" "$m_player" "$m_crafted" "$m_deloot"
         fi
     fi
     

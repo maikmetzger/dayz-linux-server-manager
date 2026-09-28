@@ -34,6 +34,19 @@ print(json.dumps({"id": num(pid), "name": name, "ping": num(ping), "guid": guid}
 PY_PLAYER_JSON
 }
 
+# Build one ban record as JSON for the details menu.
+# Usage: json=$(ban_to_json "$name" "$reason" "$duration_minutes" "$banned_at" "$expires" "$guid")
+ban_to_json() {
+    python3 - "$@" <<'PY_BAN_JSON'
+import json, sys
+name, reason, minutes, banned_at, expires, guid = sys.argv[1:7]
+try: minutes = int(minutes)
+except ValueError: minutes = -1
+print(json.dumps({"name": name, "reason": reason, "duration_minutes": minutes,
+                  "banned_at": banned_at, "expires": expires, "guid": guid}))
+PY_BAN_JSON
+}
+
 # =============================================================================
 # JSON Parsing Helpers - Now provided by lib/json_helpers.sh
 # =============================================================================
@@ -83,102 +96,13 @@ fetch_online_players() {
     local inst_dir="$1"
     local rcon_output
     
-    # Use run_rcon_action function (defined below) to execute RCON
-    rcon_output=$(run_rcon_action "$inst_dir" "players")
+    # rcon_action comes from lib/rcon_lib.sh (single RCON implementation)
+    rcon_output=$(rcon_action "$inst_dir" "players")
     
     if [[ -z "$rcon_output" ]]; then
         echo '{"count": 0, "players": [], "error": "RCON failed"}'
     else
         echo "$rcon_output"
-    fi
-}
-
-# Run RCON action and return JSON
-# Usage: result=$(run_rcon_action "$inst_dir" "action" [args...])
-run_rcon_action() {
-    local inst_dir="$1"
-    local action="$2"
-    shift 2
-    local extra_args=("$@")
-    
-    # Get RCON details from the instance
-    local marker="${inst_dir}/.dayz-instance"
-    local container_name
-    container_name="$(grep -oP 'CONTAINER_NAME=\K.*' "$marker" 2>/dev/null || echo "")"
-    
-    if [[ -z "$container_name" ]]; then
-        echo '{"success": false, "error": "No container found"}'
-        return 1
-    fi
-    
-    # Get RCON port and password from BEServer config
-    # Port is calculated as DayZ port + 3
-    local dz_port
-    dz_port=$(grep -oP 'DZ_PORT=\K[0-9]+' "$marker" 2>/dev/null || echo "2300")
-    local port=$((dz_port + 3))
-    
-    local be_config="${inst_dir}/data/config/BEServer_x64.cfg"
-    if [[ ! -f "$be_config" ]]; then
-        echo '{"success": false, "error": "BattlEye config not found"}'
-        return 1
-    fi
-    
-    local pass
-    pass=$(grep "^RConPassword" "$be_config" 2>/dev/null | awk '{print $2}' | tr -d '\r' || echo "")
-    
-    if [[ -z "$pass" ]]; then
-        echo '{"success": false, "error": "RCON password not configured"}'
-        return 1
-    fi
-    
-    # Get DayZ admin password from serverDZ.cfg for #login command
-    # NOTE: This is DIFFERENT from RCON password!
-    # - RConPassword (BEServer_x64.cfg) = BattlEye protocol auth
-    # - passwordAdmin (serverDZ.cfg) = DayZ in-game admin auth (#login)
-    local server_cfg="${inst_dir}/data/config/serverDZ.cfg"
-    local admin_pass=""
-    if [[ -f "$server_cfg" ]]; then
-        admin_pass=$(grep -oP 'passwordAdmin\s*=\s*"\K[^"]*' "$server_cfg" 2>/dev/null || echo "")
-    fi
-    
-    # Build RCON command arguments
-    local rcon_args=(
-        --host "127.0.0.1"
-        --port "$port"
-        --action "$action"
-    )
-    
-    # Add admin password if available (required for kick/ban commands)
-    if [[ -n "$admin_pass" ]]; then
-        rcon_args+=(--admin-password "$admin_pass")
-    fi
-    
-    # Add extra arguments
-    for arg in "${extra_args[@]}"; do
-        rcon_args+=("$arg")
-    done
-    
-    # Execute via Docker
-    local python_src="${PLAYERS_LIB_DIR}/be_rcon.py"
-    if [[ ! -f "$python_src" ]]; then
-        echo '{"success": false, "error": "RCON client not found"}'
-        return 1
-    fi
-    
-    # Copy script to container and execute
-    docker cp "$python_src" "${container_name}:/tmp/rcon_client.py" 2>/dev/null
-    
-    # Add --debug flag if DEBUG_RCON is set, log to file
-    if [[ -n "${DEBUG_RCON:-}" ]]; then
-        local debug_log="${inst_dir}/data/state/rcon_debug.log"
-        mkdir -p "$(dirname "$debug_log")" 2>/dev/null
-        rcon_args+=(--debug)
-        echo "--- $(date) ---" >> "$debug_log"
-        echo "Action: $action" >> "$debug_log"
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>> "$debug_log"
-    else
-        # Password via environment: command lines are visible in /proc and docker inspect
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" python3 /tmp/rcon_client.py "${rcon_args[@]}" 2>/dev/null
     fi
 }
 
@@ -232,49 +156,22 @@ players_menu() {
             player_joined=()
             
             if [[ -z "$error" || "$error" == "null" ]] && [[ "$player_count" -gt 0 ]]; then
-                # Update session tracking and get times
-                local now_ts
-                now_ts=$(date +%s)
-                
-                while IFS= read -r player; do
-                    [[ -z "$player" ]] && continue
-                    local pid pname pping pguid
-                    pid=$(json_get "$player" "id" "0")
-                    pname=$(json_get "$player" "name" "Unknown")
-                    pping=$(json_get "$player" "ping" "0")
-                    pguid=$(json_get "$player" "guid" "")
-                    
+                # One python process for the whole list: session bookkeeping,
+                # cleanup of departed players and one row per player.
+                # (Previously 5 processes per player, several seconds per refresh.)
+                # Fields are 0x1F separated: a tab would swallow empty fields
+                # such as the GUID of a lobby player (see lib/rowfmt.py).
+                local pid pname pping pguid ptime pjoined
+                while IFS=$'\x1f' read -r pid pname pping pguid ptime pjoined; do
+                    [[ -z "$pid" ]] && continue
                     player_ids+=("$pid")
                     player_names+=("$pname")
                     player_pings+=("$pping")
                     player_guids+=("$pguid")
-                    
-                    # Get or set join time from sessions.json using player_manager.py
-                    local session_result
-                    session_result=$(python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
-                        --file "$sessions_file" \
-                        --action get \
-                        --guid "$pguid" \
-                        --now "$now_ts" 2>/dev/null || echo '{}')
-
-                    local time_on_server_mins=0
-                    local joined_str=""
-                    time_on_server_mins=$(json_get "$session_result" "time_minutes" "0")
-                    joined_str=$(json_get "$session_result" "joined_at" "?")
-
-                    player_times+=("$time_on_server_mins")
-                    player_joined+=("$joined_str")
-                done < <(json_array "$player_json" "players")
-                
-                # Clean up departed players from sessions.json using player_manager.py
-                if [[ -f "$sessions_file" ]]; then
-                    local current_guids
-                    current_guids=$(IFS=','; echo "${player_guids[*]}")
-                    python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
-                        --file "$sessions_file" \
-                        --action cleanup \
-                        --guids "$current_guids" >/dev/null 2>&1 || true
-                fi
+                    player_times+=("$ptime")
+                    player_joined+=("$pjoined")
+                done < <(printf '%s' "$player_json" | python3 "${PLAYERS_LIB_DIR}/player_manager.py" session \
+                            --file "$sessions_file" --action sync --now "$(date +%s)" 2>/dev/null)
             fi
             
             player_count=${#player_ids[@]}
@@ -572,7 +469,7 @@ send_message_dialog() {
     
     # Send via RCON
     local result
-    result=$(run_rcon_action "$inst_dir" "say" --message "$formatted")
+    result=$(rcon_action "$inst_dir" "say" --message "$formatted")
     
     local success
     success=$(json_get "$result" "success" "false")
@@ -604,7 +501,7 @@ They can rejoin at any time." "n"; then
     # Execute kick - uses player NAME (not ID)
     # Note: BattlEye #kick doesn't support reason field
     local result
-    result=$(run_rcon_action "$inst_dir" "kick" --player-name "$player_name")
+    result=$(rcon_action "$inst_dir" "kick" --player-name "$player_name")
     
     local success
     success=$(json_get "$result" "success" "false")
@@ -646,31 +543,20 @@ ban_player_dialog() {
         reason="Banned by admin"
     fi
     
-    # Parse duration to human-readable
+    # Parse duration: "30m", "2h", "7d" or perm. Anything else is rejected
+    # instead of silently becoming a permanent ban.
     local human_duration="permanent"
     local duration_minutes=-1
-    
-    if [[ "$duration" != "perm" && "$duration" != "permanent" ]]; then
-        # Parse duration like "30m", "2h", "7d"
-        local num="${duration%[mhdMHD]}"
-        local unit="${duration: -1}"
-        
-        case "${unit,,}" in
-            m) 
-                duration_minutes=$num
-                human_duration="$num minutes"
-                ;;
-            h) 
-                duration_minutes=$((num * 60))
-                human_duration="$num hours"
-                ;;
-            d) 
-                duration_minutes=$((num * 60 * 24))
-                human_duration="$num days"
-                ;;
-            *)
-                human_duration="$duration"
-                ;;
+    if [[ "${duration,,}" != "perm" && "${duration,,}" != "permanent" ]]; then
+        if [[ ! "$duration" =~ ^([0-9]+)([mhdMHD])$ ]] || [[ "${BASH_REMATCH[1]}" -eq 0 ]]; then
+            show_message "Invalid duration '${duration}'. Use 30m, 2h, 7d or perm." "✗ Error"
+            return 1
+        fi
+        local num="${BASH_REMATCH[1]}"
+        case "${BASH_REMATCH[2],,}" in
+            m) duration_minutes=$num;               human_duration="$num minutes" ;;
+            h) duration_minutes=$((num * 60));      human_duration="$num hours" ;;
+            d) duration_minutes=$((num * 60 * 24)); human_duration="$num days" ;;
         esac
     fi
     
@@ -691,20 +577,50 @@ Reason: ${reason}" "y"; then
         return
     fi
     
-    # Step 1: Kick the player via RCON (this works!)
-    run_rcon_action "$inst_dir" "kick" --player-name "$player_name" >/dev/null 2>&1
-    
+    if [[ -z "$player_guid" ]]; then
+        show_message "'$player_name' has no verified GUID yet (still in lobby).
+Wait until the player is in game, then ban." "✗ Error"
+        return 1
+    fi
+
+    # Step 1: Kick the player via RCON
+    local kick_json
+    kick_json=$(rcon_action "$inst_dir" "kick" --player-name "$player_name" 2>/dev/null)
+
     # Step 2: Write GUID directly to bans.txt (RCON addBan fails silently)
     # Format: GUID -1 (permanent ban, -1 = no expiry timestamp)
     # SECURITY: Use safe_container_append_line to prevent command injection
-    safe_container_append_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "${player_guid} ${BAN_PERMANENT_MARKER}"
-    
+    if ! safe_container_append_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "${player_guid} ${BAN_PERMANENT_MARKER}"; then
+        show_message "Could not write bans.txt inside the container. Is it running?" "✗ Error"
+        return 1
+    fi
+
     # Step 3: Reload bans via RCON
-    run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
-    
-    # Save ban record to our tracking file (includes duration, reason, timestamps)
-    save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"
-    show_message "Banned '$player_name' for $human_duration" "✓ Success"
+    local reload_json
+    reload_json=$(rcon_action "$inst_dir" "loadbans" 2>/dev/null)
+
+    # Save ban record to our tracking file (includes duration, reason, timestamps).
+    # Without it a timed ban never expires, so a failure here is not a success.
+    local save_error
+    if ! save_error=$(save_ban_record "$inst_dir" "$player_guid" "$player_name" "$duration_minutes" "$reason"); then
+        show_message "GUID written to bans.txt, but the ban record could not be saved:
+${save_error}
+
+Without the record this ban will NOT expire automatically." "⚠ Warning"
+        return 1
+    fi
+
+    # Report what actually happened: the file write is done, RCON steps may have failed
+    local warnings=""
+    [[ "$(json_get "$kick_json" "success" "false")" == "true" ]] || warnings+="
+- kick failed, the player may still be connected"
+    [[ "$(json_get "$reload_json" "success" "false")" == "true" ]] || warnings+="
+- loadBans failed, the ban applies after the next server restart"
+    if [[ -n "$warnings" ]]; then
+        show_message "Banned '$player_name' for $human_duration, with warnings:${warnings}" "⚠ Partial"
+    else
+        show_message "Banned '$player_name' for $human_duration" "✓ Success"
+    fi
 }
 
 # =============================================================================
@@ -721,7 +637,7 @@ save_ban_record() {
     local duration_minutes="$4"
     local reason="$5"
 
-    local bans_file="${PLAYERS_STATE_DIR}/bans.json"
+    local bans_file="${PLAYERS_STATE_DIR:-${inst_dir}/data/state/players}/bans.json"
 
     # Format duration for ban_manager.py
     local duration_arg="perm"
@@ -729,12 +645,18 @@ save_ban_record() {
         duration_arg="${duration_minutes}m"
     fi
 
-    # Use ban_manager.py to safely add the ban record
-    python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" add \
+    # ban_manager.py exits non-zero with a JSON error when the record cannot
+    # be written; print that error so the caller can warn the admin.
+    local output
+    if ! output=$(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" add \
         --guid "$guid" \
         --name "$name" \
         --reason "$reason" \
-        --duration "$duration_arg" >/dev/null 2>&1 || true
+        --duration "$duration_arg" 2>&1); then
+        json_get "$output" "error" "$output"
+        return 1
+    fi
+    return 0
 }
 
 # =============================================================================
@@ -772,18 +694,18 @@ ban_list_menu() {
             ban_guids=()
             
             if [[ -f "$bans_file" ]]; then
-                local bans_data
-                bans_data=$(cat "$bans_file" 2>/dev/null || echo '{"bans": []}')
-                
-                while IFS= read -r ban; do
-                    [[ -z "$ban" ]] && continue
-                    ban_names+=("$(json_get "$ban" "name" "Unknown")")
-                    ban_reasons+=("$(json_get "$ban" "reason" "-")")
-                    ban_durations+=("$(json_get "$ban" "duration_minutes" "0")")
-                    ban_banned_at+=("$(json_get "$ban" "banned_at" "-")")
-                    ban_expires+=("$(json_get "$ban" "expires" "never")")
-                    ban_guids+=("$(json_get "$ban" "guid" "-")")
-                done < <(json_array "$bans_data" "bans")
+                # One process for the whole list instead of six per ban.
+                # 0x1F separated so empty fields (GUID, reason) keep their place.
+                local bguid bname breason bminutes bat bexp
+                while IFS=$'\x1f' read -r bguid bname breason bminutes bat bexp; do
+                    [[ -z "$bguid$bname" ]] && continue
+                    ban_guids+=("$bguid")
+                    ban_names+=("${bname:-Unknown}")
+                    ban_reasons+=("${breason:--}")
+                    ban_durations+=("${bminutes:-0}")
+                    ban_banned_at+=("${bat:--}")
+                    ban_expires+=("${bexp:-never}")
+                done < <(python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" list --rows 2>/dev/null)
             fi
             
             ban_count=${#ban_names[@]}
@@ -966,7 +888,8 @@ ban_list_menu() {
             '') # Enter
                 if [[ $selected -lt $ban_count ]]; then
                     # Build ban record JSON for details menu
-                    local ban_record="{\"name\": \"${ban_names[$selected]}\", \"reason\": \"${ban_reasons[$selected]}\", \"duration_minutes\": ${ban_durations[$selected]}, \"banned_at\": \"${ban_banned_at[$selected]}\", \"expires\": \"${ban_expires[$selected]}\", \"guid\": \"${ban_guids[$selected]}\"}"
+                    local ban_record
+                    ban_record=$(ban_to_json "${ban_names[$selected]}" "${ban_reasons[$selected]}" "${ban_durations[$selected]}" "${ban_banned_at[$selected]}" "${ban_expires[$selected]}" "${ban_guids[$selected]}")
                     ban_details_menu "$inst_dir" "$ban_record"
                     needs_refresh=1
                 elif [[ $selected -eq $ban_count ]]; then
@@ -985,9 +908,7 @@ ban_list_menu() {
                     local unban_guid="${ban_guids[$selected]}"
                     local unban_name="${ban_names[$selected]}"
                     if confirm "Unban '${unban_name}'?" "n"; then
-                        unban_player "$inst_dir" "$unban_guid"
-                        show_message "Unbanned: $unban_name" "Success"
-                        needs_refresh=1
+                        unban_player "$inst_dir" "$unban_guid" "$unban_name" && needs_refresh=1
                     fi
                 fi
                 ;;
@@ -1063,7 +984,14 @@ They will be able to rejoin immediately." "n"; then
 unban_player() {
     local inst_dir="$1"
     local guid="$2"
-    local name="$3"
+    local name="${3:-$2}"
+
+    # An empty GUID would match every line of bans.txt
+    if [[ -z "$guid" ]]; then
+        show_message "This ban record has no GUID, so nothing can be removed from bans.txt.
+Remove the entry from bans.json by hand." "✗ Error"
+        return 1
+    fi
 
     # Get container name
     local marker="${inst_dir}/.dayz-instance"
@@ -1076,18 +1004,27 @@ unban_player() {
     fi
 
     # Remove from our tracking (bans.json) using ban_manager.py
-    local bans_file="${PLAYERS_STATE_DIR}/bans.json"
+    local bans_file="${PLAYERS_STATE_DIR:-${inst_dir}/data/state/players}/bans.json"
     if [[ -f "$bans_file" ]]; then
         python3 "${PLAYERS_LIB_DIR}/ban_manager.py" --file "$bans_file" remove \
             --guid "$guid" >/dev/null 2>&1 || true
     fi
 
-    # Remove from BattlEye bans.txt INSIDE the container
+    # Remove from BattlEye bans.txt INSIDE the container (exact GUID match)
     # SECURITY: Use safe_container_remove_line to prevent command injection
-    safe_container_remove_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "$guid"
+    if ! safe_container_remove_line "$container_name" "$DAYZ_CONTAINER_BANS_TXT" "$guid"; then
+        show_message "Could not update bans.txt inside the container. Is it running?" "✗ Error"
+        return 1
+    fi
 
     # Reload bans via RCON
-    run_rcon_action "$inst_dir" "loadbans" >/dev/null 2>&1
-
-    show_message "Unbanned '$name'" "✓ Success"
+    local reload_json
+    reload_json=$(rcon_action "$inst_dir" "loadbans" 2>/dev/null)
+    if [[ "$(json_get "$reload_json" "success" "false")" == "true" ]]; then
+        show_message "Unbanned '$name'" "✓ Success"
+    else
+        show_message "Unbanned '$name' in bans.txt, but loadBans failed.
+The change applies after the next server restart." "⚠ Partial"
+    fi
+    return 0
 }

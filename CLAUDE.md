@@ -47,11 +47,14 @@ Libraries are sourced at startup via a loop. Each has double-source guards.
 
 **Feature Modules:**
 - `mods.sh` + `mod_config.sh` + `workshop.sh` - Mod management, Steam API, load order
+- `mod_status.py` - Date/update columns of the Mod Manager (one process for all mods)
+- `ce_scanner.py` - Scans enabled mods for CE files, link/merge/ignore state, post-sync candidates
 - `workshop_search.py` - Steam Workshop HTML scraping
 - `players.sh` + `admin_config.sh` - Player list, ban system, admin IDs
 - `be_rcon.py` - BattlEye UDP RCON protocol (CRC32 packets)
 - `types.sh` + `xml_parser.py` - Central Economy loot editor
 - `config.sh` + `config_parser.py` - Server config editor (CFG/JSON/XML)
+- `rowfmt.py` - Row output for bash readers (0x1F separated: bash `read` collapses empty tab fields)
 - `instance.sh` + `docker.sh` - Instance discovery, Docker commands
 
 ### Layer Dependencies
@@ -101,6 +104,12 @@ Integration (workshop, docker, steamcmd) never calls UI
 - Handle empty/partial data with defaults
 - Never silently swallow errors - log them
 - Debug mode: `DEBUG=1 ./tool.sh` with `log_debug`, `log_info`, `log_warn`, `log_error`
+
+### Bash TUI structure
+- A menu function is a short loop: rebuild data when needed, draw, read one key, dispatch to `_<menu>_key_*` / `_<menu>_*` helpers
+- Helpers work on the menu's locals through bash dynamic scoping; document the names they use at the top of the helper group
+- `read -rsn1 key || return 0` so a closed stdin leaves the menu instead of looping
+- Anything that needs parsing (JSON, XML, Steam API answers) goes into a `lib/*.py` module called with argv/stdin, never into interpolated `python3 -c` or unquoted heredocs
 
 ### TUI Guidelines
 - ASCII-first; unicode optional

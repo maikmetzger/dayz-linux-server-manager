@@ -66,5 +66,23 @@ class FragmentUpdateTest(unittest.TestCase):
         self.assertEqual(root.find("type[@name='Apple']/nominal").text, '5')
 
 
+class RealMissionLayoutTest(unittest.TestCase):
+    """Root tags as found in BohemiaInteractive/DayZ-Central-Economy."""
+
+    def test_eventgroupdef_root_is_eventgroups(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, 'something.xml')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('<eventgroupdef><group name="Train"><child type="X"/></group></eventgroupdef>')
+        info = xml_parser.detect_ce_type(path, use_filename_fallback=False)
+        self.assertIsNotNone(info)
+        self.assertEqual(info['ce_type'], 'eventgroups')
+        self.assertTrue(info['merge_only'])
+
+    def test_merge_only_targets_live_in_mission_root(self):
+        for key in ('randompresets', 'eventgroups', 'eventgroupdef'):
+            self.assertEqual(xml_parser.CE_TYPE_REGISTRY[key]['folder'], '')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -15,6 +15,24 @@ RCON_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${RCON_LIB_DIR}/constants.sh"
 
 # =============================================================================
+# Docker command
+# =============================================================================
+
+# Docker CLI as an array, honouring $DOCKER ("docker" or "sudo docker").
+# With sudo the password variables are preserved so they never have to be
+# written onto the command line.
+# Usage: local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
+_rcon_docker_cmd() {
+    local -a cmd
+    local IFS=' '
+    read -r -a cmd <<< "${DOCKER:-docker}"
+    if [[ "${cmd[0]}" == "sudo" ]]; then
+        cmd=(sudo --preserve-env=RCON_PASSWORD,ADMIN_PASSWORD "${cmd[@]:1}")
+    fi
+    printf '%s\n' "${cmd[@]}"
+}
+
+# =============================================================================
 # RCON Credential Extraction
 # =============================================================================
 
@@ -56,6 +74,11 @@ get_rcon_credentials() {
     if [[ ! -f "$be_cfg" ]]; then
         return 1
     fi
+
+    # BEServer_x64.cfg may set its own port (RConPort <n>); it wins over DZ_PORT+3
+    local cfg_port
+    cfg_port=$(grep -E '^RConPort[[:space:]]+[0-9]+' "$be_cfg" 2>/dev/null | awk '{print $2}' | tr -d '\r' | head -n 1)
+    [[ "$cfg_port" =~ ^[0-9]+$ ]] && rcon_port="$cfg_port"
 
     local rcon_pass
     rcon_pass=$(grep "^RConPassword" "$be_cfg" 2>/dev/null | awk '{print $2}' | tr -d '\r' || echo "")
@@ -99,7 +122,8 @@ ensure_rcon_script() {
     fi
 
     # Copy script to container
-    docker cp "$python_src" "${container_name}:${DAYZ_CONTAINER_RCON_SCRIPT}" 2>/dev/null
+    local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
+    "${dcmd[@]}" cp "$python_src" "${container_name}:${DAYZ_CONTAINER_RCON_SCRIPT}" 2>/dev/null
 }
 
 # =============================================================================
@@ -148,9 +172,9 @@ rcon_action() {
         --action "$action"
     )
 
-    # Add admin password if available
+    # Admin password (for #login) travels through the environment as well
     if [[ -n "$admin_pass" ]]; then
-        rcon_args+=(--admin-password "$admin_pass")
+        rcon_args+=(--admin-password-env ADMIN_PASSWORD)
     fi
 
     # Add extra arguments
@@ -168,32 +192,20 @@ rcon_action() {
         echo "Action: $action" >> "$debug_log"
     fi
 
-    # Execute via Docker with password passed via environment variable
-    # SECURITY: This prevents the password from appearing in 'ps' output
-    if [[ -n "${DEBUG_RCON:-}" ]]; then
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" \
-            python3 "${DAYZ_CONTAINER_RCON_SCRIPT}" "${rcon_args[@]}" --password-env RCON_PASSWORD 2>> "$debug_log"
-    else
-        docker exec -e "RCON_PASSWORD=$pass" "$container_name" \
-            python3 "${DAYZ_CONTAINER_RCON_SCRIPT}" "${rcon_args[@]}" --password-env RCON_PASSWORD 2>/dev/null
-    fi
+    # Passwords go through the environment only. "-e NAME" without a value
+    # copies the variable from our environment, so neither the host's docker
+    # process nor the container's python process shows it on the command line.
+    local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
+    local stderr_target=/dev/null
+    [[ -n "${DEBUG_RCON:-}" ]] && stderr_target="$debug_log"
+    RCON_PASSWORD="$pass" ADMIN_PASSWORD="$admin_pass" \
+        "${dcmd[@]}" exec -e RCON_PASSWORD -e ADMIN_PASSWORD "$container_name" \
+        python3 "${DAYZ_CONTAINER_RCON_SCRIPT}" "${rcon_args[@]}" --password-env RCON_PASSWORD 2>> "$stderr_target"
 }
 
 # =============================================================================
 # Safe Container Command Execution
 # =============================================================================
-
-# Safely execute a command in container with properly escaped arguments
-# SECURITY: Uses base64 encoding to prevent injection
-# Usage: safe_container_exec "$container" "command" "arg1" "arg2"
-safe_container_exec() {
-    local container="$1"
-    shift
-    local cmd=("$@")
-
-    # For simple commands, just use docker exec with proper quoting
-    docker exec "$container" "${cmd[@]}" 2>/dev/null
-}
 
 # Safely append a line to a file in container
 # SECURITY: Uses printf with proper quoting to prevent injection
@@ -205,7 +217,8 @@ safe_container_append_line() {
 
     # Use printf to safely write the content
     # The content is passed as a separate argument to printf, not interpolated
-    docker exec "$container" sh -c 'printf "%s\n" "$1" >> "$2"' _ "$content" "$file_path" 2>/dev/null
+    local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
+    "${dcmd[@]}" exec "$container" sh -c 'printf "%s\n" "$1" >> "$2"' _ "$content" "$file_path" 2>/dev/null
 }
 
 # Safely remove a line starting with pattern from file in container
@@ -214,16 +227,21 @@ safe_container_append_line() {
 safe_container_remove_line() {
     local container="$1"
     local file_path="$2"
-    local pattern="$3"
+    local key="$3"
 
-    # Create temp file, filter, then replace original
-    # Using grep -v with the pattern anchored to start of line
-    docker exec "$container" sh -c '
-        if [ -f "$2" ]; then
-            grep -v "^$1" "$2" > "$2.tmp" 2>/dev/null || true
-            mv "$2.tmp" "$2" 2>/dev/null || true
-        fi
-    ' _ "$pattern" "$file_path" 2>/dev/null || true
+    # An empty key would match every line and empty the file
+    if [[ -z "$key" ]]; then
+        echo "safe_container_remove_line: refusing empty key for ${file_path}" >&2
+        return 1
+    fi
+
+    # Remove only lines whose first field is exactly the key
+    # (bans.txt lines look like "<guid> <expiry> [reason]"). Returns docker's status.
+    local -a dcmd; mapfile -t dcmd < <(_rcon_docker_cmd)
+    "${dcmd[@]}" exec "$container" sh -c '
+        [ -f "$2" ] || exit 0
+        awk -v key="$1" '"'"'$1 != key'"'"' "$2" > "$2.tmp" && mv "$2.tmp" "$2"
+    ' _ "$key" "$file_path" 2>/dev/null
 }
 
 # =============================================================================

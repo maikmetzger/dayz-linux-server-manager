@@ -13,6 +13,8 @@ _DAYZ_MOD_CONFIG_LOADED=1
 
 # lib/mod_config.sh
 MOD_CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Loot Manager debug log lives in the user's state dir, not in the repo
+LOOT_MANAGER_LOG="${LOOT_MANAGER_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/dayz-docker-hub/loot_manager.log}"
 source "${MOD_CONFIG_LIB_DIR}/utils.sh"
 source "${MOD_CONFIG_LIB_DIR}/colors.sh"
 source "${MOD_CONFIG_LIB_DIR}/file_browser.sh"
@@ -91,63 +93,6 @@ EOF
 
 # Link an existing CustomCE file to cfgeconomycore.xml
 # Args: instance_dir, target_filename, ce_type (types|spawnabletypes|events|eventspawns)
-link_modular_xml() {
-    local instance_dir="$1"
-    local target_filename="$2"
-    local ce_type="${3:-types}"  # Default to 'types' for backward compatibility
-    
-    local mission_path=$(get_mission_path "$instance_dir")
-    [[ -z "$mission_path" ]] && return 1
-    
-    setup_modular_loot "$mission_path"
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    
-    # Map ce_type to folder path
-    local ce_folder="CustomCE/${ce_type}"
-    
-    python3 <<EOF
-import xml.etree.ElementTree as ET
-import sys
-
-core_path = "$core_xml"
-file_to_add = "$target_filename"
-ce_type = "$ce_type"
-ce_folder = "$ce_folder"
-
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    # Find the correct CE block by folder attribute
-    ce_node = None
-    for ce in root.findall('ce'):
-        if ce.get('folder') == ce_folder:
-            ce_node = ce
-            break
-    
-    # If no matching CE block, create one
-    if ce_node is None:
-        ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
-    
-    # Check if file already exists in any CE block
-    exists = False
-    for ce in root.findall('ce'):
-        for f in ce.findall('file'):
-            if f.get('name') == file_to_add:
-                exists = True
-                break
-        if exists:
-            break
-            
-    if not exists:
-        new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
-        if hasattr(ET, 'indent'):
-            ET.indent(tree, space="\t", level=0)
-        tree.write(core_path, encoding='UTF-8', xml_declaration=True)
-except Exception as e:
-    sys.exit(1)
-EOF
-}
 
 
 # Register a loot XML as a modular include
@@ -196,6 +141,24 @@ register_modular_loot() {
 
     # Clean target name for FS safety
     target_filename=$(echo "$target_filename" | tr -cd '[:alnum:]_.-')
+
+    # Never link a file the server cannot parse: one broken CE file stops CE loading
+    if ! python3 - "$source_xml" <<'PY_VALIDATE' 2>/dev/null
+import re, sys, xml.etree.ElementTree as ET
+with open(sys.argv[1], 'rb') as f:
+    data = f.read()
+try:
+    ET.fromstring(data)
+except ET.ParseError:
+    # a bare fragment (<type> without <types>) is fine once wrapped
+    body = re.sub(rb'^\s*<\?xml[^>]*\?>', b'', data)
+    ET.fromstring(b'<r>' + body + b'</r>')
+PY_VALIDATE
+    then
+        echo "Error: '$source_xml' is not well-formed XML, not linked" >&2
+        [[ "$silent" == "0" ]] && show_message "'$(basename "$source_xml")' is not valid XML and was not linked." "Error"
+        return 1
+    fi
     
     # Route to the correct CE folder based on detected type
     local ce_folder="CustomCE/${ce_type}"
@@ -225,14 +188,11 @@ register_modular_loot() {
     cp "$source_xml" "$original_path"
     
     # 3. Add to cfgeconomycore.xml using Python for correct CE block
-    python3 <<EOF
+    python3 - "$core_xml" "$target_filename" "$ce_type" "$ce_folder" <<'EOF'
 import xml.etree.ElementTree as ET
 import sys
 
-core_path = "$core_xml"
-file_to_add = "$target_filename"
-ce_type = "$ce_type"
-ce_folder = "$ce_folder"
+core_path, file_to_add, ce_type, ce_folder = sys.argv[1:5]
 
 try:
     tree = ET.parse(core_path)
@@ -249,16 +209,10 @@ try:
     if ce_node is None:
         ce_node = ET.SubElement(root, 'ce', {'folder': ce_folder})
     
-    # Check if file already exists in any CE block
-    exists = False
-    for ce in root.findall('ce'):
-        for f in ce.findall('file'):
-            if f.get('name') == file_to_add:
-                exists = True
-                break
-        if exists:
-            break
-            
+    # Already linked in this CustomCE block? Other blocks (e.g. a user-added
+    # db block listing the vanilla types.xml) must not count as a duplicate.
+    exists = any(f.get('name') == file_to_add for f in ce_node.findall('file'))
+
     if not exists:
         new_file = ET.SubElement(ce_node, 'file', {'name': file_to_add, 'type': ce_type})
         
@@ -271,13 +225,18 @@ try:
     else:
         print("Already linked")
 except Exception as e:
-    print(f"Error: {e}")
+    print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)
 EOF
-    
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        [[ "$silent" == "0" ]] && show_message "Could not register $target_filename in cfgeconomycore.xml" "Error"
+        return $rc
+    fi
     if [[ "$silent" == "0" ]]; then
         show_message "Registered $target_filename in cfgeconomycore.xml (${ce_type})" "Success"
     fi
+    return 0
 }
 
 # Unregister a modular include (removes from any CE block)
@@ -288,7 +247,7 @@ unregister_modular_loot() {
     local mission_path=$(get_mission_path "$instance_dir")
     [[ -z "$mission_path" ]] && return 1
     
-    echo "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename" >> "${SCRIPT_DIR}/loot_manager.log"
+    echo "[$(date +%T)] MGR: Unregistering/Unlinking: $target_filename" >> "$LOOT_MANAGER_LOG"
     
     local core_xml="${mission_path}/cfgeconomycore.xml"
     
@@ -344,35 +303,9 @@ PYTHON_UNREGISTER
 get_ce_ignore_file() {
     local inst_dir="$1"
     local mission_path
-    mission_path=$(get_mission_path "$inst_dir" 2>/dev/null)
+    # Without a mission the path would degrade to /CustomCE at the filesystem root
+    mission_path=$(get_mission_path "$inst_dir" 2>/dev/null) || return 1
     echo "${mission_path}/CustomCE/.ce_ignored.json"
-}
-
-# Check if a file is in the ignore list
-# Usage: is_ce_ignored "$inst_dir" "mod_id" "filename"
-is_ce_ignored() {
-    local inst_dir="$1"
-    local mod_id="$2"
-    local filename="$3"
-    local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
-    
-    if [[ ! -f "$ignore_file" ]]; then
-        return 1  # Not ignored
-    fi
-    
-    python3 -c "
-import json, sys
-try:
-    with open('$ignore_file', 'r') as f:
-        data = json.load(f)
-    key = f'${mod_id}|${filename}'.lower()
-    if key in [x.lower() for x in data.get('ignored', [])]:
-        sys.exit(0)
-    sys.exit(1)
-except:
-    sys.exit(1)
-"
 }
 
 # Add a file to the ignore list
@@ -382,13 +315,12 @@ add_ce_ignore() {
     local mod_id="$2"
     local filename="$3"
     local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
-    
-    python3 -c "
-import json, os
-ignore_file = '$ignore_file'
-mod_id = '$mod_id'
-filename = '$filename'
+    ignore_file=$(get_ce_ignore_file "$inst_dir") || { show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"; return 1; }
+
+    # Values travel as arguments: file names come from mod folders and may contain quotes
+    python3 - "$ignore_file" "$mod_id" "$filename" <<'PY_ADD_IGNORE'
+import json, os, sys
+ignore_file, mod_id, filename = sys.argv[1], sys.argv[2], sys.argv[3]
 key = f'{mod_id}|{filename}'
 
 data = {'ignored': []}
@@ -408,7 +340,7 @@ os.makedirs(os.path.dirname(ignore_file), exist_ok=True)
 with open(ignore_file, 'w') as f:
     json.dump(data, f, indent=2)
 print('Added')
-"
+PY_ADD_IGNORE
 }
 
 # Remove a file from the ignore list
@@ -418,17 +350,15 @@ remove_ce_ignore() {
     local mod_id="$2"
     local filename="$3"
     local ignore_file
-    ignore_file=$(get_ce_ignore_file "$inst_dir")
+    ignore_file=$(get_ce_ignore_file "$inst_dir") || return 1
     
     if [[ ! -f "$ignore_file" ]]; then
         return
     fi
     
-    python3 -c "
-import json
-ignore_file = '$ignore_file'
-mod_id = '$mod_id'
-filename = '$filename'
+    python3 - "$ignore_file" "$mod_id" "$filename" <<'PY_REMOVE_IGNORE'
+import json, sys
+ignore_file, mod_id, filename = sys.argv[1], sys.argv[2], sys.argv[3]
 key = f'{mod_id}|{filename}'
 
 try:
@@ -440,8 +370,9 @@ try:
         with open(ignore_file, 'w') as f:
             json.dump(data, f, indent=2)
         print('Removed')
-except: pass
-"
+except (OSError, ValueError) as e:
+    print(f'WARN: {e}', file=sys.stderr)
+PY_REMOVE_IGNORE
 }
 
 # =============================================================================
@@ -666,11 +597,11 @@ view_file_content() {
 
 # Scans mods for CE files and returns structured data
 # The new Modular Loot Manager (Professional Bulk View)
-# Uses scan_dayz_ce_files_python to get data
+# Uses scan_ce_files to get data (one 0x1F separated row per file, see lib/ce_scanner.py)
 # Parse the CE scan JSON into the shared arrays (src_paths, smod_ids, states, ...).
 # Top-level on purpose: cleanup_mod_ce_files needs it too, not only the dashboard.
 parse_scan_result() {
-    local json="$1"
+    local rows="$1"
     # Reset arrays
     src_paths=()
     smod_ids=()
@@ -684,8 +615,8 @@ parse_scan_result() {
     
     # Keep the loop variables local: with bash's dynamic scoping an unqualified
     # read would overwrite a caller's 'mid' (e.g. the mod being removed).
-    local sp mid mn fn ct st ln md
-    while IFS='|' read -r sp mid mn fn ct st ln md; do
+    local sp mid mn fn ct st ln md ig
+    while IFS=$'\x1f' read -r sp mid mn fn ct st ln md ig; do
         [[ -z "$sp" ]] && continue
         src_paths+=("$sp")
         smod_ids+=("$mid")
@@ -695,374 +626,285 @@ parse_scan_result() {
         states+=("$st")
         slinked_names+=("$ln")
         smodified+=("$md")
-        signored+=(0)  # Will be checked after
-    done < <(echo "$json" | python3 -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    for i in data:
-        st = 1 if i.get('status') == 'linked' else 0
-        ln = i.get('linked_filename', '')
-        md = 1 if i.get('modified', False) else 0
-        print(f\"{i['file_path']}|{i['mod_id']}|{i.get('mod_name', 'mod_' + i['mod_id'])}|{i['filename']}|{i.get('ce_type', 'types')}|{st}|{ln}|{md}\")
-except: pass
-")
+        signored+=("${ig:-0}")
+    done <<< "$rows"
 }
 
+# Name under which the selected file is (or would be) linked in CustomCE
+# Usage: tn=$(_loot_linked_name "$midx")
+_loot_linked_name() {
+    local midx="$1"
+    if [[ -n "${slinked_names[$midx]}" ]]; then
+        echo "${slinked_names[$midx]}"
+    elif [[ "${smod_ids[$midx]}" == "LOCAL" ]]; then
+        echo "${sfile_names[$midx]}"
+    else
+        echo "${smod_ids[$midx]}_${sfile_names[$midx]}"
+    fi
+}
+
+# Path of the linked copy of a CE file, with the fallbacks older versions
+# produced (cleaned name, types/ folder). Prints the first candidate that
+# exists, otherwise the primary path.
+# Usage: p=$(_loot_linked_copy_path "$inst_dir" "$ce_type" "$linked_name")
+_loot_linked_copy_path() {
+    local inst_dir="$1" ct="$2" tn="$3"
+    local mission cleaned p
+    mission=$(get_mission_path "$inst_dir")
+    cleaned=$(echo "$tn" | tr -cd '[:alnum:]_.-')
+    for p in "${mission}/CustomCE/${ct}/${tn}" "${mission}/CustomCE/${ct}/${cleaned}" "${mission}/CustomCE/types/${tn}"; do
+        if [[ -f "$p" ]]; then echo "$p"; return 0; fi
+    done
+    echo "${mission}/CustomCE/${ct}/${tn}"
+}
+
+# One table row of the loot dashboard (reads the caller's s* arrays)
+# Usage: _loot_draw_row ROW IDX IS_SELECTED(0/1)
+_loot_draw_row() {
+    local row="$1" idx="$2" is_selected="$3"
+    local ce_type="${sce_types[$idx]:-types}"
+    local type_str type_color
+    case "$ce_type" in
+        types)          type_str="[TYPES]     "; type_color="$CYN" ;;
+        spawnabletypes) type_str="[SPAWNABLE] "; type_color="$MAG" ;;
+        events)         type_str="[EVENTS]    "; type_color="$YLW" ;;
+        eventspawns)    type_str="[EVENTPOS]  "; type_color="$BLU" ;;
+        randompresets)  type_str="[PRESETS]   "; type_color="$GRN" ;;
+        eventgroups)    type_str="[GROUPS]    "; type_color="$RED" ;;
+        *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
+    esac
+
+    local status_str status_color row_dim=""
+    if [[ ${states[$idx]} -eq 1 ]]; then
+        status_str="[  LINKED  ]"; status_color="$GRN"
+        is_merge_only_type "$ce_type" && { status_str="[  MERGED  ]"; status_color="$CYN"; }
+    elif [[ ${signored[$idx]:-0} -eq 1 ]]; then
+        status_str="[ IGNORED  ]"; status_color="$DIM"; row_dim="$DIM"
+    else
+        status_str="[ UNLINKED ]"; status_color="$WHITE"
+        is_merge_only_type "$ce_type" && status_str="[ UNMERGED ]"
+    fi
+
+    local mod_str="   " mod_color="$WHITE"
+    [[ ${smodified[$idx]:-0} -eq 1 ]] && { mod_str="[*]"; mod_color="$YLW"; }
+
+    move_to "$row" 1
+    if [[ $is_selected -eq 1 ]]; then
+        printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+        move_to "$row" 3
+        printf "%-12s %3s %-10s %-12s %-24s %-28s" "$status_str" "$mod_str" "$type_str" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
+        printf "%s" "$RESET"
+    else
+        move_to "$row" 3
+        printf "%s%s%-12s%s %s%3s%s %s%-10s%s %-12s %-24s %-28s%s" "$row_dim" "$status_color" "$status_str" "$RESET$row_dim" "$mod_color" "$mod_str" "$RESET$row_dim" "$type_color" "$type_str" "$RESET$row_dim" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}" "$RESET"
+    fi
+}
+
+# Header, table and footer of the loot dashboard. Reads the caller's s*
+# arrays, selection and count, and keeps offset so the selection is visible.
+_loot_draw_screen() {
+    get_term_size
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    move_to 1 1
+    printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Modular Loot Manager - $SELECTED_NAME" "$RESET"
+
+    local table_start=3
+    move_to $table_start 1
+    printf "%s%s%*s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+    move_to $((table_start + 1)) 1
+    printf "  %-12s %-3s %-10s %-12s %-24s %-28s" "STATUS" "MOD" "TYPE" "WORKSHOP ID" "SOURCE / GROUP" "FILE NAME"
+    move_to $((table_start + 2)) 1
+    printf "%s%s%*s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+
+    local v_height=$((TERM_ROWS - 10))
+    [[ $v_height -lt 5 ]] && v_height=5
+    [[ $selection -lt $offset ]] && offset=$selection
+    [[ $selection -ge $((offset + v_height)) ]] && offset=$((selection - v_height + 1))
+
+    local i idx is_selected
+    for ((i=0; i<v_height; i++)); do
+        idx=$((offset + i))
+        [[ $idx -ge $count ]] && break
+        is_selected=0; [[ $idx -eq $selection ]] && is_selected=1
+        _loot_draw_row $((table_start + 3 + i)) "$idx" "$is_selected"
+    done
+
+    move_to $((TERM_ROWS - 1)) 1
+    local footer=" [Enter] Edit   [L] Link   [B] Browse   [I] Ignore   [r] Rollback   [d] Delete   [q] Back"
+    printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
+}
+
+# [r] Rollback menu for the linked copy of the selected file
+_loot_key_rollback() {
+    local inst_dir="$1" midx="$2"
+    # Linked files are named <mod_id>_<file> (see register_modular_loot);
+    # prefer the name the scan reported.
+    local linked_fn="${slinked_names[$midx]:-}"
+    [[ -z "$linked_fn" ]] && linked_fn=$(echo "${smod_ids[$midx]}_${sfile_names[$midx]}" | tr -cd '[:alnum:]_.-')
+    show_rollback_menu "$inst_dir" "$linked_fn" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${linked_fn}"
+}
+
+# [d] Delete the linked copy of the selected file (and its registration)
+_loot_key_delete() {
+    local inst_dir="$1" midx="$2"
+    local p
+    p=$(_loot_linked_copy_path "$inst_dir" "${sce_types[$midx]:-types}" "$(_loot_linked_name "$midx")")
+    if [[ ! -f "$p" ]]; then
+        show_message "File does not exist: $(basename "$p")" "Warning"
+        return 0
+    fi
+    if confirm "Delete physical file '$(basename "$p")'?" "n"; then
+        unregister_modular_loot "$inst_dir" "$(basename "$p")"
+        rm -f "$p"
+        show_message "Deleted $(basename "$p")" "Success"
+    fi
+}
+
+# [L] on an active file: unlink it, or unmerge it for merge-only types
+_loot_deactivate() {
+    local inst_dir="$1" midx="$2"
+    local ct="${sce_types[$midx]:-types}"
+    if is_merge_only_type "$ct"; then
+        local target_xml
+        if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+            show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+            return 0
+        fi
+        unmerge_ce_file_python "$inst_dir" "$target_xml" "${smod_ids[$midx]}"
+        return 0
+    fi
+    if confirm "Unlink '${sfile_names[$midx]}' from ${smod_names[$midx]}?" "y"; then
+        unregister_modular_loot "$inst_dir" "$(_loot_linked_name "$midx")"
+    fi
+}
+
+# [L] on an inactive file: link or merge it (an ignored file is un-ignored)
+_loot_activate() {
+    local inst_dir="$1" midx="$2"
+    local ct="${sce_types[$midx]:-types}"
+    local fn="${sfile_names[$midx]}"
+    if [[ ${signored[$midx]:-0} -eq 1 ]]; then
+        remove_ce_ignore "$inst_dir" "${smod_ids[$midx]}" "$fn"
+    fi
+    if is_merge_only_type "$ct"; then
+        confirm "Merge entries from '$fn' into main $ct?" "y" || return 0
+    else
+        confirm "Link '$fn' from ${smod_names[$midx]}?" "y" || return 0
+    fi
+    ce_activate_file "$inst_dir" "${src_paths[$midx]}" "${smod_ids[$midx]}" "${smod_names[$midx]}" "$ct" || true
+}
+
+_loot_key_link() {
+    local inst_dir="$1" midx="$2"
+    if [[ ${states[$midx]} -eq 1 ]]; then
+        _loot_deactivate "$inst_dir" "$midx"
+    else
+        _loot_activate "$inst_dir" "$midx"
+    fi
+}
+
+# [b] Browse the workshop folder of the selected file's mod
+_loot_key_browse() {
+    local workshop_path="$1" midx="$2"
+    local mid="${smod_ids[$midx]}"
+    if [[ "$mid" == "LOCAL" ]]; then
+        show_message "Cannot browse local/orphan files - no workshop folder" "Info"
+    elif [[ -d "${workshop_path}/${mid}" ]]; then
+        workshop_folder_browser "${workshop_path}/${mid}" "${smod_names[$midx]}" "$mid"
+    else
+        show_message "Workshop folder not found: @${mid}" "Error"
+    fi
+}
+
+# [i] Toggle the ignore flag of an inactive file
+_loot_key_ignore() {
+    local inst_dir="$1" midx="$2"
+    local mid="${smod_ids[$midx]}" fn="${sfile_names[$midx]}"
+    if [[ ${states[$midx]} -eq 1 ]]; then
+        show_message "Cannot ignore linked files. Unlink first." "Warning"
+    elif [[ ${signored[$midx]:-0} -eq 1 ]]; then
+        remove_ce_ignore "$inst_dir" "$mid" "$fn"
+    else
+        add_ce_ignore "$inst_dir" "$mid" "$fn"
+    fi
+}
+
+# [Enter] Edit the active copy of a linked file, otherwise the workshop source
+_loot_key_edit() {
+    local inst_dir="$1" midx="$2"
+    local fn="${sfile_names[$midx]}"
+    local target="${src_paths[$midx]}"
+    if [[ ${states[$midx]} -eq 1 ]]; then
+        target=$(_loot_linked_copy_path "$inst_dir" "${sce_types[$midx]:-types}" "$(_loot_linked_name "$midx")")
+        [[ -f "$target" ]] || target="${src_paths[$midx]}"   # copy missing: edit the source
+    fi
+    if [[ -f "$target" ]]; then
+        xml_edit_file "$target" "Edit ${fn}"
+    else
+        show_message "File not found for editing: $(basename "$target") (Src: $fn)" "Error"
+    fi
+}
+
+# Modular Loot Manager: table of the CE files the enabled mods ship with
+# their link/merge state, plus the actions on the selected file.
+# Usage: modular_loot_dashboard "$instance_dir"
 modular_loot_dashboard() {
     local inst_dir="$1"
-    
-    
     local selection=0
     local offset=0
-    
-    echo "=== Loot Manager Session: $(date) ===" > "${SCRIPT_DIR}/loot_manager.log"
-    
-    
-    # Check ignore status for all parsed files
-    check_ignore_status() {
-        local ignore_file
-        ignore_file=$(get_ce_ignore_file "$inst_dir")
-        
-        if [[ ! -f "$ignore_file" ]]; then
-            return
-        fi
-        
-        local ignored_list
-        ignored_list=$(python3 -c "
-import json
-try:
-    with open('$ignore_file', 'r') as f:
-        data = json.load(f)
-    for item in data.get('ignored', []):
-        print(item.lower())
-except: pass
-" 2>/dev/null)
-        
-        for ((i=0; i<${#smod_ids[@]}; i++)); do
-            local key="${smod_ids[$i]}|${sfile_names[$i]}"
-            if echo "$ignored_list" | grep -qi "^${key}$" 2>/dev/null; then
-                signored[$i]=1
-            fi
-        done
-    }
+    mkdir -p "$(dirname "$LOOT_MANAGER_LOG")"
+    echo "=== Loot Manager Session: $(date) ===" > "$LOOT_MANAGER_LOG"
 
+    local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
+    [[ -d "$workshop_path" ]] || workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
+
+    # The scan walks every enabled mod folder, so it runs only when an action
+    # may have changed something, not for every cursor movement.
+    local needs_rescan=1
+    local ce_result key seq midx
+    local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
     while true; do
-        # 1. Scan everything (calls the Python implementation)
-        echo "[DEBUG] 1. Starting scan..." >> "${SCRIPT_DIR}/loot_manager.log"
-        local ce_result
-        local workshop_path="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
-        if [[ ! -d "$workshop_path" ]]; then workshop_path="${inst_dir}/serverfiles/steamapps/workshop/content/221100"; fi
-        echo "[DEBUG] 2. Workshop path: $workshop_path" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>>"${SCRIPT_DIR}/loot_manager.log" | tail -n 1)
-        echo "[DEBUG] 3. Scan done, result length: ${#ce_result}" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        if [[ -z "$ce_result" ]]; then ce_result="[]"; fi
+        if [[ $needs_rescan -eq 1 ]]; then
+            echo "[DEBUG] scan: workshop=$workshop_path" >> "$LOOT_MANAGER_LOG"
+            ce_result=$(scan_ce_files "$inst_dir" "$workshop_path" 2>>"$LOOT_MANAGER_LOG")
+            parse_scan_result "$ce_result"
+            echo "[DEBUG] scan done: ${#src_paths[@]} files" >> "$LOOT_MANAGER_LOG"
+            needs_rescan=0
+        fi
 
-        # 2. Parse result into arrays
-        echo "[DEBUG] 4. Parsing results..." >> "${SCRIPT_DIR}/loot_manager.log"
-        local -a src_paths smod_ids smod_names sfile_names sce_types states slinked_names smodified signored
-        parse_scan_result "$ce_result"
-        echo "[DEBUG] 5. Parse done, count: ${#src_paths[@]}" >> "${SCRIPT_DIR}/loot_manager.log"
-        
-        # 3. Check ignore status for each file
-        check_ignore_status
-        echo "[DEBUG] 6. Ignore check done" >> "${SCRIPT_DIR}/loot_manager.log"
-        
         local count=${#src_paths[@]}
         if [[ $count -eq 0 ]]; then
             show_message "No mod CE definitions detected." "Info"
-            # Fallback to manual browse if empty
-            mod_config_browser "$inst_dir/data/config" 
+            mod_config_browser "$inst_dir/data/config"   # fallback: manual browse
             return
         fi
+        [[ $selection -ge $count ]] && selection=$((count - 1))
 
-        # 3. Draw TUI
-        echo "[DEBUG] 7. Drawing TUI, count=$count" >> "${SCRIPT_DIR}/loot_manager.log"
-        get_term_size
-        echo "[DEBUG] 8. Term size: ${TERM_ROWS}x${TERM_COLS}" >> "${SCRIPT_DIR}/loot_manager.log"
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        move_to 1 1
-        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Modular Loot Manager - $SELECTED_NAME" "$RESET"
-        
-        local table_start=3
-        move_to $table_start 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        move_to $((table_start + 1)) 1
-        printf "  %-12s %-3s %-10s %-12s %-24s %-28s" "STATUS" "MOD" "TYPE" "WORKSHOP ID" "SOURCE / GROUP" "FILE NAME"
-        
-        move_to $((table_start + 2)) 1
-        printf "%s%s%*s%s" "$DIM" "$RED" "$TERM_COLS" "" | tr ' ' '-'
-        printf "%s" "$RESET"
-        
-        local v_height=$((TERM_ROWS - 10))
-        [[ $v_height -lt 5 ]] && v_height=5
-        if [[ $selection -lt $offset ]]; then offset=$selection; fi
-        if [[ $selection -ge $((offset + v_height)) ]]; then offset=$((selection - v_height + 1)); fi
+        _loot_draw_screen
 
-        echo "[DEBUG] 9. Starting row loop, v_height=$v_height, offset=$offset" >> "${SCRIPT_DIR}/loot_manager.log"
-        for ((i=0; i<v_height; i++)); do
-            local idx=$((offset + i))
-            [[ $idx -ge $count ]] && break
-            
-            # Debug: log each row being drawn
-            echo "[DEBUG] 10. Drawing row i=$i idx=$idx ce_type=${sce_types[$idx]:-unknown}" >> "${SCRIPT_DIR}/loot_manager.log"
-            
-            local row=$((table_start + 3 + i))
-            local status_str="[ UNLINKED ]"
-            local status_color="$WHITE"
-            local row_dim=""
-            
-            # Check ignored status first (overrides unlinked display)
-            if [[ ${signored[$idx]:-0} -eq 1 ]]; then
-                status_str="[ IGNORED  ]"
-                status_color="$DIM"
-                row_dim="$DIM"
-            elif [[ ${states[$idx]} -eq 1 ]]; then
-                status_str="[  LINKED  ]"
-                status_color="$GRN"
-            fi
-            
-            # CE Type formatting
-            local ce_type="${sce_types[$idx]:-types}"
-            local type_str
-            local type_color="$CYN"
-            case "$ce_type" in
-                types)          type_str="[TYPES]     "; type_color="$CYN" ;;
-                spawnabletypes) type_str="[SPAWNABLE] "; type_color="$MAG" ;;
-                events)         type_str="[EVENTS]    "; type_color="$YLW" ;;
-                eventspawns)    type_str="[EVENTPOS]  "; type_color="$BLU" ;;
-                randompresets)  type_str="[PRESETS]   "; type_color="$GRN" ;;
-                eventgroups)    type_str="[GROUPS]    "; type_color="$RED" ;;
-                *)              type_str="[OTHER]     "; type_color="$WHITE" ;;
-            esac
-            
-            # Merge Status Override
-            if [[ "$ce_type" == "randompresets" || "$ce_type" == "eventgroups" ]]; then
-                if [[ ${states[$idx]} -eq 1 ]]; then
-                    status_str="[  MERGED  ]"
-                    status_color="$CYN"
-                else
-                    status_str="[ UNMERGED ]"
-                    status_color="$WHITE" 
-                fi
-            fi
-            
-            echo "[DEBUG] 11. Case done, type_str=$type_str" >> "${SCRIPT_DIR}/loot_manager.log"
-            
-            # Modified indicator
-            local mod_str="   "
-            local mod_color="$WHITE"
-            if [[ ${smodified[$idx]:-0} -eq 1 ]]; then
-                mod_str="[*]"
-                mod_color="$YLW"
-            fi
-            
-            move_to $row 1
-            if [[ $idx -eq $selection ]]; then
-                printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
-                move_to $row 3
-                printf "%-12s %3s %-10s %-12s %-24s %-28s" "$status_str" "$mod_str" "$type_str" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}"
-                printf "%s" "$RESET"
-            else
-                move_to $row 3
-                printf "%s%s%-12s%s %s%3s%s %s%-10s%s %-12s %-24s %-28s%s" "$row_dim" "$status_color" "$status_str" "$RESET$row_dim" "$mod_color" "$mod_str" "$RESET$row_dim" "$type_color" "$type_str" "$RESET$row_dim" "${smod_ids[$idx]:0:12}" "${smod_names[$idx]:0:24}" "${sfile_names[$idx]:0:28}" "$RESET"
-            fi
-        done
-        
-        # Footer
-        move_to $((TERM_ROWS - 1)) 1
-        local footer=" [Enter] Edit   [L] Link   [B] Browse   [I] Ignore   [r] Rollback   [d] Delete   [q] Back"
-        printf "%s%s%-$((TERM_COLS-1))s%s" "$BG_DARKGRAY" "$WHITE" "$footer" "$RESET"
-        
-        # 3. Handle Input
-        IFS= read -rsn1 key
-        if [[ "$key" == $'\x1b' ]]; then
-            read -rsn2 -t 0.1 seq || true
-            case "$seq" in
-                "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
-                "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
-            esac
-        elif [[ "$key" == "q" || "$key" == "Q" ]]; then
-            return
-        elif [[ "$key" == "r" || "$key" == "R" ]]; then
-             local midx=$selection
-             local fn="${sfile_names[$midx]}"
-             
-             # Call Rollback UI (Phase 4)
-             show_rollback_menu "$inst_dir" "${smod_names[$midx]}_${fn}" "$(get_mission_path "$inst_dir")/CustomCE/${sce_types[$midx]}/${smod_names[$midx]}_${fn}"
-             
-        elif [[ "$key" == "d" || "$key" == "D" ]]; then
-            local midx=$selection
-            local src="${src_paths[$midx]}"
-            local fn="${sfile_names[$midx]}"
-            local m_id="${smod_ids[$midx]}"
-            local ct="${sce_types[$midx]:-types}"
-            
-            # Determine target filename
-            local tn="${m_id}_${fn}"
-            [[ "$m_id" == "LOCAL" ]] && tn="$fn"
-            
-            # Use actual linked name if it exists (handles cleaned/legacy names)
-            if [[ -n "${slinked_names[$midx]}" ]]; then tn="${slinked_names[$midx]}"; fi
-            
-            local cleaned_tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
-            local p="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${tn}"
-            
-            # Fallback checks for path robustnes
-            if [[ ! -f "$p" && -f "$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}" ]]; then p="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}"; fi
-            if [[ ! -f "$p" && -f "$(get_mission_path "$inst_dir")/CustomCE/types/${tn}" ]]; then p="$(get_mission_path "$inst_dir")/CustomCE/types/${tn}"; fi
-            
-            if [[ -f "$p" ]]; then
-                if confirm "Delete physical file '$(basename "$p")'?" "n"; then
-                    unregister_modular_loot "$inst_dir" "$(basename "$p")"
-                    rm -f "$p"
-                    show_message "Deleted $(basename "$p")" "Success"
-                fi
-            else
-                show_message "File does not exist: $(basename "$p")" "Warning"
-            fi
-        elif [[ "$key" == "l" || "$key" == "L" ]]; then
-            # Toggle Link/Unlink
-            local midx=$selection
-            local src="${src_paths[$midx]}"
-            local mn="${smod_ids[$midx]}"
-            local fn="${sfile_names[$midx]}"
-            local ct="${sce_types[$midx]:-types}"
-            
-            if [[ ${states[$midx]} -eq 1 ]]; then
-                # LINKED/MERGED -> Unlink/Unmerge
-                
-                # Check for merge-only types
-                if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    local target_xml
-                    if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
-                        show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
-                        continue
-                    fi
-                    
-                    unmerge_ce_file_python "$inst_dir" "$target_xml" "${smod_ids[$midx]}"
-                    # Force re-scan to update status
-                    continue
-                fi
-                
-                # Default Link Logic (Files via cfgeconomycore)
-                local target_to_unlink="${smod_ids[$midx]}_${fn}"
-                [[ "${smod_ids[$midx]}" == "LOCAL" ]] && target_to_unlink="$fn"
-                
-                # Use ACTUAL linked filename if detected
-                if [[ -n "${slinked_names[$midx]}" ]]; then
-                    target_to_unlink="${slinked_names[$midx]}"
-                fi
-                
-                if confirm "Unlink '$fn' from ${smod_names[$midx]}?" "y"; then
-                    unregister_modular_loot "$inst_dir" "$target_to_unlink"
-                fi
-            else
-                # UNLINKED -> Link
-                # If ignored, auto-remove from ignore list when linking
-                if [[ ${signored[$midx]:-0} -eq 1 ]]; then
-                    remove_ce_ignore "$inst_dir" "${smod_ids[$midx]}" "$fn"
-                fi
-                
-                # Check for merge-only types
-                if [[ "$ct" == "randompresets" || "$ct" == "eventgroups" ]]; then
-                    if confirm "Merge entries from '$fn' into main $ct?" "y"; then
-                        # Call Python Merge Logic
-                        # Phase 2 Implementation
-                        local target_xml
-                        if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
-                            show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
-                            continue
-                        fi
-                        
-                        merge_ce_file_python "$inst_dir" "$target_xml" "$src" "${smod_ids[$midx]}" "${smod_names[$midx]}"
-                        # Force re-scan to update status
-                        continue
-                    fi
-                elif confirm "Link '$fn' from ${smod_names[$midx]}?" "y"; then
-                     register_modular_loot "$inst_dir" "$src" "${smod_ids[$midx]}" 1 "$ct"
-                fi
-            fi
-        elif [[ "$key" == "b" || "$key" == "B" ]]; then
-            # Browse workshop folder
-            local midx=$selection
-            local mid="${smod_ids[$midx]}"
-            local mname="${smod_names[$midx]}"
-            
-            if [[ "$mid" == "LOCAL" || "$mid" == "ORPHAN" ]]; then
-                show_message "Cannot browse local/orphan files - no workshop folder" "Info"
-            else
-                # Find workshop path
-                local workshop_base="${inst_dir}/data/serverfiles/steamapps/workshop/content/221100"
-                if [[ ! -d "$workshop_base" ]]; then
-                    workshop_base="${inst_dir}/serverfiles/steamapps/workshop/content/221100"
-                fi
-                local mod_folder="${workshop_base}/${mid}"
-                
-                if [[ -d "$mod_folder" ]]; then
-                    workshop_folder_browser "$mod_folder" "$mname" "$mid"
-                else
-                    show_message "Workshop folder not found: @${mid}" "Error"
-                fi
-            fi
-        elif [[ "$key" == "i" || "$key" == "I" ]]; then
-            # Toggle Ignore status
-            local midx=$selection
-            local mid="${smod_ids[$midx]}"
-            local fn="${sfile_names[$midx]}"
-            
-            # Can only ignore UNLINKED files
-            if [[ ${states[$midx]} -eq 1 ]]; then
-                show_message "Cannot ignore linked files. Unlink first." "Warning"
-            elif [[ ${signored[$midx]:-0} -eq 1 ]]; then
-                # Currently ignored -> Un-ignore
-                remove_ce_ignore "$inst_dir" "$mid" "$fn"
-            else
-                # Not ignored -> Add to ignore list
-                add_ce_ignore "$inst_dir" "$mid" "$fn"
-            fi
-        elif [[ "$key" == "" ]]; then
-            # Edit File
-            local midx=$selection
-            local fn="${sfile_names[$midx]}"
-            local ct="${sce_types[$midx]:-types}"
-            
-            # Determine target for editing
-            local target_edit_path="${src_paths[$midx]}" # Default: workshop source
-            if [[ ${states[$midx]} -eq 1 ]]; then
-                # If linked, edit the ACTIVE copy in CustomCE
-                local m_id="${smod_ids[$midx]}"
-                local tn="${m_id}_${fn}"
-                if [[ "$m_id" == "LOCAL" ]]; then tn="$fn"; fi
-                if [[ -n "${slinked_names[$midx]}" ]]; then tn="${slinked_names[$midx]}"; fi
-                
-                local cleaned_tn=$(echo "$tn" | tr -cd '[:alnum:]_.-')
-                target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${tn}"
-                
-                # Check cleaned name or 'types' folder as fallback
-                if [[ ! -f "$target_edit_path" && -f "$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}" ]]; then
-                    target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/${ct}/${cleaned_tn}"
-                fi
-                if [[ ! -f "$target_edit_path" && -f "$(get_mission_path "$inst_dir")/CustomCE/types/${tn}" ]]; then
-                    target_edit_path="$(get_mission_path "$inst_dir")/CustomCE/types/${tn}"
-                fi
-                
-                # FINAL FALLBACK: If it's linked but we can't find the copy, edit the source!
-                if [[ ! -f "$target_edit_path" ]]; then
-                    target_edit_path="${src_paths[$midx]}"
-                fi
-            fi
-            
-            if [[ -f "$target_edit_path" ]]; then
-                xml_edit_file "$target_edit_path" "Edit ${fn}"
-            else
-                show_message "File not found for editing: $(basename "$target_edit_path") (Src: $fn)" "Error"
-            fi
-        fi
+        IFS= read -rsn1 key || return 0   # EOF (stdin closed): leave instead of looping
+        needs_rescan=1  # every action below may change files; navigation resets it
+        midx=$selection
+        case "$key" in
+            $'\x1b')
+                needs_rescan=0
+                read -rsn2 -t 0.1 seq || true
+                case "$seq" in
+                    "[A") [[ $selection -gt 0 ]] && selection=$((selection - 1)) ;;
+                    "[B") [[ $selection -lt $((count - 1)) ]] && selection=$((selection + 1)) ;;
+                esac
+                ;;
+            q|Q) return ;;
+            r|R) _loot_key_rollback "$inst_dir" "$midx" ;;
+            d|D) _loot_key_delete "$inst_dir" "$midx" ;;
+            l|L) _loot_key_link "$inst_dir" "$midx" ;;
+            b|B) _loot_key_browse "$workshop_path" "$midx" ;;
+            i|I) _loot_key_ignore "$inst_dir" "$midx" ;;
+            "")  _loot_key_edit "$inst_dir" "$midx" ;;
+            *)   needs_rescan=0 ;;
+        esac
     done
 }
 
@@ -1126,331 +968,148 @@ mod_folder_browser() {
 # CE File Detection Functions (Phase 3-4)
 # =============================================================================
 
-# get_linked_ce_files - Get list of CE files linked in cfgeconomycore.xml
-#
-# Usage: get_linked_ce_files "$instance_dir"
-#
-# Output: JSON array to stdout with file info
-get_linked_ce_files() {
+# find_mod_list_files - mods.txt and servermods.txt of an instance
+# Looks in config/ first, then data/config/, then anywhere below the instance.
+# Usage: while read -r f; do ...; done < <(find_mod_list_files "$instance_dir")
+find_mod_list_files() {
     local instance_dir="$1"
-    local mission_path
-    mission_path=$(get_mission_path "$instance_dir") || return 1
-    
-    local core_xml="${mission_path}/cfgeconomycore.xml"
-    [[ ! -f "$core_xml" ]] && echo "[]" && return 0
-    
-    python3 <<PYTHON_GET_LINKED
-import xml.etree.ElementTree as ET
-import json
-import os
-
-mission_path = "$mission_path"
-core_path = "$core_xml"
-
-try:
-    tree = ET.parse(core_path)
-    root = tree.getroot()
-    
-    files = []
-    for ce in root.findall('ce'):
-        folder = ce.get('folder', '')
-        for f in ce.findall('file'):
-            name = f.get('name', '')
-            ce_type = f.get('type', 'types')
-            full_path = os.path.join(mission_path, folder, name)
-            original_path = os.path.join(mission_path, folder, '.originals', name)
-            
-            files.append({
-                "name": name,
-                "folder": folder,
-                "ce_type": ce_type,
-                "path": full_path,
-                "original_path": original_path,
-                "exists": os.path.exists(full_path),
-                "has_original": os.path.exists(original_path)
-            })
-    
-    print(json.dumps(files))
-except Exception as e:
-    import sys
-    sys.stderr.write(f"DEBUG: Python Error (get_linked): {e}\n")
-    print('[]')
-PYTHON_GET_LINKED
+    local base
+    for base in "${instance_dir}/config" "${instance_dir}/data/config"; do
+        if [[ -f "${base}/mods.txt" || -f "${base}/servermods.txt" ]]; then
+            printf '%s\n' "${base}/mods.txt" "${base}/servermods.txt"
+            return 0
+        fi
+    done
+    local found
+    found=$(find "$instance_dir" -path '*/config/mods.txt' 2>/dev/null | head -n 1) || true
+    [[ -n "$found" ]] && printf '%s\n' "$found" "$(dirname "$found")/servermods.txt"
+    return 0
 }
 
-# Scans mods for CE files and returns structured data (Python based)
-scan_dayz_ce_files_python() {
+# scan_ce_files - CE files of the enabled mods and their link/merge state
+# Runs lib/ce_scanner.py once and prints one row per file (fields separated
+# by 0x1F, see lib/rowfmt.py), which parse_scan_result turns into the s* arrays.
+# Usage: result=$(scan_ce_files "$instance_dir" "$workshop_dir" [scanner options])
+scan_ce_files() {
     local instance_dir="$1"
     local workshop_dir="$2"
-    
+    shift 2
     local mission_path
     mission_path=$(get_mission_path "$instance_dir") || return 1
-    
-    # Locate mods.txt (Root or Data)
-    local mods_file="${instance_dir}/config/mods.txt"
-    if [[ ! -f "$mods_file" && -f "${instance_dir}/data/config/mods.txt" ]]; then
-        mods_file="${instance_dir}/data/config/mods.txt"
-    fi
-     
-    local servermods_file="${instance_dir}/config/servermods.txt"
-    if [[ ! -f "$servermods_file" && -f "${instance_dir}/data/config/servermods.txt" ]]; then
-        servermods_file="${instance_dir}/data/config/servermods.txt"
-    fi
-    
 
-    # Fallback to finding it
-    if [[ ! -f "$mods_file" ]]; then
-        local found
-        found=$(find "$instance_dir" -name "mods.txt" 2>/dev/null | grep "/config/mods.txt" | head -n 1)
-        if [[ -n "$found" ]]; then
-            mods_file="$found"
-            # Assuming servermods is sibling
-            servermods_file="$(dirname "$found")/servermods.txt"
+    local -a args=()
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && args+=(--mods-file "$f")
+    done < <(find_mod_list_files "$instance_dir")
+    local ignore_file
+    ignore_file=$(get_ce_ignore_file "$instance_dir") && args+=(--ignore-file "$ignore_file")
+
+    python3 "${MOD_CONFIG_LIB_DIR}/ce_scanner.py" scan --format rows \
+        --workshop-dir "$workshop_dir" --mission-path "$mission_path" \
+        --instance-dir "$instance_dir" ${args[@]+"${args[@]}"} "$@"
+}
+
+# scan_new_ce_files - CE files of the enabled mods that are neither linked,
+# merged nor ignored. Fills the caller's arrays ce_mod_ids, ce_mod_names,
+# ce_file_paths, ce_filenames and ce_types.
+# Usage: local -a ce_mod_ids ce_mod_names ce_file_paths ce_filenames ce_types
+#        scan_new_ce_files "$inst_dir" "$workshop_path"
+scan_new_ce_files() {
+    local inst_dir="$1" workshop_path="$2"
+    ce_mod_ids=(); ce_mod_names=(); ce_file_paths=(); ce_filenames=(); ce_types=()
+    local sp mid mn fn ct rest
+    while IFS=$'\x1f' read -r sp mid mn fn ct rest; do
+        [[ -z "$sp" ]] && continue
+        ce_mod_ids+=("$mid")
+        ce_mod_names+=("$mn")
+        ce_file_paths+=("$sp")
+        ce_filenames+=("$fn")
+        ce_types+=("$ct")
+    done < <(scan_ce_files "$inst_dir" "$workshop_path" --only-new 2>/dev/null)
+}
+
+# ce_link_files_dialog - checklist to activate the files scan_new_ce_files found
+# Usage: ce_link_files_dialog "$inst_dir" "Link CE Files - <instance>"
+ce_link_files_dialog() {
+    local inst_dir="$1" title="$2"
+    local ce_count=${#ce_filenames[@]}
+    [[ $ce_count -eq 0 ]] && return 0
+    local -a ce_selected=()
+    local i
+    for ((i=0; i<ce_count; i++)); do ce_selected+=(1); done   # all pre-selected
+    local selection=0
+    while true; do
+        draw_header "$title"
+        local -a items=()
+        for ((i=0; i<ce_count; i++)); do
+            local check=" "
+            [[ ${ce_selected[$i]} -eq 1 ]] && check="x"
+            items+=("[$check] ${ce_mod_names[$i]} $(ce_type_label "${ce_types[$i]}") - ${ce_filenames[$i]}")
+        done
+        items+=("--------------------")
+        items+=("✅|LINK SELECTED FILES")
+        items+=("❌|Cancel / Skip All")
+        run_menu items "Toggle files with Enter, then Execute" $selection || return 0
+        selection=$MENU_RESULT
+        if [[ $selection -lt $ce_count ]]; then
+            ce_selected[$selection]=$((1 - ce_selected[$selection]))
+        elif [[ $selection -eq $((ce_count + 1)) ]]; then
+            _ce_activate_selected "$inst_dir"
+            return 0
+        elif [[ $selection -eq $((ce_count + 2)) ]]; then
+            return 0
         fi
+    done
+}
+
+# Activate every checked file of ce_link_files_dialog
+_ce_activate_selected() {
+    local inst_dir="$1"
+    local i link_count=0
+    for ((i=0; i<${#ce_filenames[@]}; i++)); do
+        [[ ${ce_selected[$i]} -eq 1 ]] || continue
+        ce_activate_file "$inst_dir" "${ce_file_paths[$i]}" "${ce_mod_ids[$i]}" "${ce_mod_names[$i]}" "${ce_types[$i]}" || continue
+        link_count=$((link_count + 1))
+    done
+    [[ $link_count -gt 0 ]] && show_message "Linked $link_count CE file(s)!" "Success"
+    return 0
+}
+
+# Merge-only CE types are merged into one mission file instead of being linked
+is_merge_only_type() {
+    [[ "$1" == "randompresets" || "$1" == "eventgroups" ]]
+}
+
+# Short label of a CE type for menus
+ce_type_label() {
+    case "$1" in
+        types)          echo "[TYPES]" ;;
+        spawnabletypes) echo "[SPAWNABLE]" ;;
+        events)         echo "[EVENTS]" ;;
+        eventspawns)    echo "[EVENTPOS]" ;;
+        randompresets)  echo "[PRESETS]" ;;
+        eventgroups)    echo "[GROUPS]" ;;
+        *)              echo "[OTHER]" ;;
+    esac
+}
+
+# ce_activate_file - make one CE file active for the mission: merge-only
+# types are merged into the mission file, everything else is linked via
+# cfgeconomycore.xml.
+# Usage: ce_activate_file "$inst_dir" "$src" "$mod_id" "$mod_name" "$ce_type"
+ce_activate_file() {
+    local inst_dir="$1" src="$2" mod_id="$3" mod_name="$4" ct="$5"
+    if is_merge_only_type "$ct"; then
+        local target_xml
+        if ! target_xml=$(ce_merge_target "$inst_dir" "$ct"); then
+            show_message "Mission folder not found. Check 'template' in serverDZ.cfg." "Error"
+            return 1
+        fi
+        merge_ce_file_python "$inst_dir" "$target_xml" "$src" "$mod_id" "$mod_name"
+    else
+        register_modular_loot "$inst_dir" "$src" "$mod_id" 1 "$ct"
     fi
-
-    # DEBUG: Print detected paths to stderr (log)
-    >&2 echo "DEBUG: scan_dayz_ce_files_python"
-    >&2 echo "DEBUG: instance_dir=$instance_dir"
-    >&2 echo "DEBUG: mission_path=$mission_path"
-    >&2 echo "DEBUG: mods_file=$mods_file"
-    >&2 echo "DEBUG: servermods_file=$servermods_file"
-    >&2 echo "DEBUG: workshop_dir=$workshop_dir"
-
-    # Get already linked files for status checking
-    local linked_json
-    linked_json=$(get_linked_ce_files "$instance_dir")
-    
-    # Pass variables to Python env
-    export DAYZ_WORKSHOP_DIR="$workshop_dir"
-    export DAYZ_MODS_FILE="$mods_file"
-    export DAYZ_SERVERMODS_FILE="$servermods_file"
-    export DAYZ_LINKED_JSON="$linked_json"
-    export DAYZ_SCRIPT_DIR="$SCRIPT_DIR"
-    export DAYZ_MISSION_PATH="$mission_path"
-    export DAYZ_INSTANCE_DIR="$instance_dir"
-    
-    python3 <<'PYTHON_CE_SCAN'
-import os
-import json
-import sys
-
-# Load Env Vars
-workshop_dir = os.environ.get('DAYZ_WORKSHOP_DIR')
-mods_file = os.environ.get('DAYZ_MODS_FILE')
-servermods_file = os.environ.get('DAYZ_SERVERMODS_FILE')
-linked_json = os.environ.get('DAYZ_LINKED_JSON')
-script_dir = os.environ.get('DAYZ_SCRIPT_DIR')
-mission_path = os.environ.get('DAYZ_MISSION_PATH')
-instance_dir = os.environ.get('DAYZ_INSTANCE_DIR')
-# Import xml_parser for fast detection
-sys.path.append(os.path.join(script_dir, 'lib'))
-try:
-    import xml_parser
-except ImportError:
-    # Fallback if import fails (should not happen)
-    xml_parser = None
-
-# Parse linked files
-try:
-    linked = {f['name']: f for f in json.loads(linked_json)}
-except:
-    linked = {}
-
-# Get all mod IDs from files
-mod_ids = set()
-mod_name_map = {} # Populated after mod_ids collected
-
-for f in [mods_file, servermods_file]:
-    if f and os.path.exists(f):
-        with open(f, errors='ignore') as fp:
-            for line in fp:
-                mid = line.strip().split('|')[0].strip()
-                if mid.isdigit():
-                    mod_ids.add(mid)
-
-def get_mod_name(workshop_dir, mod_id):
-    meta_path = os.path.join(workshop_dir, mod_id, 'meta.cpp')
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, 'r', errors='ignore') as f:
-                import re
-                match = re.search(r'name\s*=\s*"([^"]+)"', f.read())
-                if match: return match.group(1)
-        except: pass
-    return mod_id
-
-mod_name_map = {mid: get_mod_name(workshop_dir, mid) for mid in mod_ids}
-
-results = []
-scanned_files = set() # To track which files we found in mods, to identify orphans later
-
-# 1. SCAN MODS
-for mod_id in sorted(mod_ids):
-    mod_folder = os.path.join(workshop_dir, mod_id)
-    if not os.path.isdir(mod_folder):
-        continue
-    
-    # Find XML files in mod
-    for root, dirs, files in os.walk(mod_folder):
-        for fname in files:
-            lfn = fname.lower()
-            # 1. Skip core files and non-CE XMLs
-            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin', 'meta.cpp.xml']: continue
-            if not lfn.endswith('.xml'): continue
-            
-            fpath = os.path.join(root, fname)
-            
-            # 2. Detect CE type with expert fallback
-            ce_type = ""
-            if xml_parser:
-                try:
-                    res = xml_parser.detect_ce_type(fpath)
-                    if res: ce_type = res['ce_type']
-                except: pass
-            
-            if not ce_type:
-                if 'randompresets' in lfn: ce_type = 'randompresets'
-                elif 'eventgroups' in lfn: ce_type = 'eventgroups'
-                elif 'spawnable' in lfn: ce_type = 'spawnabletypes'
-                elif 'eventspawns' in lfn or 'eventpos' in lfn: ce_type = 'eventspawns'
-                elif 'events' in lfn: ce_type = 'events'
-                elif 'types' in lfn: ce_type = 'types'
-                else:
-                    # Skip common non-loot files found in mods (e.g. info, setup, core folders)
-                    rel_p = root.lower()
-                    if 'setup' in rel_p or 'info' in rel_p or 'core' in rel_p: continue
-                    continue # Skip unknown XML files (don't default to types)
-            
-            # 3. Check status - MOD-AWARE matching
-            # Priority: 1) ModID_filename, 2) Exact filename match
-            status = "new"
-            linked_name = ""
-            is_linked = False
-            
-            # MERGED STATUS CHECK (Override for merge-only types)
-            if ce_type in ['randompresets', 'eventgroups']:
-                target_file = 'cfgrandompresets' if ce_type == 'randompresets' else 'cfgeventgroups'
-                tracking_path = os.path.join(instance_dir, 'data', 'state', 'ce_merge_tracking', f'{target_file}.json')
-                
-                is_merged = False
-                if os.path.exists(tracking_path):
-                    try:
-                        with open(tracking_path, 'r') as f:
-                            tdata = json.load(f)
-                            if mod_id in tdata.get('entries', {}):
-                                is_merged = True
-                    except: pass
-                
-                if is_merged:
-                    status = "linked" # Reuse linked status for TUI to show MERGED
-                    is_linked = True
-                    linked_name = f"{mod_id}_{ce_type}" # Fake name
-                else:
-                    status = "new"
-                    is_linked = False
-            else:
-                # STANDARD LINK CHECK
-                search_name = fname.lower().strip()
-                # Cleaned version of workshop filename
-                search_name_cfn = "".join(x for x in search_name if x.isalnum() or x in "._-")
-                # Expected linked name pattern: ModID_filename
-                expected_linked = f"{mod_id}_{search_name_cfn}".lower()
-                
-                if not is_linked:
-                    for ln in linked:
-                        ln_orig = ln
-                        lnl = ln.lower().strip()
-                        if "_" in lnl:
-                            parts = lnl.split("_", 1)
-                            prefix = parts[0]
-                            suffix = parts[1]
-                            # Only match if suffix equals our filename AND prefix looks like a mod ID or known name
-                            if (suffix == search_name or suffix == search_name_cfn):
-                                # Check if this linked file is already claimed by its own mod
-                                if prefix.isdigit() and prefix != mod_id:
-                                    continue  # This linked file belongs to a different mod
-                                is_linked = True; linked_name = ln_orig; break
-            
-            if is_linked:
-                status = "linked"
-            
-            # Check if file is modified (compare against original snapshot)
-            is_modified = False
-            if is_linked and linked_name:
-                # Get linked file info from linked dict
-                li = linked.get(linked_name, {})
-                linked_path = li.get('path', '')
-                original_path = li.get('original_path', '')
-                if linked_path and original_path and os.path.exists(linked_path) and os.path.exists(original_path):
-                    try:
-                        import hashlib
-                        def file_hash(fp):
-                            with open(fp, 'rb') as f:
-                                return hashlib.md5(f.read()).hexdigest()
-                        if file_hash(linked_path) != file_hash(original_path):
-                            is_modified = True
-                    except: pass
-            
-            results.append({
-                "mod_id": mod_id,
-                "mod_name": mod_name_map.get(mod_id, mod_id),
-                "file_path": fpath,
-                "filename": fname,
-                "ce_type": ce_type,
-                "status": status,
-                "linked_filename": linked_name,
-                "modified": is_modified
-            })
-            
-            # Track for orphan detection
-            scanned_files.add(fname)
-            if linked_name: scanned_files.add(linked_name)
-
-# 2. SCAN ORPHANS (Local files in CustomCE not from mods)
-# We need to skip:
-# - Files we already scanned from workshop
-# - Files that are linked (in cfgeconomycore.xml) - these are managed by us or the mod
-# - Files with mod ID prefixes that match known mod IDs
-ce_folders = ["types", "spawnabletypes", "events", "eventspawns", "randompresets", "eventgroups"]
-for folder in ce_folders:
-    dir_path = os.path.join(mission_path, "CustomCE", folder)
-    if not os.path.isdir(dir_path): continue
-    for root, dirs, files in os.walk(dir_path):
-        for fname in files:
-            lfn = fname.lower()
-            if not lfn.endswith('.xml'): continue
-            if ".originals" in root or ".backups" in root: continue
-            if lfn in ['cfgeconomycore.xml', 'mod.xml', 'meta.cpp', 'meta.bin']: continue
-            
-            # If we already saw this file in mod scan, skip
-            if fname in scanned_files: continue
-            
-            # If file is already in cfgeconomycore.xml (linked), skip it
-            if fname in linked: continue
-            
-            # Check if this file looks like one we registered (ModID_filename pattern)
-            # Skip if it starts with a known mod ID prefix
-            is_registered = False
-            for mid in mod_ids:
-                if fname.startswith(f"{mid}_"):
-                    is_registered = True
-                    break
-            if is_registered: continue
-            
-            # This is a truly local/orphan file not mapped to any active mod
-            results.append({
-                "mod_id": "LOCAL",
-                "mod_name": "[ Manual / Local ]",
-                "file_path": os.path.join(root, fname),
-                "filename": fname,
-                "ce_type": folder,
-                "status": "unlinked",
-                "linked_filename": ""
-            })
-
-print(json.dumps(results))
-PYTHON_CE_SCAN
 }
 
 # -----------------------------------------------------------------------------
@@ -1471,7 +1130,7 @@ cleanup_mod_ce_files() {
     
     # 1. Scan for current status
     local ce_result
-    ce_result=$(scan_dayz_ce_files_python "$inst_dir" "$workshop_path" 2>/dev/null | tail -n 1)
+    ce_result=$(scan_ce_files "$inst_dir" "$workshop_path" 2>/dev/null)
     
     # 2. Parse into global arrays (smod_ids, states, etc)
     parse_scan_result "$ce_result"
@@ -1529,15 +1188,16 @@ cleanup_mod_ce_files() {
 # Merge Tracking Wrappers (Phase 2)
 # =============================================================================
 
-# Resolve the merge target for merge-only CE types inside the active mission
-# (randompresets -> db/cfgrandompresets.xml, eventgroups -> db/cfgeventgroups.xml).
+# Resolve the merge target for merge-only CE types inside the active mission.
+# The vanilla files live in the mission root (cfgrandompresets.xml,
+# cfgeventgroups.xml), not in db/: a merge into db/ is never read by the server.
 # Usage: target_xml=$(ce_merge_target "$inst_dir" "$ce_type") || <no mission found>
 ce_merge_target() {
     local inst_dir="$1" ce_type="$2"
     local mission_path
     mission_path=$(get_mission_path "$inst_dir") || return 1
-    local target_file="db/cfgrandompresets.xml"
-    [[ "$ce_type" == "eventgroups" ]] && target_file="db/cfgeventgroups.xml"
+    local target_file="cfgrandompresets.xml"
+    [[ "$ce_type" == "eventgroups" ]] && target_file="cfgeventgroups.xml"
     echo "${mission_path}/${target_file}"
 }
 
@@ -1594,30 +1254,6 @@ unmerge_ce_file_python() {
         fi
     fi
     return 1
-}
-
-# check_ce_file_update - Check if a linked CE file has updates from workshop
-#
-# Usage: result=$(check_ce_file_update "$workshop_file" "$local_file" "$original_file")
-#
-# Returns: JSON with diff info
-check_ce_file_update() {
-    local workshop_file="$1"
-    local local_file="$2"
-    local original_file="${3:-}"
-    
-    if [[ ! -f "$workshop_file" ]]; then
-        echo '{"error": "Workshop file not found"}'
-        return 1
-    fi
-    
-    if [[ ! -f "$local_file" ]]; then
-        echo '{"error": "Local file not found"}'
-        return 1
-    fi
-    
-    # Use Python diff-ce command
-    python3 "${SCRIPT_DIR}/lib/xml_parser.py" diff-ce "$workshop_file" "$local_file"
 }
 
 # =============================================================================
@@ -1686,14 +1322,14 @@ list_ce_backups() {
     # Strip .xml extension for matching
     local base="${ce_filename%.xml}"
     
-    python3 <<EOF
+    python3 - "$backup_dir" "$base" <<'EOF'
 import os
 import json
 import re
+import sys
 from datetime import datetime
 
-backup_dir = "$backup_dir"
-base = "$base"
+backup_dir, base = sys.argv[1], sys.argv[2]
 
 backups = []
 pattern = re.compile(rf'^{re.escape(base)}_(\d{{8}}_\d{{6}})_(\w+)\.xml$')
@@ -1766,207 +1402,6 @@ log_ce_action() {
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
     echo "[${timestamp}] ${action^^}: ${filename} - ${message}" >> "$log_file"
-}
-
-# merge_ce_file - Merge workshop updates into local CE file with backup
-#
-# Usage: result=$(merge_ce_file "$instance_dir" "$workshop_file" "$local_file" "$original_file")
-#
-# Returns: JSON merge result
-merge_ce_file() {
-    local instance_dir="$1"
-    local workshop_file="$2"
-    local local_file="$3"
-    local original_file="${4:-}"
-    
-    if [[ ! -f "$workshop_file" ]]; then
-        echo '{"success": false, "error": "Workshop file not found"}'
-        return 1
-    fi
-    
-    if [[ ! -f "$local_file" ]]; then
-        echo '{"success": false, "error": "Local file not found"}'
-        return 1
-    fi
-    
-    # Create backup before merge
-    local backup_path
-    backup_path=$(backup_ce_file "$instance_dir" "$local_file" "premerge")
-    
-    if [[ -z "$backup_path" ]]; then
-        echo '{"success": false, "error": "Failed to create backup"}'
-        return 1
-    fi
-    
-    # Perform merge using Python
-    local result
-    if [[ -n "$original_file" && -f "$original_file" ]]; then
-        result=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" merge-ce "$workshop_file" "$local_file" --original "$original_file")
-    else
-        result=$(python3 "${SCRIPT_DIR}/lib/xml_parser.py" merge-ce "$workshop_file" "$local_file")
-    fi
-    
-    local basename
-    basename=$(basename "$local_file")
-    
-    # Log the merge
-    local added removed
-    added=$(echo "$result" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('added',[])))" 2>/dev/null || echo "0")
-    log_ce_action "$instance_dir" "merge" "$basename" "Merged: +${added} items, backup: $(basename "$backup_path")"
-    
-    echo "$result"
-}
-
-# prompt_ce_merge - Interactive TUI prompt for CE file merge
-#
-# Usage: prompt_ce_merge "$instance_dir" "$mod_id" "$workshop_file" "$local_file" "$original_file"
-#
-# Returns: 0 if user chose to merge/skip, 1 if cancelled
-prompt_ce_merge() {
-    local instance_dir="$1"
-    local mod_id="$2"
-    local workshop_file="$3"
-    local local_file="$4"
-    local original_file="${5:-}"
-    
-    local basename
-    basename=$(basename "$local_file")
-    
-    # Get diff info
-    local diff_result
-    diff_result=$(check_ce_file_update "$workshop_file" "$local_file")
-    
-    local added removed modified
-    added=$(echo "$diff_result" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('added',[])))" 2>/dev/null || echo "0")
-    removed=$(echo "$diff_result" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('removed',[])))" 2>/dev/null || echo "0")
-    modified=$(echo "$diff_result" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('modified',[])))" 2>/dev/null || echo "0")
-    
-    # Build menu items
-    local -a items=(
-        "🔀|Merge (add new items, preserve your edits)"
-        "📥|Replace (overwrite with workshop version)"
-        "⏭️|Skip (keep your current version)"
-        "👁️|View Diff Details"
-        "--------------------"
-        "❌|Cancel"
-    )
-    
-    local title="CE Update: ${basename} (Mod ${mod_id})"
-    local selection=0
-    
-    while true; do
-        printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-        
-        # Header
-        move_to 1 1
-        printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "$title" "$RESET"
-        
-        # Diff summary
-        move_to 3 2
-        printf "%sChanges detected:%s" "$BOLD" "$RESET"
-        move_to 4 4
-        printf "%s+%d new items%s  %s-%d removed%s  %s~%d modified%s" \
-            "$GREEN" "$added" "$RESET" \
-            "$RED" "$removed" "$RESET" \
-            "$YELLOW" "$modified" "$RESET"
-        
-        move_to 6 2
-        printf "%sChoose action:%s" "$DIM" "$RESET"
-        
-        # Menu items
-        local row=8
-        for i in "${!items[@]}"; do
-            move_to $row 4
-            local item="${items[$i]}"
-            
-            if [[ "$item" == ----* ]]; then
-                printf "%s%s%s" "$DIM" "────────────────────────" "$RESET"
-            elif [[ $i -eq $selection ]]; then
-                printf "%s%s ▶ %s %s" "$BG_RED" "$WHITE$BOLD" "${item#*|}" "$RESET"
-            else
-                local icon="${item%%|*}"
-                local label="${item#*|}"
-                printf "   %s %s" "$icon" "$label"
-            fi
-            row=$((row + 1))
-        done
-        
-        # Read key
-        read -rsn1 key
-        case "$key" in
-            $'\x1b')
-                read -rsn2 -t 0.1 seq
-                case "$seq" in
-                    '[A') ((selection > 0)) && selection=$((selection - 1)) ;;
-                    '[B') ((selection < ${#items[@]} - 1)) && selection=$((selection + 1)) ;;
-                esac
-                # Skip separators
-                while [[ "${items[$selection]}" == "----"* && $selection -gt 0 ]]; do selection=$((selection - 1)); done
-                while [[ "${items[$selection]}" == "----"* && $selection -lt $((${#items[@]} - 1)) ]]; do selection=$((selection + 1)); done
-                ;;
-            '')
-                local selected_item="${items[$selection]}"
-                case "$selected_item" in
-                    "🔀|"*)
-                        # Merge
-                        local result
-                        result=$(merge_ce_file "$instance_dir" "$workshop_file" "$local_file" "$original_file")
-                        local success
-                        success=$(echo "$result" | python3 -c "import json,sys; print(json.load(sys.stdin).get('success', False))" 2>/dev/null)
-                        if [[ "$success" == "True" ]]; then
-                            show_message "Merged successfully! +${added} items added." "Merge"
-                        else
-                            show_message "Merge failed. Check backup in .backups/" "Error"
-                        fi
-                        return 0
-                        ;;
-                    "📥|"*)
-                        # Replace
-                        if confirm "This will OVERWRITE your local changes. Continue?" "n"; then
-                            backup_ce_file "$instance_dir" "$local_file" "prereplace" >/dev/null
-                            cp "$workshop_file" "$local_file"
-                            log_ce_action "$instance_dir" "replace" "$basename" "Replaced with workshop version"
-                            show_message "Replaced with workshop version. Backup saved." "Replace"
-                        fi
-                        return 0
-                        ;;
-                    "⏭️|"*)
-                        # Skip
-                        log_ce_action "$instance_dir" "skip" "$basename" "User skipped update"
-                        return 0
-                        ;;
-                    "👁️|"*)
-                        # View diff
-                        printf "%s" "$CLEAR_SCREEN"
-                        move_to 1 1
-                        printf "%s%s Diff Details: %s %s\n" "$BG_RED" "$WHITE$BOLD" "$basename" "$RESET"
-                        echo ""
-                        echo "$diff_result" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print(f'Added ({len(d.get(\"added\",[]))}):')
-for x in d.get('added',[])[:10]: print(f'  + {x}')
-if len(d.get('added',[])) > 10: print(f'  ... and {len(d.get(\"added\",[]))-10} more')
-print(f'\\nRemoved ({len(d.get(\"removed\",[]))}):')
-for x in d.get('removed',[])[:10]: print(f'  - {x}')
-if len(d.get('removed',[])) > 10: print(f'  ... and {len(d.get(\"removed\",[]))-10} more')
-print(f'\\nModified ({len(d.get(\"modified\",[]))}):')
-for x in d.get('modified',[])[:10]: print(f'  ~ {x}')
-if len(d.get('modified',[])) > 10: print(f'  ... and {len(d.get(\"modified\",[]))-10} more')
-"
-                        echo ""
-                        read -rp "Press Enter to continue..."
-                        ;;
-                    "❌|"*)
-                        return 1
-                        ;;
-                esac
-                ;;
-            'q'|'Q')
-                return 1
-                ;;
-        esac
-    done
 }
 
 # show_rollback_menu - TUI menu to rollback CE file from backups

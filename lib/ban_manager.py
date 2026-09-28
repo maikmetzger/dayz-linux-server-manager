@@ -13,14 +13,19 @@ that are better suited to Python than bash.
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rowfmt import join_row  # noqa: E402
 
 
 # =============================================================================
 # Ban Record Model
 # =============================================================================
+
 
 class BanRecord:
     """Represents a ban record."""
@@ -105,24 +110,35 @@ class BanManager:
         self._load()
 
     def _load(self) -> None:
-        """Load bans from JSON file."""
-        if os.path.exists(self.bans_file):
-            try:
-                with open(self.bans_file, 'r') as f:
-                    data = json.load(f)
-                    self.bans = [BanRecord.from_dict(b) for b in data.get('bans', [])]
-            except (json.JSONDecodeError, IOError):
-                self.bans = []
+        """Load bans from JSON file.
+
+        A file that cannot be read or has the wrong shape is remembered in
+        self.load_error; _save then refuses to overwrite it, so a corrupt
+        file is never silently replaced by a single new record.
+        """
+        self.load_error = None
+        if not os.path.exists(self.bans_file):
+            return
+        try:
+            with open(self.bans_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            bans = data.get('bans') if isinstance(data, dict) else None
+            if not isinstance(bans, list) or not all(isinstance(b, dict) for b in bans):
+                raise ValueError('expected an object with a "bans" list of objects')
+            self.bans = [BanRecord.from_dict(b) for b in bans]
+        except (json.JSONDecodeError, OSError, ValueError, KeyError, TypeError) as e:
+            self.load_error = f"{self.bans_file}: {e}"
+            print(f"WARN: cannot read {self.load_error}", file=sys.stderr)
+            self.bans = []
 
     def _save(self) -> None:
-        """Save bans to JSON file."""
-        try:
-            os.makedirs(os.path.dirname(self.bans_file), exist_ok=True)
-            data = {'bans': [b.to_dict() for b in self.bans]}
-            with open(self.bans_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except IOError:
-            pass
+        """Save bans to JSON file. Raises OSError when the write is not possible."""
+        if self.load_error:
+            raise OSError(f"refusing to overwrite unreadable ban file ({self.load_error})")
+        os.makedirs(os.path.dirname(os.path.abspath(self.bans_file)), exist_ok=True)
+        data = {'bans': [b.to_dict() for b in self.bans]}
+        with open(self.bans_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
 
     def add_ban(
         self,
@@ -241,23 +257,18 @@ def parse_duration(duration_str: str) -> Dict[str, Any]:
     if duration_str in ('perm', 'permanent', '-1', ''):
         return {'minutes': -1, 'human': 'permanent'}
 
-    if len(duration_str) < 2:
-        return {'minutes': -1, 'human': 'permanent'}
-
-    try:
-        num = int(duration_str[:-1])
-        unit = duration_str[-1]
-    except ValueError:
-        return {'minutes': -1, 'human': duration_str}
+    # Anything else must be a positive number with a unit; unknown input
+    # raises instead of silently turning into a permanent ban.
+    match = re.fullmatch(r'(\d+)([mhd])', duration_str)
+    if not match or int(match.group(1)) == 0:
+        raise ValueError(f"invalid duration '{duration_str}': use 30m, 2h, 7d or perm")
+    num, unit = int(match.group(1)), match.group(2)
 
     if unit == 'm':
         return {'minutes': num, 'human': f'{num} minutes'}
-    elif unit == 'h':
+    if unit == 'h':
         return {'minutes': num * 60, 'human': f'{num} hours'}
-    elif unit == 'd':
-        return {'minutes': num * 60 * 24, 'human': f'{num} days'}
-    else:
-        return {'minutes': -1, 'human': duration_str}
+    return {'minutes': num * 60 * 24, 'human': f'{num} days'}
 
 
 # =============================================================================
@@ -289,7 +300,10 @@ def main():
     get_parser.add_argument('--guid', required=True, help='Player GUID')
 
     # List bans
-    subparsers.add_parser('list', help='List all bans')
+    list_parser = subparsers.add_parser('list', help='List all bans')
+    list_parser.add_argument('--rows', action='store_true',
+                             help='One row per ban: guid, name, reason, minutes, banned_at, expires '
+                                  '(fields separated by 0x1F, see rowfmt.py)')
 
     # Get expired bans
     subparsers.add_parser('expired', help='List expired bans')
@@ -340,10 +354,15 @@ def main():
 
     elif args.command == 'list':
         bans = manager.list_bans()
-        print(json.dumps({
-            'count': len(bans),
-            'bans': [b.to_dict() for b in bans]
-        }))
+        if args.rows:
+            for b in bans:
+                fields = (b.guid, b.name, b.reason, b.duration_minutes, b.banned_at, b.expires)
+                print(join_row(fields))
+        else:
+            print(json.dumps({
+                'count': len(bans),
+                'bans': [b.to_dict() for b in bans]
+            }))
 
     elif args.command == 'expired':
         expired = manager.get_expired_bans()
@@ -370,4 +389,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as e:
+        print(json.dumps({'success': False, 'error': str(e)}))
+        sys.exit(1)

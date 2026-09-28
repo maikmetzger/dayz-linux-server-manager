@@ -55,7 +55,11 @@ check_and_remove_expired_bans() {
 
     # Find expired bans
     local expired_result
-    expired_result=$(python3 "${LIB_DIR}/ban_manager.py" --file "$BANS_JSON" expired 2>/dev/null)
+    if ! expired_result=$(python3 "${LIB_DIR}/ban_manager.py" --file "$BANS_JSON" expired 2>&1); then
+        # A crashing helper is not "nothing expired"
+        log_error "ban_manager.py expired failed: ${expired_result}"
+        return 1
+    fi
 
     if [[ -z "$expired_result" ]]; then
         return 0
@@ -99,16 +103,20 @@ except:
     done <<< "$expired_guids"
 
     # Remove expired bans from bans.json
-    python3 "${LIB_DIR}/ban_manager.py" --file "$BANS_JSON" cleanup >/dev/null 2>&1 || true
+    python3 "${LIB_DIR}/ban_manager.py" --file "$BANS_JSON" cleanup >/dev/null 2>&1 \
+        || log_warn "ban_manager.py cleanup failed, bans.json still lists the expired bans"
 
     # Reload bans via RCON if be_rcon.py is available
     if [[ -f "${LIB_DIR}/be_rcon.py" ]] && [[ -n "${RCON_PASSWORD:-}" ]]; then
         log_info "Reloading bans via RCON..."
-        python3 "${LIB_DIR}/be_rcon.py" \
-            --host "$RCON_HOST" \
-            --port "$RCON_PORT" \
-            --password-env RCON_PASSWORD \
-            --action loadbans >/dev/null 2>&1 || true
+        local reload_json
+        if reload_json=$(python3 "${LIB_DIR}/be_rcon.py" --host "$RCON_HOST" --port "$RCON_PORT" \
+                --password-env RCON_PASSWORD --action loadbans 2>&1) \
+           && [[ "$reload_json" == *'"success": true'* ]]; then
+            log_info "Bans reloaded via RCON"
+        else
+            log_warn "loadBans via RCON failed, bans.txt changes apply at the next restart: ${reload_json}"
+        fi
     fi
 
     log_info "Done - removed ${removed_count} expired ban(s)"

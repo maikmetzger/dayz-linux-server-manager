@@ -52,6 +52,7 @@ C0="${RESET}"
 BG_BLACK="${ESC}[40m"
 BG_RED="${ESC}[48;2;178;0;0m"       # #b20000 DayZ blood red
 BG_DARKGRAY="${ESC}[100m"
+BG_YELLOW="${ESC}[48;2;255;255;0m"      # highlighted [!S] Sync button (sync pending)
 BG_WHITE="${ESC}[47m"
 
 # -----------------------------------------------------------------------------
@@ -69,8 +70,3 @@ CLEAR_LINE="${ESC}[2K"
 # Move cursor to row, column (1-indexed)
 move_to() { printf "${ESC}[%d;%dH" "$1" "$2"; }
 
-# Move cursor up N lines
-move_up() { printf "${ESC}[%dA" "${1:-1}"; }
-
-# Move cursor down N lines
-move_down() { printf "${ESC}[%dB" "${1:-1}"; }

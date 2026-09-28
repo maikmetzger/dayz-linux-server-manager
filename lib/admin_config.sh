@@ -109,21 +109,6 @@ is_admin_tool_installed() {
     return 1
 }
 
-# Get list of installed admin tools
-# Usage: tools=$(get_installed_admin_tools "$inst_dir")
-# Returns: pipe-delimited list "mod_id|name|config_path|format"
-get_installed_admin_tools() {
-    local inst_dir="$1"
-    local result=""
-    
-    for pattern in "${ADMIN_TOOL_PATTERNS[@]}"; do
-        IFS='|' read -r mod_id name config_path format <<< "$pattern"
-        if is_admin_tool_installed "$mod_id" "$inst_dir"; then
-            echo "$pattern"
-        fi
-    done
-}
-
 # =============================================================================
 # VPPAdminTools Functions
 # =============================================================================
@@ -154,7 +139,7 @@ add_vpp_admin() {
         return 0  # Already exists
     fi
     
-    echo "$steam_id" >> "$file"
+    append_line "$file" "$steam_id"
 }
 
 # Remove admin from VPP
@@ -219,7 +204,7 @@ add_zomberry_admin() {
         return 0
     fi
     
-    echo "$steam_id" >> "$file"
+    append_line "$file" "$steam_id"
 }
 
 # Remove admin from ZomBerry
@@ -324,12 +309,13 @@ add_expansion_admin() {
     
     mkdir -p "$dir"
     
-    python3 << EOF
+    # Path and id travel as arguments: a quote in the profile path must not break the code
+    python3 - "$file" "$steam_id" <<'EOF'
 import json
 import os
+import sys
 
-file_path = '$file'
-steam_id = '$steam_id'
+file_path, steam_id = sys.argv[1], sys.argv[2]
 
 data = {"EnablePermissions": 1, "Admins": []}
 
@@ -357,11 +343,11 @@ remove_expansion_admin() {
     local file="${profile_dir}/ExpansionMod/Settings/PermissionsSettings.json"
     
     if [[ -f "$file" ]]; then
-        python3 << EOF
+        python3 - "$file" "$steam_id" <<'EOF'
 import json
+import sys
 
-file_path = '$file'
-steam_id = '$steam_id'
+file_path, steam_id = sys.argv[1], sys.argv[2]
 
 try:
     with open(file_path, 'r') as f:
@@ -723,7 +709,7 @@ admin_vpp_password_dialog() {
     current_pw=$(get_vpp_password "$profile_dir")
     
     local new_pw
-    new_pw=$(read_input "Enter new password:" "" "VPP Admin Password")
+    new_pw=$(read_secret "Enter new password:" "" "VPP Admin Password")
     
     if [[ -n "$new_pw" ]]; then
         set_vpp_password "$profile_dir" "$new_pw"
@@ -745,7 +731,7 @@ admin_password_dialog() {
     fi
     
     local new_pw
-    new_pw=$(read_input "Enter new password:" "" "$label Password")
+    new_pw=$(read_secret "Enter new password:" "" "$label Password")
     
     if [[ -n "$new_pw" ]]; then
         if [[ "$type" == "dayz" ]]; then

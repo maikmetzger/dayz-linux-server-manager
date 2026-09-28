@@ -13,13 +13,6 @@
 # Config Registry
 # =============================================================================
 # Format: "parser|relative_path|icon|label"
-declare -A CONFIG_REGISTRY=(
-    ["serverDZ"]="cfg|data/config/serverDZ.cfg|🔧|Server Settings"
-    ["BEServer"]="beserver|data/config/BEServer_x64.cfg|🔐|RCON Settings"
-    ["types"]="xml||📦|Loot Economy"
-    ["modConfigs"]="mod||📁|Mod Configs"
-    ["adminTools"]="admin||🔐|Admin Tools"
-)
 
 # Helper to find types.xml within mpmissions
 find_types_xml() {
@@ -337,8 +330,11 @@ config_parser_exec() {
     # Disable exit on error for docker commands
     set +e
     
-    # Copy script to container
-    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null
+    # Copy the parser and the helper module it imports (fileutil.py) into
+    # the container; python resolves imports relative to the script's folder.
+    local fileutil_script="${SCRIPT_DIR}/lib/fileutil.py"
+    $DOCKER cp "${parser_script}" "${container}:/tmp/config_parser.py" 2>/dev/null \
+        && $DOCKER cp "${fileutil_script}" "${container}:/tmp/fileutil.py" 2>/dev/null
     if [[ $? -ne 0 ]]; then
         set -e
         echo '{"status":"error","message":"Failed to copy parser to container. Is the container running?"}'
@@ -360,9 +356,11 @@ config_parser_exec() {
     echo "$output"
 }
 
-# Parse JSON response from Python
-# Usage: result=$(config_parser_exec ...) && value=$(json_get "$result" "value")
-json_get() {
+# Parse JSON response from config_parser.py (grep based, top-level keys and
+# the values nested under "data"). Named cfg_* so it cannot collide with the
+# python json_get in lib/json_helpers.sh, which only knows top-level keys.
+# Usage: result=$(config_parser_exec ...) && value=$(cfg_json_get "$result" "value")
+cfg_json_get() {
     local json="$1"
     local key="$2"
     
@@ -382,12 +380,12 @@ json_get() {
     echo "$value"
 }
 
-json_get_status() {
+cfg_json_status() {
     local json="$1"
-    json_get "$json" "status"
+    cfg_json_get "$json" "status"
 }
 
-json_get_keys() {
+cfg_json_keys() {
     local json="$1"
     # Extract keys array: ["key1", "key2"] -> key1 key2
     # Use || true to prevent crash
@@ -497,99 +495,6 @@ types_selection_menu() {
 # Config Editor Main Menu
 # =============================================================================
 
-config_editor_menu() {
-    local container="$SELECTED_CONTAINER"
-    local inst_dir="$SELECTED_DIR"
-    
-    while true; do
-        draw_header "Config Editor"
-        
-        local -a items=()
-        local -a config_ids=()
-        
-        for id in "${!CONFIG_REGISTRY[@]}"; do
-            IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$id]}"
-            local full_path="${inst_dir}/${rel_path}"
-            local display_name="${icon}|${label}"
-            
-            # Check if file exists (via host path since it's mounted)
-            local exists=0
-            if [[ "$fmt" == "mod" ]]; then
-                exists=1
-            elif [[ -n "$rel_path" ]]; then
-                [[ -f "$full_path" ]] && exists=1
-            else
-                # Dynamic path (e.g. types.xml)
-                local dyn_path=$(find_types_xml "$inst_dir")
-                [[ -n "$dyn_path" && -f "$dyn_path" ]] && exists=1
-            fi
-
-            if [[ $exists -eq 1 ]]; then
-                items+=("${display_name}")
-            else
-                items+=("${icon}|${label} (not found)")
-            fi
-            config_ids+=("$id")
-        done
-        
-        items+=("--------------------")
-        items+=("←|Back")
-        
-        if ! run_menu items "Select Config File"; then
-            return
-        fi
-        
-        # Check if Back was selected (by content, not index)
-        local selected_item="${items[$MENU_RESULT]}"
-        if [[ "$selected_item" == "←|Back" || "$selected_item" == ----* ]]; then
-            return
-        fi
-        
-        local selected_id="${config_ids[$MENU_RESULT]}"
-        IFS='|' read -r fmt rel_path icon label <<< "${CONFIG_REGISTRY[$selected_id]}"
-        
-        local full_path=""
-        if [[ -n "$rel_path" ]]; then
-            full_path="${inst_dir}/${rel_path}"
-        else
-            # Dynamic lookup for types.xml
-            full_path=$(find_types_xml "$inst_dir")
-        fi
-        
-        if [[ -z "${full_path}" || ! -f "${full_path}" ]]; then
-            show_message "File not found: ${selected_id}.xml" "Error"
-            continue
-        fi
-        
-        # Route to appropriate editor based on format/ID
-        case "$fmt" in
-            "xml")
-                if [[ "$selected_id" == "types" ]]; then
-                    types_selection_menu "$inst_dir" "$container"
-                else
-                    config_xml_editor "$inst_dir" "$full_path" "$selected_id" "$container"
-                fi
-                ;;
-            "mod")
-                # Mod configs browser - uses profile directory
-                local profile_dir="${inst_dir}/data/profile"
-                mod_config_browser "$profile_dir"
-                ;;
-            "admin")
-                # Admin tools menu - manage Steam64 IDs and passwords
-                source "${SCRIPT_DIR}/lib/admin_config.sh"
-                admin_tools_menu "$inst_dir"
-                ;;
-            *)
-                case "$selected_id" in
-                    "serverDZ"|"BEServer") config_category_editor "$container" "$full_path" "$selected_id" ;;
-                    *) config_flat_editor "$container" "$full_path" "$selected_id" ;;
-                esac
-                ;;
-        esac
-    done
-}
-
 # =============================================================================
 # Category-based Editor (for serverDZ.cfg)
 # =============================================================================
@@ -675,13 +580,13 @@ config_flat_editor() {
     local result
     result=$(config_parser_exec "$container" list cfg "$container_path")
     
-    if [[ "$(json_get_status "$result")" != "ok" ]]; then
-        show_message "Failed to read config: $(json_get "$result" "message")" "Error"
+    if [[ "$(cfg_json_status "$result")" != "ok" ]]; then
+        show_message "Failed to read config: $(cfg_json_get "$result" "message")" "Error"
         return
     fi
     
     local keys_raw
-    keys_raw=$(json_get_keys "$result")
+    keys_raw=$(cfg_json_keys "$result")
     local keys_csv
     keys_csv=$(echo "$keys_raw" | tr '\n' ',' | sed 's/,$//')
     
@@ -692,263 +597,219 @@ config_flat_editor() {
 # Table Editor (Key-Value pairs)
 # =============================================================================
 
+# Values of the given keys from a getall result, one per line, in ONE process
+# (cfg_json_get was one grep/sed pipeline per key on every reload).
+# Usage: mapfile -t values < <(cfg_json_values "$result" "${keys[@]}")
+cfg_json_values() {
+    local json="$1"
+    shift
+    printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin).get("data", {})
+except (ValueError, AttributeError):
+    data = {}
+for key in sys.argv[1:]:
+    print(str(data.get(key, "")).replace("\n", " "))
+' "$@"
+}
+
+# Hint for the edit prompt from a validation rule ("int:1-127" -> "(1-127)")
+_cfg_validation_hint() {
+    local rule="$1"
+    [[ -n "$rule" ]] || return 0
+    local type="${rule%%:*}" range="${rule#*:}"
+    case "$type" in
+        bool)           echo "(0 or 1)" ;;
+        int|float|enum) echo "($range)" ;;
+    esac
+}
+
+# ---- config table: drawing ---------------------------------------------------
+# The _cfg_editor_* helpers run inside config_table_editor and use its locals:
+# keys, values, count, selection, scroll_offset, the cfg_defaults/cfg_memos/
+# cfg_validation namerefs and the layout variables set by _cfg_editor_layout.
+
+# Column layout: KEY | VALUE | DEFAULT | MEMO (rest of the line)
+_cfg_editor_layout() {
+    table_start=3
+    col_key=2
+    w_key=34
+    col_val=$((col_key + w_key))
+    w_val=25
+    col_def=$((col_val + w_val))
+    w_def=20
+    col_memo=$((col_def + w_def))
+    w_memo=$((TERM_COLS - col_memo - 1))
+    max_rows=$((TERM_ROWS - table_start - 5))
+}
+
+# Cell text cut to max_len characters with ".."
+_cfg_cell() {
+    local text="$1" max_len="$2"
+    [[ ${#text} -ge $max_len ]] && text="${text:0:$((max_len - 2))}.."
+    printf '%s' "$text"
+}
+
+# Full-width dashed line at ROW
+_cfg_editor_draw_rule() {
+    move_to "$1" 1
+    printf "%s%s" "$DIM" "$RED"
+    printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
+    printf "%s" "$RESET"
+}
+
+# One table row for key index $1 at screen row $2
+_cfg_editor_draw_row() {
+    local i="$1" row="$2"
+    local key="${keys[$i]}"
+    local val="${values[$i]}"
+    [[ "${key,,}" == *password* && -n "$val" ]] && val="********"   # never print passwords
+    local d_key d_val d_def d_memo
+    d_key=$(_cfg_cell "$key" $((w_key - 2)))
+    d_val=$(_cfg_cell "${val:-(not set)}" $((w_val - 2)))
+    d_def=$(_cfg_cell "${cfg_defaults[$key]:-}" $((w_def - 2)))
+    d_memo=$(_cfg_cell "${cfg_memos[$key]:-}" "$w_memo")
+
+    move_to "$row" 1
+    if [[ $i -eq $selection ]]; then
+        printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
+        move_to "$row" $col_key;  printf "▶ %s" "$d_key"
+        move_to "$row" $col_val;  printf "%s" "$d_val"
+        move_to "$row" $col_def;  printf "%s" "$d_def"
+        move_to "$row" $col_memo; printf "%s" "$d_memo"
+    else
+        local val_color="$WHITE"
+        [[ "$d_val" == "(not set)" ]] && val_color="$YELLOW"
+        [[ "$d_val" == "(empty)" ]] && val_color="$DIM"
+        move_to "$row" $col_key;  printf "  %s" "$d_key"
+        move_to "$row" $col_val;  printf "%s%s" "$val_color" "$d_val"
+        move_to "$row" $col_def;  printf "%s%s" "$DIM" "$d_def"
+        move_to "$row" $col_memo; printf "%s%s" "$DIM" "$d_memo"
+    fi
+    printf "%s" "$RESET"
+}
+
+# Header, column titles, visible rows, full memo of the selected key, footer
+_cfg_editor_draw() {
+    local screen_title="$1"
+    printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
+    move_to 1 1
+    printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "$screen_title" "$RESET"
+
+    _cfg_editor_draw_rule $table_start
+    local col c w label
+    for col in "$col_key:$w_key:KEY" "$col_val:$w_val:VALUE" "$col_def:$w_def:DEFAULT"; do
+        IFS=: read -r c w label <<< "$col"
+        move_to $((table_start + 1)) "$c"
+        printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w" "$label" "$RESET"
+    done
+    move_to $((table_start + 1)) $col_memo
+    printf "%s%sMEMO%s" "$DIM" "$WHITE" "$RESET"
+    _cfg_editor_draw_rule $((table_start + 2))
+
+    local i row=$((table_start + 3))
+    for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
+        _cfg_editor_draw_row "$i" "$row"
+        row=$((row + 1))
+    done
+
+    local memo="${cfg_memos[${keys[$selection]}]:-}"
+    if [[ -n "$memo" ]]; then
+        move_to $((TERM_ROWS - 2)) 1
+        printf "%s%sℹ️  %s%s" "$RESET" "$BOLD" "$memo" "$RESET"
+    fi
+
+    move_to $((TERM_ROWS - 1)) 1
+    local footer_text=" [Enter] Edit   [q] Back"
+    printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" $((TERM_COLS - ${#footer_text})) "" "$RESET"
+}
+
+# ---- config table: editing ---------------------------------------------------
+
+# Ask for a new value of the selected key and write it into the container
+_cfg_editor_edit_selected() {
+    local container="$1" parser_format="$2" container_path="$3" title="$4"
+    local key="${keys[$selection]}"
+    local current_val="${values[$selection]}"
+    [[ "$current_val" == "(empty)" ]] && current_val=""
+    local rule="${cfg_validation[$key]:-}"
+    local hint
+    hint=$(_cfg_validation_hint "$rule")
+    local secret_flag=""
+    [[ "${key,,}" == *password* ]] && secret_flag="secret"
+
+    local new_val
+    # shellcheck disable=SC2086  # secret_flag is intentionally unquoted (empty = no 4th arg)
+    new_val=$(read_input "Edit $key $hint" "$current_val" "$title" $secret_flag)
+    [[ -n "$new_val" ]] || return 0
+    if [[ "${rule%%:*}" == "bool" && "$new_val" != "0" && "$new_val" != "1" ]]; then
+        show_message "Warning: $key expects 0 or 1" "Validation"
+    fi
+    [[ "$new_val" != "$current_val" ]] || return 0
+
+    local set_result msg
+    set_result=$(config_parser_exec "$container" set "$parser_format" "$container_path" "$key" "$new_val")
+    if [[ "$(cfg_json_status "$set_result")" != "ok" ]]; then
+        msg=$(cfg_json_get "$set_result" "message")
+        show_message "Failed to save: ${msg:-Raw: $set_result}" "Error"
+    fi
+    return 0
+}
+
+# Table editor for one config file inside the container: KEY | VALUE |
+# DEFAULT | MEMO, Enter edits the selected key, values are re-read after
+# every edit. prefix selects the SERVERDZ_* or BESERVER_* lookup tables.
+# Usage: config_table_editor "$container" "$config_path" "Title" "key1,key2" [PREFIX]
 config_table_editor() {
-    local container="$1"
-    local config_path="$2"
-    local title="$3"
-    local keys_csv="$4"
-    local prefix="${5:-SERVERDZ}" # Default to SERVERDZ if not provided
-    
-    local container_path="/dayz/config/$(basename "$config_path")"
-    local filename
+    local container="$1" config_path="$2" title="$3" keys_csv="$4"
+    local prefix="${5:-SERVERDZ}"
+    local filename container_path
     filename="$(basename "$config_path")"
-    
-    # Determine parser format based on prefix
+    container_path="/dayz/config/${filename}"
     local parser_format="cfg"
     [[ "$prefix" == "BESERVER" ]] && parser_format="beserver"
-    
-    # Parse keys
+
+    local -a keys values
     IFS=',' read -ra keys <<< "$keys_csv"
-    
-    # Setup Variable Names for Lookup
-    local defaults_var="${prefix}_DEFAULTS"
-    local memos_var="${prefix}_MEMOS"
-    local validation_var="${prefix}_VALIDATION"
-    
-    local selection=0
-    local scroll_offset=0
-    
+    local count=${#keys[@]}
+    local -n cfg_defaults="${prefix}_DEFAULTS" cfg_memos="${prefix}_MEMOS" cfg_validation="${prefix}_VALIDATION"
+
+    local selection=0 scroll_offset=0 key seq result
+    local table_start col_key w_key col_val w_val col_def w_def col_memo w_memo max_rows
     while true; do
-        # Fetch current values
-        local result
         result=$(config_parser_exec "$container" getall "$parser_format" "$container_path")
-        
-        if [[ "$(json_get_status "$result")" != "ok" ]]; then
-            show_message "Failed to read config: $(json_get "$result" "message")" "Error"
+        if [[ "$(cfg_json_status "$result")" != "ok" ]]; then
+            show_message "Failed to read config: $(cfg_json_get "$result" "message")" "Error"
             return
         fi
-        
-        # Parse values into array
-        local -a values=()
-        for key in "${keys[@]}"; do
-            local val
-            val=$(json_get "$result" "$key")
-            values+=("$val")
-        done
-        
-        # Calculate Layout
+        mapfile -t values < <(cfg_json_values "$result" "${keys[@]}")
         get_term_size
-        local table_start=3
-        
-        # Column Definitions (3-column layout: KEY | VALUE | DEFAULT)
-        # Memo is shown only in footer now
-        local col_key=2
-        local w_key=34
-        
-        local col_val=$((col_key + w_key))
-        local w_val=25
-        
-        local col_def=$((col_val + w_val))
-        local w_def=20
-        
-        local col_memo=$((col_def + w_def))
-        # Memo gets remaining width
-        
-        local max_rows=$((TERM_ROWS - table_start - 5)) 
+        _cfg_editor_layout
 
-        # Input Loop
+        # navigate until Enter (edit) or q
         while true; do
-             # Handle scrolling
             if [[ $selection -lt $scroll_offset ]]; then
                 scroll_offset=$selection
             elif [[ $selection -ge $((scroll_offset + max_rows)) ]]; then
                 scroll_offset=$((selection - max_rows + 1))
             fi
-            
-            # Draw UI
-            printf "%s%s" "$HIDE_CURSOR" "$CLEAR_SCREEN"
-            
-            # 1. Header Bar
-            move_to 1 1
-            printf "%s%s %-$((TERM_COLS-1))s%s" "$BG_RED" "$WHITE$BOLD" "Config Editor - $filename - $title" "$RESET"
-            
-            # 2. Table Header
-            move_to $table_start 1
-            printf "%s%s" "$DIM" "$RED"
-            printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
-            printf "%s" "$RESET"
-            
-            move_to $((table_start + 1)) $col_key
-            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_key" "KEY" "$RESET"
-            move_to $((table_start + 1)) $col_val
-            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_val" "VALUE" "$RESET"
-            move_to $((table_start + 1)) $col_def
-            printf "%s%s%-*s%s" "$DIM" "$WHITE" "$w_def" "DEFAULT" "$RESET"
-            move_to $((table_start + 1)) $col_memo
-            printf "%s%sMEMO%s" "$DIM" "$WHITE" "$RESET"
-            
-            move_to $((table_start + 2)) 1
-            printf "%s%s" "$DIM" "$RED"
-            printf "%*s" "$TERM_COLS" "" | tr ' ' '-'
-            printf "%s" "$RESET"
-            
-            # 3. Rows
-            local row=$((table_start + 3))
-            local count=${#keys[@]}
-            
-            local current_memo=""
-            
-            for (( i=scroll_offset; i<count && i<(scroll_offset + max_rows); i++ )); do
-                local key="${keys[$i]}"
-                local val="${values[$i]}"
-                local default
-                local memo
-                
-                # Dynamic Lookup via eval
-                eval "default=\"\${${defaults_var}[\$key]:-}\""
-                eval "memo=\"\${${memos_var}[\$key]:-}\""
-                
-                # Truncate visuals
-                local d_key="$key"
-                [[ ${#d_key} -ge $((w_key-2)) ]] && d_key="${d_key:0:$((w_key-4))}.."
-                
-                local d_val="$val"
-                if [[ -z "$d_val" ]]; then
-                    # Check if key actually exists in file or is just missing
-                    # If parsed value is empty string, it could be either
-                    # For now, use "(not set)" to indicate it's not in the file
-                    d_val="(not set)"
-                fi
-                [[ ${#d_val} -ge $((w_val-2)) ]] && d_val="${d_val:0:$((w_val-4))}.."
-                
-                local d_def="$default"
-                [[ ${#d_def} -ge $((w_def-2)) ]] && d_def="${d_def:0:$((w_def-4))}.."
-                
-                # Memo (remaining width)
-                local w_memo=$((TERM_COLS - col_memo - 1))
-                local d_memo="$memo"
-                [[ ${#d_memo} -ge $w_memo ]] && d_memo="${d_memo:0:$((w_memo-2))}.."
-                
-                # Capture current selection memo for footer
-                [[ $i -eq $selection ]] && current_memo="$memo"
-                
-                move_to $row 1
-                if [[ $i -eq $selection ]]; then
-                    # Selected Row
-                    printf "%s%s%*s" "$BG_RED" "$WHITE$BOLD" "$TERM_COLS" ""
-                    move_to $row $col_key
-                    printf "▶ %s" "$d_key"
-                    move_to $row $col_val
-                    printf "%s" "$d_val"
-                    move_to $row $col_def
-                    printf "%s" "$d_def"
-                    move_to $row $col_memo
-                    printf "%s" "$d_memo"
-                    printf "%s" "$RESET"
-                else
-                    # Normal Row
-                    move_to $row $col_key
-                    printf "  %s" "$d_key"
-                    move_to $row $col_val
-                    # Color based on value state
-                    if [[ "$d_val" == "(not set)" ]]; then
-                        printf "%s%s" "$YELLOW" "$d_val"
-                    elif [[ "$d_val" == "(empty)" ]]; then
-                        printf "%s%s" "$DIM" "$d_val"
-                    else
-                        printf "%s%s" "$WHITE" "$d_val"
-                    fi
-                    move_to $row $col_def
-                    printf "%s%s" "$DIM" "$d_def"
-                    move_to $row $col_memo
-                    printf "%s%s" "$DIM" "$d_memo"
-                    printf "%s" "$RESET"
-                fi
-                row=$((row + 1))
-            done
-            
-            # 4. Description Bar (Full memo at bottom)
-            if [[ -n "$current_memo" ]]; then
-                move_to $((TERM_ROWS - 2)) 1
-                printf "%s%sℹ️  %s%s" "$RESET" "$BOLD" "$current_memo" "$RESET"
-            fi
-            
-            # 5. Footer
-            move_to $((TERM_ROWS - 1)) 1
-            local footer_text=" [Enter] Edit   [q] Back"
-            local pad_len=$((TERM_COLS - ${#footer_text}))
-            printf "%s%s%s%*s%s" "$BG_DARKGRAY" "$WHITE" "$footer_text" "$pad_len" "" "$RESET"
-            
-            # Input Handling
-            IFS= read -rsn1 key
+            _cfg_editor_draw "Config Editor - $filename - $title"
+
+            IFS= read -rsn1 key || return 0   # EOF: leave instead of looping
             case "$key" in
                 $'\x1b')
                     read -rsn2 -t 0.1 seq || true
                     case "$seq" in
-                        '[A') 
-                            if [[ $selection -gt 0 ]]; then
-                                selection=$((selection - 1))
-                            fi
-                            ;;
-                        '[B') 
-                            if [[ $selection -lt $((count - 1)) ]]; then
-                                selection=$((selection + 1))
-                            fi
-                            ;;
+                        '[A') if [[ $selection -gt 0 ]]; then selection=$((selection - 1)); fi ;;
+                        '[B') if [[ $selection -lt $((count - 1)) ]]; then selection=$((selection + 1)); fi ;;
                     esac
                     ;;
-                '') # Enter - Edit
-                    break # Break inner loop to edit
-                    ;;
-                'q'|'Q')
-                    return # Exit function
-                    ;;
+                '')  break ;;
+                q|Q) return 0 ;;
             esac
         done
-        
-        # Edit Action
-        local selected_key="${keys[$selection]}"
-        local current_val="${values[$selection]}"
-        [[ "$current_val" == "(empty)" ]] && current_val=""
-        
-        # Validation Hint (Dynamic Lookup)
-        local valid_rule
-        eval "valid_rule=\"\${${validation_var}[\$selected_key]:-}\""
-        
-        local hint=""
-        local type="string"
-        if [[ -n "$valid_rule" ]]; then
-            type="${valid_rule%%:*}"
-            local range="${valid_rule#*:}"
-            case "$type" in
-                "bool") hint="(0 or 1)" ;;
-                "int"|"float") hint="($range)" ;;
-                "enum") hint="($range)" ;;
-            esac
-        fi
-        
-        local new_val
-        new_val=$(read_input "Edit $selected_key $hint" "$current_val" "$title")
-        
-        if [[ -n "$new_val" ]]; then
-            # Validation Warning
-            if [[ "$type" == "bool" ]]; then
-                if [[ "$new_val" != "0" && "$new_val" != "1" ]]; then
-                     show_message "Warning: $selected_key expects 0 or 1" "Validation"
-                fi
-            fi
-            
-            if [[ "$new_val" != "$current_val" ]]; then
-                local set_result
-                set_result=$(config_parser_exec "$container" set "$parser_format" "$container_path" "$selected_key" "$new_val")
-                if [[ "$(json_get_status "$set_result")" != "ok" ]]; then
-                    local msg
-                    msg=$(json_get "$set_result" "message")
-                    [[ -z "$msg" ]] && msg="Raw: $set_result"
-                    show_message "Failed to save: $msg" "Error"
-                fi
-            fi
-        fi
+        _cfg_editor_edit_selected "$container" "$parser_format" "$container_path" "$title"
     done
 }
 
